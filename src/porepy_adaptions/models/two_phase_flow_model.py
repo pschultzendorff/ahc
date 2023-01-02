@@ -98,6 +98,13 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self._n_G: float = 1.0
         self._m_G: float = -2.0
         self._beta_G: float = 1.0
+        # Relative permeability limited below
+        self._limit_rel_perm: bool = False
+        # Wetting saturation limited below
+        self._limit_w_saturation: bool = False
+        # Grid size
+        self._grid_size: int = 20
+        self._phys_size: int = 2
 
     def prepare_simulation(self) -> None:
         self.create_grid()
@@ -122,13 +129,11 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self._discretize()
         self._initialize_linear_solver()
 
-        def _bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
-            """Homogeneous Neumann conditions on all external boundaries, except Dirichlet
-            for one cell to ensure a unique solution exists."""
-            all_bf, *_ = self._domain_boundary_sides(g)
-            # Note that doing it this way, ``all_bf[1:]`` will be assigned Neumann
-            # conditions.
-            return pp.BoundaryCondition(g, all_bf[:1], "dir")
+    def _bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
+        """Homogeneous Neumann conditions on three sides, Dirichlet
+        on one side to ensure existence of a unique solution."""
+        all_bf, *_ = self._domain_boundary_sides(g)
+        return pp.BoundaryCondition(g, all_bf[: self._grid_size], "dir")
 
     def _bc_values(self, g: pp.Grid) -> np.ndarray:
         """Homogeneous boundary values. Dirichlet pressure equals the initial state
@@ -205,43 +210,47 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         """Wetting phase relative permeability pressure computed with the ... model.
 
         .. math::
+            k_{r,ww}(s_w)=s_w^3
+            or
             k_{r,w}(s_w)=\max\{s_w^3,0.0001^3\}
-
-        Parameters:
-            toggle_off: _description_, defaults to False
 
         Returns:
             _description_
         """
+        s = self._ad.saturation
         cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
         # TODO: Fix this so it applies to all subdomains.
-        array = np.full(self.mdg.subdomains()[0].num_cells, 0.0001)
-        max_func = pp.ad.Function(partial(pp.ad.functions.maximum, var1=array), "max")
-        s = self._ad.saturation
-        # return cube_func(max_func(s))
-        # ! Commented out the maximum for now!
-        return cube_func(s)
+        if self._limit_rel_perm:
+            array = np.full(self.mdg.subdomains()[0].num_cells, 0.0001)
+            max_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var1=array), "max"
+            )
+            return cube_func(max_func(s))
+        else:
+            return cube_func(s)
 
     def _nw_rel_perm(self) -> pp.ad.Operator:
         """Non-wetting phase relative permeability pressure computed with the ... model.
 
         .. math::
-            k_{r,w}(s_w)=\max\{(1-s_w)^3,0.0001^3\}
-
-        Parameters:
-            toggle_off: _description_, defaults to False
+            k_{r,nw}(s_w)=(1-s_w)^3
+            or
+            k_{r,nw}(s_w)=\max\{(1-s_w)^3,0.0001^3\}
 
         Returns:
             _description_
         """
+        s = self._ad.saturation
         cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
         # TODO: Fix this so it applies to all subdomains.
-        array = np.full(self.mdg.subdomains()[0].num_cells, 0.0001)
-        max_func = pp.ad.Function(partial(pp.ad.functions.maximum, var1=array), "max")
-        s = self._ad.saturation
-        # return cube_func(max_func(1 - s))
-        # ! Commented out the maximum for now!
-        return cube_func(1 - s)
+        if self._limit_rel_perm:
+            min_value = np.full(self.mdg.subdomains()[0].num_cells, 0.0001)
+            max_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var1=min_value), "max"
+            )
+            return cube_func(max_func(1 - s))
+        else:
+            return cube_func(1 - s)
 
     # ! For later!
     # def _vector_source(self, g: Union[pp.Grid, pp.MortarGrid]) -> np.ndarray:
@@ -255,18 +264,16 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
     #     return vals
 
     def create_grid(self) -> None:
-        GRID_SIZE: int = 20
-        PHYS_SIZE: int = 2
         cell_dims: np.ndarray = np.array(
             [
-                GRID_SIZE,
-                GRID_SIZE,
+                self._grid_size,
+                self._grid_size,
             ]
         )
         phys_dims: np.ndarray = np.array(
             [
-                PHYS_SIZE,
-                PHYS_SIZE,
+                self._phys_size,
+                self._phys_size,
             ]
         )
         g_cart: pp.CartGrid = pp.CartGrid(cell_dims, phys_dims)
@@ -282,8 +289,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
                         0,
                     ],
                     [
-                        GRID_SIZE,
-                        GRID_SIZE,
+                        self._grid_size,
+                        self._grid_size,
                     ],
                 ]
             ).T
@@ -388,12 +395,14 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         # method (``_flux``).
 
         # TODO: Fix this so it applies to all subdomains.
-        array = np.full(self.mdg.subdomains()[0].num_cells, 0.0001)
-        # max_func = pp.ad.Function(partial(pp.ad.functions.maximum, var1=array), "max")
-        # s = max_func(self._ad.saturation)
-        # s_prev = self._ad.saturation.previous_timestep()
-        # ! Commented out the maximum for now!
-        s = self._ad.saturation
+        if self._limit_w_saturation:
+            min_s = np.full(self.mdg.subdomains()[0].num_cells, 0.0001)
+            max_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var1=min_s), "max"
+            )
+            s = max_func(self._ad.saturation)
+        else:
+            s = self._ad.saturation
         s_prev = self._ad.saturation.previous_timestep()
 
         # Ad sorce

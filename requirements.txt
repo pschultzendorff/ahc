@@ -12,5 +12,6 @@ shapely[vectorized]
 six
 sympy
 typing_extensions
-pytorch
+#pytorch>=1.13
+tqdm
 #porepy

@@ -21,23 +21,33 @@ from typing import Callable, Union
 import numpy as np
 import scipy.sparse as sps
 
-import porepy_adaptions as pp
+# import porepy_adaptions as pp
 from porepy.numerics.ad.forward_mode import Ad_array
 
 __all__ = ["pow"]
 
 
 def pow(var, exponent: float):
-    # TODO Write tests for this function.
     if isinstance(var, Ad_array):
         if exponent >= 0:
             val = np.power(var.val, exponent)
         else:
-            val = 1 / np.power(var.val, -exponent)
+            # Calculate the power expression explicitely with dtype=np.float64 to avoid
+            # integer division.
+            power = np.power(var.val, -exponent, dtype=np.float64)
+            val = np.divide(
+                1,
+                power,
+                out=np.zeros_like(power),
+                where=power != 0,
+                casting="unsafe",
+            )
         if exponent - 1 >= 0:
             der = var.diagvec_mul_jac(exponent * np.power(var.val, exponent - 1))
         else:
-            power = np.power(var.val, 1 - exponent)
+            # Calculate the power expression explicitely with dtype=np.float64 to avoid
+            # integer division (which can result in integer results).
+            power = np.power(var.val, 1 - exponent, dtype=np.float64)
             der = var.diagvec_mul_jac(
                 np.divide(
                     exponent,
@@ -49,8 +59,14 @@ def pow(var, exponent: float):
             )
         return Ad_array(val, der)
     else:
-        # TODO mypy gives an error, fix this!
         if exponent >= 0:
             return np.power(var, exponent)
         else:
-            return np.power(var, -exponent)
+            power = np.power(var, -exponent, dtype=np.float64)
+            return np.divide(
+                1,
+                power,
+                out=np.zeros_like(power),
+                where=power != 0,
+                casting="unsafe",
+            )
