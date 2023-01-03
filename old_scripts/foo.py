@@ -1,4 +1,4 @@
-import porepy_adaptions.numerics.ad.functions as af
+import tpf_lab.numerics.ad.functions as af
 import numpy as np
 from porepy.numerics.ad import Ad_array
 import scipy.sparse as sps

@@ -4,7 +4,7 @@ import numpy as np
 import scipy.sparse as sps
 from porepy.numerics.ad.forward_mode import Ad_array
 
-from porepy_adaptions.numerics.ad import functions as af
+from src.tpf_lab.numerics.ad import functions as af
 
 
 class AdFunctionTest(unittest.TestCase):

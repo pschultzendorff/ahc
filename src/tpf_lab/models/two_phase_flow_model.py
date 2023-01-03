@@ -132,14 +132,13 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
     def _bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """Homogeneous Neumann conditions on three sides, Dirichlet
         on one side to ensure existence of a unique solution."""
-        all_bf, *_ = self._domain_boundary_sides(g)
-        return pp.BoundaryCondition(g, all_bf[: self._grid_size], "dir")
+        south = self._domain_boundary_sides(g).south
+        return pp.BoundaryCondition(g, south, "dir")
 
     def _bc_values(self, g: pp.Grid) -> np.ndarray:
         """Homogeneous boundary values. Dirichlet pressure equals the initial state
         pressure"""
         array = np.zeros(g.num_faces)
-        array[0] = 0.3
         return array
 
     def _upwind_rel_perm_bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
@@ -502,6 +501,11 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     # Newton loop.
     def before_newton_loop(self) -> None:
+        logger.info(
+            f"Time step {self.time_manager.time_index} at time \
+                {self.time_manager.time:.1e} of {self.time_manager.time_final:.1e} \
+                with time step {self.time_manager.dt:.1e}"
+        )
         self._nonlinear_iteration = 0
         for sd, data in self.mdg.subdomains(return_data=True):
             variables_assembled = self.dof_manager.assemble_variable(
@@ -555,6 +559,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self, solution: np.ndarray, errors: float, iteration_counter: int
     ) -> None:
         logger.info(f"Failed on timestep {self.time_manager.time_index}")
+        logger.info(f"Error {errors[-1]} Newton iteration {iteration_counter}")
         raise ValueError("Newton iterations did not converge")
 
     def _export(self):

@@ -8,7 +8,13 @@ import numpy as np
 
 import porepy as pp
 from porepy.models.run_models import run_time_dependent_model
-from src.porepy_adaptions.models.two_phase_flow_model import TwoPhaseFlow
+from src.tpf_lab.models.two_phase_flow_model import TwoPhaseFlow
+
+
+# Simple test run
+# Neumann bc on three sides, Dirichlet bc on one side.
+model = TwoPhaseFlow({"folder_name": os.path.join("two_phase_flow_runs", "simple")})
+run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
@@ -19,8 +25,10 @@ class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
 
 
 # Simple test run
-model = TwoPhaseFlow({"folder_name": os.path.join("two_phase_flow_runs", "simple")})
-run_time_dependent_model(model, {})
+model = TwoPhaseFlow_Dirichlet(
+    {"folder_name": os.path.join("two_phase_flow_runs", "dirichlet")}
+)
+# run_time_dependent_model(model, {})
 
 # Test run with wetting source
 class TwoPhaseFlow_WSource(TwoPhaseFlow):
