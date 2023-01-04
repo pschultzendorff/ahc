@@ -14,7 +14,7 @@ from src.tpf_lab.models.two_phase_flow_model import TwoPhaseFlow
 # Simple test run
 # Neumann bc on three sides, Dirichlet bc on one side.
 model = TwoPhaseFlow({"folder_name": os.path.join("two_phase_flow_runs", "simple")})
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
@@ -108,9 +108,16 @@ class TwoPhaseFlow_LongInj_Dir(TwoPhaseFlow_WSource_Dir):
 
 
 model = TwoPhaseFlow_LongInj_Dir(
-    {"folder_name": os.path.join("two_phase_flow_runs", "long_inj_dir_max_functions")}
+    {
+        "file_name": "long_inj_dir_sat_growth_limit",
+        "folder_name": os.path.join(
+            "two_phase_flow_runs", "long_inj_dir_sat_growth_limit"
+        ),
+    }
 )
-# run_time_dependent_model(model, {})
+model._limit_saturation_growth = True
+run_time_dependent_model(model, {})
+
 
 # Test run with extraction
 

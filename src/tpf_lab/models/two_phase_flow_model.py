@@ -105,6 +105,9 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         # Grid size
         self._grid_size: int = 20
         self._phys_size: int = 2
+        # Limit saturation growth
+        self._limit_saturation_growth: bool = False
+        self._max_saturation_growth: float = 0.2
 
     def prepare_simulation(self) -> None:
         self.create_grid()
@@ -506,6 +509,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
                 {self.time_manager.time:.1e} of {self.time_manager.time_final:.1e} \
                 with time step {self.time_manager.dt:.1e}"
         )
+        self.time_manager._recomp_sol = False
         self._nonlinear_iteration = 0
         for sd, data in self.mdg.subdomains(return_data=True):
             variables_assembled = self.dof_manager.assemble_variable(
@@ -516,6 +520,10 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             )
             pp.set_iterate(
                 data, {self.saturation_var: variables_assembled[sd.num_cells :]}
+            )
+        if self._limit_saturation_growth:
+            self._prev_saturation: np.ndarray = self.dof_manager.assemble_variable(
+                variables=[self.saturation_var], from_iterate=False
             )
 
     def before_newton_iteration(self) -> None:
@@ -549,7 +557,25 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
     def after_newton_convergence(
         self, solution: np.ndarray, errors: float, iteration_counter: int
     ) -> None:
-
+        # If the saturation changes to much, decrease the time step and calculate again.
+        if self._limit_saturation_growth:
+            new_saturation: np.ndarray = self.dof_manager.assemble_variable(
+                variables=[self.saturation_var], from_iterate=False
+            )
+            if (
+                np.max(np.abs(new_saturation - self._prev_saturation))
+                > self._max_saturation_growth
+            ):
+                # This is set to false again in ``before_newton_loop``. NOTE: This is
+                # not a very nice solution, however, as of now I didn't find a way to
+                # pass ``recompute_solution`` to ``time_manager.compute_time_step()`` in
+                # ``run_time_dependent_model`` without the code getting really messy.
+                self.time_manager._recomp_sol = True
+                self.convergence_status = False
+                logger.info(
+                    "Saturation grew to quickly. Trying again with a smaller time step."
+                )
+                return None
         timestep_solution = self.dof_manager.assemble_variable(from_iterate=True)
         self.dof_manager.distribute_variable(timestep_solution, to_iterate=False)
         self.convergence_status = True
@@ -559,7 +585,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self, solution: np.ndarray, errors: float, iteration_counter: int
     ) -> None:
         logger.info(f"Failed on timestep {self.time_manager.time_index}")
-        logger.info(f"Error {errors[-1]} Newton iteration {iteration_counter}")
+        logger.info(f"Error {errors} Newton iteration {iteration_counter}")
         raise ValueError("Newton iterations did not converge")
 
     def _export(self):
