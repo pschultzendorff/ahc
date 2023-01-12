@@ -113,14 +113,14 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         # Parameters for the capillary pressure function
         self._cap_pressure_model: str = "Brooks-Corey"
         # van Genuchten model
-        self._n_g: float = -2.0
+        self._n_g: float = 2.0
         self._m_g: float = 2 / 3
         self._beta_g: float = 1.0
-        self._residual_w_saturation: float = 0.3
-        self._residual_nw_saturation: float = 1.0
+        self._residual_w_saturation: float = 0.1
+        self._residual_nw_saturation: float = 0.0
         # Brooks Corey model
         self._entry_pressure: float = 1.0
-        self._n_b: float = 3.5
+        self._n_b: float = 0.5
         # Relative permeability limited below
         self._limit_rel_perm: bool = False
         # Note: the values get cubed!
@@ -258,7 +258,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             pow_func_2 = pp.ad.Function(partial(pow, exponent=-self._n_g), "pow")
             return pow_func_2(pow_func_1(normalized_s) - 1) / self._beta_g
         elif self._cap_pressure_model == "Brooks-Corey":
-            pow_func = pp.ad.Function(partial(pow, exponent=self._n_b), "pow")
+            pow_func = pp.ad.Function(partial(pow, exponent=-self._n_b), "pow")
             return pow_func(normalized_s) * self._entry_pressure
         else:
             return s * 0

@@ -14,7 +14,7 @@ from src.tpf_lab.models.two_phase_flow_model import TwoPhaseFlow
 # Simple test run
 # Neumann bc on three sides, Dirichlet bc on one side.
 model = TwoPhaseFlow({"folder_name": os.path.join("two_phase_flow_runs", "simple")})
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
@@ -34,7 +34,7 @@ model = TwoPhaseFlow_Dirichlet(
 class TwoPhaseFlow_WSource(TwoPhaseFlow):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[209] = 1
+        array[209] = 0.01
         return array
 
 
