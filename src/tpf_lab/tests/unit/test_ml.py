@@ -6,7 +6,7 @@ import torch.nn as nn
 
 from src.tpf_lab.ml.ml_ad import nn_wrapper
 
-# from src.porepy_adaptions.ml.nn import BaseNN
+# from src.tpf_lab.ml.nn import BaseNN
 
 
 class TestNN_Linear(nn.Module):
