@@ -14,7 +14,8 @@ def nn_wrapper(network: nn.Module):
     """Wraps a neural network s.t. it can be used as a ``porepy.ad.functions`` function.
 
     Parameters:
-        network: _description_
+        network: Neural network. The ``ad`` module does not check that the input and
+        output sizes are correct, hence this needs to be ensured by the user.
     """
 
     def inner(var):

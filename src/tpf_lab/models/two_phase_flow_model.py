@@ -260,6 +260,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         elif self._cap_pressure_model == "Brooks-Corey":
             pow_func = pp.ad.Function(partial(pow, exponent=self._n_b), "pow")
             return pow_func(normalized_s) * self._entry_pressure
+        else:
+            return s * 0
 
     def _w_rel_perm(self) -> pp.ad.Operator:
         """Wetting phase relative permeability pressure computed with the ... model.
