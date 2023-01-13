@@ -106,7 +106,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self.time_manager: pp.TimeManager
         # Time schedule.
         self._time_step: float = 0.2
-        self._schedule: np.ndarray = np.array([0, 2.0])
+        self._schedule: np.ndarray = np.array([0, 20.0])
         # Phase parameters
         self._w_viscosity_value: float = 1.0
         self._nw_viscosity_value: float = 1.0
@@ -119,8 +119,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self._residual_w_saturation: float = 0.1
         self._residual_nw_saturation: float = 0.0
         # Brooks Corey model
-        self._entry_pressure: float = 1.0
-        self._n_b: float = 0.5
+        self._entry_pressure: float = 0.1
+        self._n_b: float = 1.0
         # Relative permeability limited below
         self._limit_rel_perm: bool = False
         # Note: the values get cubed!
@@ -476,7 +476,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         porosity_ad = pp.ad.ParameterArray(self.params_key, "porosity", subdomains)
 
         # Compute cap pressure and relative permeabilities.
-        p_cap = self._cap_pressure(toggle_off=False)
+        p_cap = self._cap_pressure(toggle_off=True)
         w_mobility = upwind.upwind * (self._w_rel_perm() / w_viscosity_ad)
         nw_mobility = upwind.upwind * (self._nw_rel_perm() / nw_viscosity_ad)
         total_mobility = w_mobility + nw_mobility

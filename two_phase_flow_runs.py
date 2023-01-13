@@ -13,8 +13,13 @@ from src.tpf_lab.models.two_phase_flow_model import TwoPhaseFlow
 
 # Simple test run
 # Neumann bc on three sides, Dirichlet bc on one side.
-model = TwoPhaseFlow({"folder_name": os.path.join("two_phase_flow_runs", "simple")})
-# run_time_dependent_model(model, {})
+model = TwoPhaseFlow(
+    {
+        "file_name": "simple",
+        "folder_name": os.path.join("two_phase_flow_runs", "simple"),
+    }
+)
+run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
@@ -26,22 +31,28 @@ class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
 
 # Simple test run
 model = TwoPhaseFlow_Dirichlet(
-    {"folder_name": os.path.join("two_phase_flow_runs", "dirichlet")}
+    {
+        "file_name": "dirichlet",
+        "folder_name": os.path.join("two_phase_flow_runs", "dirichlet"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 # Test run with wetting source
 class TwoPhaseFlow_WSource(TwoPhaseFlow):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[209] = 0.01
+        array[209] = 1.0
         return array
 
 
 model = TwoPhaseFlow_WSource(
-    {"folder_name": os.path.join("two_phase_flow_runs", "w_source_neu")}
+    {
+        "file_name": "w_source_neu",
+        "folder_name": os.path.join("two_phase_flow_runs", "w_source_neu"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_WSource_Dir(TwoPhaseFlow_Dirichlet):
@@ -52,9 +63,12 @@ class TwoPhaseFlow_WSource_Dir(TwoPhaseFlow_Dirichlet):
 
 
 model = TwoPhaseFlow_WSource_Dir(
-    {"folder_name": os.path.join("two_phase_flow_runs", "w_source_dir")}
+    {
+        "file_name": "w_source_dir",
+        "folder_name": os.path.join("two_phase_flow_runs", "w_source_dir"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 
 # Test run with non-wetting source
@@ -66,9 +80,29 @@ class TwoPhaseFlow_NWSource(TwoPhaseFlow):
 
 
 model = TwoPhaseFlow_NWSource(
-    {"folder_name": os.path.join("two_phase_flow_runs", "nw_source_neu")}
+    {
+        "file_name": "nw_source_neu",
+        "folder_name": os.path.join("two_phase_flow_runs", "nw_source_neu"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
+
+
+class TwoPhaseFlow_NWSource(TwoPhaseFlow):
+    def _nw_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 1
+        return array
+
+
+model = TwoPhaseFlow_NWSource(
+    {
+        "file_name": "nw_source_neu_long_inj",
+        "folder_name": os.path.join("two_phase_flow_runs", "nw_source_neu_long_inj"),
+    }
+)
+model._schedule: np.ndarray = np.array([0, 100.0])
+run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_NWSource_Dir(TwoPhaseFlow_Dirichlet):
@@ -79,9 +113,12 @@ class TwoPhaseFlow_NWSource_Dir(TwoPhaseFlow_Dirichlet):
 
 
 model = TwoPhaseFlow_NWSource_Dir(
-    {"folder_name": os.path.join("two_phase_flow_runs", "nw_source_dir")}
+    {
+        "file_name": "nw_source_dir",
+        "folder_name": os.path.join("two_phase_flow_runs", "nw_source_dir"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 
 # Longer injection
@@ -90,7 +127,7 @@ class TwoPhaseFlow_LongInj(TwoPhaseFlow_WSource):
         super().__init__(params)
         # Let the model run for a longer time
         self._time_step: float = 0.2
-        self._schedule: np.ndarray = np.array([0, 40.0])
+        self._schedule: np.ndarray = np.array([0, 100.0])
 
 
 model = TwoPhaseFlow_LongInj(
@@ -99,7 +136,7 @@ model = TwoPhaseFlow_LongInj(
         "folder_name": os.path.join("two_phase_flow_runs", "long_inj_neu"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_LongInj_Dir(TwoPhaseFlow_WSource_Dir):
@@ -107,7 +144,7 @@ class TwoPhaseFlow_LongInj_Dir(TwoPhaseFlow_WSource_Dir):
         super().__init__(params)
         # Let the model run for a longer time
         self._time_step: float = 0.2
-        self._schedule: np.ndarray = np.array([0, 40.0])
+        self._schedule: np.ndarray = np.array([0, 150.0])
 
 
 model = TwoPhaseFlow_LongInj_Dir(
@@ -119,7 +156,7 @@ model = TwoPhaseFlow_LongInj_Dir(
     }
 )
 model._limit_saturation_change = True
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 # Test run with extraction
@@ -140,9 +177,12 @@ class TwoPhaseFlow_Ext(TwoPhaseFlow):
 
 
 model = TwoPhaseFlow_Ext(
-    {"folder_name": os.path.join("two_phase_flow_runs", "ext_neu")}
+    {
+        "file_name": "ext_neu",
+        "folder_name": os.path.join("two_phase_flow_runs", "ext_neu"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_Ext_Dir(TwoPhaseFlow_Dirichlet):
@@ -159,9 +199,12 @@ class TwoPhaseFlow_Ext_Dir(TwoPhaseFlow_Dirichlet):
 
 
 model = TwoPhaseFlow_Ext_Dir(
-    {"folder_name": os.path.join("two_phase_flow_runs", "ext_dir")}
+    {
+        "file_name": "ext_dir",
+        "folder_name": os.path.join("two_phase_flow_runs", "ext_dir"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 
 # Test run with injection and extraction at the same time
@@ -180,9 +223,12 @@ class TwoPhaseFlow_InjExt(TwoPhaseFlow):
 
 
 model = TwoPhaseFlow_InjExt(
-    {"folder_name": os.path.join("two_phase_flow_runs", "inj_ext_neu")}
+    {
+        "file_name": "inj_ext_neu",
+        "folder_name": os.path.join("two_phase_flow_runs", "inj_ext_neu"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_InjExt_Dir(TwoPhaseFlow_Dirichlet):
@@ -200,9 +246,12 @@ class TwoPhaseFlow_InjExt_Dir(TwoPhaseFlow_Dirichlet):
 
 
 model = TwoPhaseFlow_InjExt_Dir(
-    {"folder_name": os.path.join("two_phase_flow_runs", "inj_ext_dir")}
+    {
+        "file_name": "inj_ext_dir",
+        "folder_name": os.path.join("two_phase_flow_runs", "inj_ext_dir"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 # Test run with more complicated geometry
 class TwoPhaseFlow_Geom(TwoPhaseFlow_WSource):
@@ -219,9 +268,12 @@ class TwoPhaseFlow_Geom(TwoPhaseFlow_WSource):
 
 
 model = TwoPhaseFlow_Geom(
-    {"folder_name": os.path.join("two_phase_flow_runs", "complex_geom")}
+    {
+        "file_name": "complex_geom",
+        "folder_name": os.path.join("two_phase_flow_runs", "complex_geom"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
 
 # Test run on triangle grid
 class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow):
@@ -266,6 +318,9 @@ class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow):
 
 
 model = TwoPhaseFlow_TriangleGrid(
-    {"folder_name": os.path.join("two_phase_flow_runs", "triangle_grid")}
+    {
+        "file_name": "triangle_grid",
+        "folder_name": os.path.join("two_phase_flow_runs", "triangle_grid"),
+    }
 )
-# run_time_dependent_model(model, {})
+run_time_dependent_model(model, {})
