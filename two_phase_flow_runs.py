@@ -19,7 +19,9 @@ model = TwoPhaseFlow(
         "folder_name": os.path.join("two_phase_flow_runs", "simple"),
     }
 )
-run_time_dependent_model(model, {})
+
+model._schedule: np.ndarray = np.array([0, 0.2])
+# run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
@@ -36,13 +38,13 @@ model = TwoPhaseFlow_Dirichlet(
         "folder_name": os.path.join("two_phase_flow_runs", "dirichlet"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 # Test run with wetting source
 class TwoPhaseFlow_WSource(TwoPhaseFlow):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[209] = 1.0
+        array[209] = 0.2
         return array
 
 
@@ -52,13 +54,20 @@ model = TwoPhaseFlow_WSource(
         "folder_name": os.path.join("two_phase_flow_runs", "w_source_neu"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(
+#     model,
+#     {
+#         "max_iterations": 30,
+#         "nl_convergence_tol": 1e-5,
+#         "nl_divergence_tol": 1e5,
+#     },
+# )
 
 
 class TwoPhaseFlow_WSource_Dir(TwoPhaseFlow_Dirichlet):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[209] = 1
+        array[209] = 0.2
         return array
 
 
@@ -68,14 +77,21 @@ model = TwoPhaseFlow_WSource_Dir(
         "folder_name": os.path.join("two_phase_flow_runs", "w_source_dir"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(
+#     model,
+#     {
+#         "max_iterations": 30,
+#         "nl_convergence_tol": 1e-5,
+#         "nl_divergence_tol": 1e5,
+#     },
+# )
 
 
 # Test run with non-wetting source
 class TwoPhaseFlow_NWSource(TwoPhaseFlow):
-    def _nw_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
-        array[209] = 1
+    def _n_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._n_source(g)
+        array[209] = 0.2
         return array
 
 
@@ -85,14 +101,7 @@ model = TwoPhaseFlow_NWSource(
         "folder_name": os.path.join("two_phase_flow_runs", "nw_source_neu"),
     }
 )
-run_time_dependent_model(model, {})
-
-
-class TwoPhaseFlow_NWSource(TwoPhaseFlow):
-    def _nw_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
-        array[209] = 1
-        return array
+# run_time_dependent_model(model, {})
 
 
 model = TwoPhaseFlow_NWSource(
@@ -102,13 +111,13 @@ model = TwoPhaseFlow_NWSource(
     }
 )
 model._schedule: np.ndarray = np.array([0, 100.0])
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_NWSource_Dir(TwoPhaseFlow_Dirichlet):
-    def _nw_source(self, g: pp.Grid) -> np.ndarray:
+    def _n_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[209] = 1
+        array[209] = 0.2
         return array
 
 
@@ -118,7 +127,7 @@ model = TwoPhaseFlow_NWSource_Dir(
         "folder_name": os.path.join("two_phase_flow_runs", "nw_source_dir"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 # Longer injection
@@ -136,7 +145,14 @@ model = TwoPhaseFlow_LongInj(
         "folder_name": os.path.join("two_phase_flow_runs", "long_inj_neu"),
     }
 )
-# run_time_dependent_model(model, {})
+# run_time_dependent_model(
+#     model,
+#     {
+#         "max_iterations": 30,
+#         "nl_convergence_tol": 1e-4,
+#         "nl_divergence_tol": 1e5,
+#     },
+# )
 
 
 class TwoPhaseFlow_LongInj_Dir(TwoPhaseFlow_WSource_Dir):
@@ -172,7 +188,7 @@ class TwoPhaseFlow_Ext(TwoPhaseFlow):
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[309] = -1
+        array[309] = -0.2
         return array
 
 
@@ -182,7 +198,7 @@ model = TwoPhaseFlow_Ext(
         "folder_name": os.path.join("two_phase_flow_runs", "ext_neu"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 class TwoPhaseFlow_Ext_Dir(TwoPhaseFlow_Dirichlet):
@@ -194,7 +210,7 @@ class TwoPhaseFlow_Ext_Dir(TwoPhaseFlow_Dirichlet):
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[309] = -1
+        array[309] = -0.2
         return array
 
 
@@ -204,7 +220,7 @@ model = TwoPhaseFlow_Ext_Dir(
         "folder_name": os.path.join("two_phase_flow_runs", "ext_dir"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 
 # Test run with injection and extraction at the same time
@@ -217,8 +233,8 @@ class TwoPhaseFlow_InjExt(TwoPhaseFlow):
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[109] = 1
-        array[309] = -1
+        array[109] = 0.2
+        array[309] = -0.2
         return array
 
 
@@ -228,7 +244,14 @@ model = TwoPhaseFlow_InjExt(
         "folder_name": os.path.join("two_phase_flow_runs", "inj_ext_neu"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(
+#     model,
+#     {
+#         "max_iterations": 30,
+#         "nl_convergence_tol": 1e-4,
+#         "nl_divergence_tol": 1e5,
+#     },
+# )
 
 
 class TwoPhaseFlow_InjExt_Dir(TwoPhaseFlow_Dirichlet):
@@ -240,8 +263,8 @@ class TwoPhaseFlow_InjExt_Dir(TwoPhaseFlow_Dirichlet):
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[109] = 1
-        array[309] = -1
+        array[109] = 0.2
+        array[309] = -0.2
         return array
 
 
@@ -251,7 +274,7 @@ model = TwoPhaseFlow_InjExt_Dir(
         "folder_name": os.path.join("two_phase_flow_runs", "inj_ext_dir"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(model, {})
 
 # Test run with more complicated geometry
 class TwoPhaseFlow_Geom(TwoPhaseFlow_WSource):
@@ -260,10 +283,8 @@ class TwoPhaseFlow_Geom(TwoPhaseFlow_WSource):
         region in the left half.
         """
         array: np.ndarray = super()._permeability(g)
-        array[309:311] = 0.01
-        array[109:111] = 0.01
-        array[204] = 10
-        array[205] = 10
+        array[265:275] = 1.0
+        array[125:135] = 20
         return array
 
 
@@ -273,10 +294,18 @@ model = TwoPhaseFlow_Geom(
         "folder_name": os.path.join("two_phase_flow_runs", "complex_geom"),
     }
 )
-run_time_dependent_model(model, {})
+model._schedule = [0, 100.0]
+run_time_dependent_model(
+    model,
+    {
+        "max_iterations": 30,
+        "nl_convergence_tol": 1e-4,
+        "nl_divergence_tol": 1e5,
+    },
+)
 
 # Test run on triangle grid
-class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow):
+class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow_WSource):
     def create_grid(self) -> None:
         GRID_SIZE: int = 20
         PHYS_SIZE: int = 2
@@ -293,9 +322,9 @@ class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow):
             ]
         )
         g_cart: pp.CartGrid = pp.CartGrid(cell_dims, phys_dims)
-        g_tetra: pp.TetrahedralGrid = pp.TetrahedralGrid(g_cart.nodes)
+        g_tetra: pp.TriangleGrid = pp.TriangleGrid(g_cart.nodes[:2])
         g_tetra.compute_geometry()
-        self.mdg: pp.MixedDimensionalGrid = pp.meshing.subdomains_to_mdg([[g_cart]])
+        self.mdg: pp.MixedDimensionalGrid = pp.meshing.subdomains_to_mdg([[g_tetra]])
         self.box: dict = pp.bounding_box.from_points(
             np.array(
                 [
@@ -311,16 +340,18 @@ class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow):
             ).T
         )
 
-    def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
-        array[209] = 1
-        return array
-
 
 model = TwoPhaseFlow_TriangleGrid(
     {
-        "file_name": "triangle_grid",
-        "folder_name": os.path.join("two_phase_flow_runs", "triangle_grid"),
+        "file_name": "triangle_grid_w_source",
+        "folder_name": os.path.join("two_phase_flow_runs", "triangle_grid_w_source"),
     }
 )
-run_time_dependent_model(model, {})
+# run_time_dependent_model(
+#     model,
+#     {
+#         "max_iterations": 30,
+#         "nl_convergence_tol": 1e-5,
+#         "nl_divergence_tol": 1e5,
+#     },
+# )

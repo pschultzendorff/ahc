@@ -17,28 +17,82 @@ class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
     def _w_rel_perm(self) -> pp.ad.Operator:
         """Wetting phase relative permeability pressure computed with a nn."""
         s = self._ad.saturation
-        model = BaseNN()
+        model = BaseNN({"depth": 1, "act": "linear"})
         model.load_state_dict(
-            torch.load(os.path.join("saved_models", "BaseNN_RelPerm_Wetting.pt"))
+            torch.load(
+                os.path.join(
+                    "saved_models",
+                    "BaseNN_RelPermW_BrooksCorey_1HiddenLayers.pt",
+                )
+            )
         )
         nn_func = pp.ad.Function(nn_wrapper(model), "w_nn")
         return nn_func(s)
 
-    def _nw_rel_perm(self) -> pp.ad.Operator:
+    def _n_rel_perm(self) -> pp.ad.Operator:
         s = self._ad.saturation
-        model = BaseNN()
+        model = BaseNN({"depth": 1, "act": "linear"})
         model.load_state_dict(
-            torch.load(os.path.join("saved_models", "BaseNN_RelPerm_NonWetting.pt"))
+            torch.load(
+                os.path.join(
+                    "saved_models", "BaseNN_RelPermN_BrooksCorey_1HiddenLayers.pt"
+                )
+            )
         )
         nn_func = pp.ad.Function(nn_wrapper(model), "nw_nn")
         return nn_func(s)
+
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 0.3
+        return array
 
 
 # Simple test run
 model = TwoPhaseFlow_DataRelPerm(
     {
-        "file_name": "DataRelPerm",
-        "folder_name": os.path.join("two_phase_flow_runs", "DataRelPerm"),
+        "file_name": "RelPerm_BrooksCorey_Data",
+        "folder_name": os.path.join("two_phase_flow_runs", "RelPerm_BrooksCorey_Data"),
+    }
+)
+model._schedule = [0, 100.0]
+# run_time_dependent_model(
+#     model,
+#     {
+#         "max_iterations": 30,
+#         "nl_convergence_tol": 1e-8,
+#         "nl_divergence_tol": 1e5,
+#     },
+# )
+
+
+class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
+    def _n_rel_perm(self) -> pp.ad.Operator:
+        s = self._ad.saturation
+        model = BaseNN({"depth": 1, "act": "linear"})
+        model.load_state_dict(
+            torch.load(
+                os.path.join(
+                    "saved_models", "BaseNN_RelPermN_BrooksCorey_1HiddenLayers.pt"
+                )
+            )
+        )
+        nn_func = pp.ad.Function(nn_wrapper(model), "nw_nn")
+        return nn_func(s)
+
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 0.3
+        return array
+
+
+# Simple test run
+model = TwoPhaseFlow_DataRelPerm(
+    {
+        "file_name": "RelPerm_BrooksCorey_DataN_FormulaW",
+        "folder_name": os.path.join(
+            "two_phase_flow_runs", "RelPerm_BrooksCorey_DataN_FormulaW"
+        ),
     }
 )
 run_time_dependent_model(
@@ -51,24 +105,26 @@ run_time_dependent_model(
 )
 
 
-class TwoPhaseFlow_WSource_Dir(TwoPhaseFlow_DataRelPerm):
+class TwoPhaseFlow_WSource(TwoPhaseFlow):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[209] = 1
+        array[209] = 0.3
         return array
 
 
-model = TwoPhaseFlow_WSource_Dir(
+model = TwoPhaseFlow_WSource(
     {
-        "file_name": "DataRelPerm_w_source_dir",
-        "folder_name": os.path.join("two_phase_flow_runs", "DataRelPerm_w_source_dir"),
+        "file_name": "RelPerm_BrooksCorey_Formula",
+        "folder_name": os.path.join(
+            "two_phase_flow_runs", "RelPerm_BrooksCorey_Formula"
+        ),
     }
 )
 # run_time_dependent_model(
 #     model,
 #     {
 #         "max_iterations": 30,
-#         "nl_convergence_tol": 1e-8,
+#         "nl_convergence_tol": 1e-10,
 #         "nl_divergence_tol": 1e5,
 #     },
 # )
