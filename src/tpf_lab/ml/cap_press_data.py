@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 
 class CapPressDataset(torch.utils.data.Dataset):
-    def __init__(self, len: int = 1000, model: str = "brooks_corey") -> None:
+    def __init__(self, len: int = 1000, model: str = "Brooks-Corey") -> None:
         super().__init__()
         self.len = len
         self.model: str = model
@@ -18,7 +18,7 @@ class CapPressDataset(torch.utils.data.Dataset):
         self.std = torch.tensor([1.5] * self.len).unsqueeze(-1)
         self.s_w = torch.rand([self.len, 1])
         noise = torch.normal(self.mean, self.mean)
-        if self.model == "brooks_corey":
+        if self.model == "Brooks-Corey":
             self.gen_func = BrooksCorey()
             self.target: torch.Tensor = self.gen_func(self.s_w) + noise
 
@@ -68,12 +68,12 @@ class BrooksCorey(nn.Module):
         """Nonwetting residual saturation."""
 
     def forward(self, s_w: torch.Tensor) -> torch.Tensor:
-        p_cw = self.w_thresh_press / (
-            ((s_w - self.w_res_sat) / (1 - self.w_res_sat)) ** self.w_psi
+        normalized_s_w = (s_w - self.w_res_sat) / (1 - self.n_res_sat - self.w_res_sat)
+        normalized_s_n = (1 - s_w - self.w_res_sat) / (
+            1 - self.n_res_sat - self.w_res_sat
         )
-        p_cn = self.n_thresh_press / (
-            ((1 - s_w - self.n_res_sat) / (1 - self.n_res_sat)) ** self.n_psi
-        )
+        p_cw = self.w_thresh_press / (normalized_s_w**self.w_psi)
+        p_cn = self.n_thresh_press / (normalized_s_n**self.n_psi)
         return p_cw + p_cn
 
 

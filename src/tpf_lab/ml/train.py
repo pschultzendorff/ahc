@@ -78,15 +78,15 @@ nw_train_dataloader: DataLoader = DataLoader(nw_train_data, batch_size=64)
 # nw_train_data: IterableRelPermDataset = IterableRelPermDataset(model="power_nw")
 # nw_train_dataloader: DataLoader = DataLoader(nw_train_data, batch_size=64)
 
-loss_func = nn.MSELoss()
 model = BaseNN()
 trainer = optim.Adam(model.parameters())
 
 
-def train(data, epochs: int = 5000) -> None:
+def train(data, model: nn.Module, trainer: optim.Optimizer, epochs: int = 5000) -> None:
     """Train for a number of epochs. Since an IterableDataset is used, each epoch is one
     batch.
     """
+    loss_func = nn.MSELoss()
     for epoch in range(epochs):
         logger.info(f"epoch {epoch}")
         progress_bar = tqdm.tqdm(data)
@@ -116,11 +116,11 @@ def train_iterable(data, epochs: int = 5000) -> None:
 
 
 # Wetting
-train(w_train_dataloader)
-torch.save(
-    model.state_dict(),
-    os.path.join("saved_models", "BaseNN_RelPerm_Wetting_200_datapoints.pt"),
-)
+# train(w_train_dataloader, model, trainer)
+# torch.save(
+#     model.state_dict(),
+#     os.path.join("saved_models", "BaseNN_RelPerm_Wetting_200_datapoints.pt"),
+# )
 
 x = torch.arange(0, 1, 0.01).unsqueeze(-1)
 truth = power(x)

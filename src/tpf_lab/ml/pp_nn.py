@@ -8,14 +8,24 @@ class BaseNN(nn.Module):
         super().__init__()
         if params is None:
             params = {}
-        self._depth: int = params.get("depth", 1)
+        self._depth: int = params.get("depth", 0)
         self._hidden_size: int = params.get("hidden_size", 30)
-        # TODO: Implement a layer list with the given depth.
-        self.fc1 = nn.Linear(1, self._hidden_size)
-        self.fc2 = nn.Linear(self._hidden_size, 1)
+        self.fcs = nn.ModuleList(
+            [
+                nn.Linear(self._hidden_size, self._hidden_size)
+                for i in range(self._depth - 1)
+            ]
+        )
+        self.fcs.insert(0, nn.Linear(1, self._hidden_size))
+        self.fcs.append(nn.Linear(self._hidden_size, 1))
         # Use sigmoid for the final layer, to enforce :math:0\leq S_w\leq1.
-        self.act = nn.Sigmoid()
+        self.act1 = nn.Sigmoid()
+        if params.get("act", "sigmoid") == "linear":
+            self.act2 = nn.Identity()
+        else:
+            self.act2 = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.act(self.fc1(x))
-        return self.act(self.fc2(x))
+        for fc in self.fcs[:-1]:
+            x = self.act1(fc(x))
+        return self.act2(self.fcs[-1](x))
