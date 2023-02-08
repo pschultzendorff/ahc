@@ -25,33 +25,31 @@ Units:
 from __future__ import annotations
 
 import logging
-import os
 import time
-from functools import partial
 from typing import Optional, Union
-
+from functools import partial
 import numpy as np
-import porepy as pp
-import scipy.sparse as sps
-from pythonjsonlogger import jsonlogger
 
+import porepy as pp
 from src.tpf_lab.numerics.ad.functions import pow
 
-
+# Setup logging.
 logger = logging.getLogger("__name__")
+logger.setLevel(logging.INFO)
+ch = logging.StreamHandler()
+ch.setLevel(logging.INFO)
+logger.addHandler(ch)
 
 
 class _AdVariables:
-    pressure_w: pp.ad.MergedVariable
-    pressure_n: pp.ad.MergedVariable
+    pressure: pp.ad.MergedVariable
     saturation: pp.ad.MergedVariable
-    # Do we need the flux_discretization?
     flux_discretization: Union[pp.ad.MpfaAd, pp.ad.TpfaAd]
     subdomains: list[pp.Grid]
 
 
 class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
-    """This is a model class for two-phase flow problems.
+    """This is a shell class for two-phase  flow problems.
 
     This class is intended to provide a standardized setup, with all discretizations
     in place and reasonable parameter and boundary values. The intended use is to
@@ -61,15 +59,13 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
     model classes (CompressibleFlow).
 
     Public attributes:
-        primary_pressure_var: Name assigned to the pressure variable in the
+        variable (str): Name assigned to the pressure variable in the
             highest-dimensional subdomain. Will be used throughout the simulations,
-            including in ParaView export. The default variable name is "wetting
-            pressure" or "nonwetting pressure", depending on the chosen two-phase flow
-            formulation.
-        parameter_key: Keyword used to define parameters and discretizations.
+            including in ParaView export. The default variable name is 'p'.
+        parameter_key (str): Keyword used to define parameters and discretizations.
         params (dict): Dictionary of parameters used to control the solution procedure.
-            Some frequently used entries are file and folder names for export, mesh
-            sizes...
+            Some frequently used entries are file and folder names for export,
+           mesh sizes...
         mdg (pp.MixedDimensionalGrid): Mixed-dimensional grid. Should be set by a method
             create_grid, which should be provided by the user.
         convergence_status (bool): Whether the non-linear iteration has converged.
@@ -84,54 +80,32 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
-        if params is not None and "formulation" in params:
-            self._formulation: str = params["formulation"]
-        else:
-            self._formulation = "w_pressure_w_saturation"
+        self._formulation: str = "w_pressure_w_saturation"
         # Variables
-        self.pressure_w_var = "pressure_w"
-        r"""Name for the wetting pressure variable :math:p_w . Depending on the chosen
-        formulation, this is either a primary or a secondary variable."""
-        self.pressure_n_var = "pressure_n"
-        r"""Name for the nonwetting pressure variable :math:p_n . Depending on the
-        chosen formulation, this is either a primary or a secondary variable."""
-        self.saturation_var: str = "saturation_w"
+        self.pressure_var: str
+        r"""Name for the pressure variable :math:p_\alpha . Depending on the chosen
+         formulation, this is either the wetting or the nonetting pressure.
+        """
+        if self._formulation == "w_pressure_w_saturation":
+            self.pressure_var = "w_pressure"
+        elif self._formulation == "n_pressure_w_saturation":
+            self.pressure_var = "n_pressure"
+        self.saturation_var: str = "w_saturation"
         """Name for the wetting saturation variable :math:S_w ."""
-
         # Discretizations and params
         self.params_key: str = "params"
-        """Keyword to define parameters that are not related to any discretization (i.e.
-        porosity, total source and )"""
-        self.w_flux_key: str = "wetting flux"
-        """Keyword to define parameters and discretizations connected to the wetting
-        phase."""
-        self.n_flux_key: str = "nonwetting flux"
-        """Keyword to define parameters and discretizations connected to the nonwetting
-        phase."""
-        self.cap_flux_key: str = "capillary flux"
-        """Keyword to define parameters and discretizations connected to the capillary
-        flux."""
-        if self._formulation == "w_pressure_w_saturation":
-            self.primary_pressure_var: str = self.pressure_w_var
-            self.secondary_pressure_var: str = self.pressure_n_var
-        elif self._formulation == "n_pressure_w_saturation":
-            self.primary_pressure_var = self.pressure_n_var
-            self.secondary_pressure_var = self.pressure_w_var
-
+        self.cap_params_key: str = "cap_params"
         # Some options
         self._use_ad: bool = True
-
         # Managers etc.
         self._ad = _AdVariables()
         self.exporter: pp.Exporter
         self.dof_manager: pp.DofManager
         self._eq_manager: pp.ad.EquationManager
         self.time_manager: pp.TimeManager
-
         # Time schedule.
         self._time_step: float = 0.2
         self._schedule: np.ndarray = np.array([0, 20.0])
-
         # Phase parameters
         self._w_viscosity: float = 1.0
         """Wetting fluid viscosity.
@@ -153,9 +127,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
         SI Units: kg/m^3
         """
-
         # Parameters for the capillary pressure function
-        self._cap_pressure_model: Optional[str] = "Brooks-Corey"
+        self._cap_pressure_model: str = "Brooks-Corey"
         # van Genuchten model
         self._n_g: float = 2.0
         self._m_g: float = 2 / 3
@@ -165,18 +138,11 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         # Brooks Corey model
         self._entry_pressure: float = 0.1
         self._n_b: int = 1
-        # linear model
-        self._cap_pressure_linear: float = 1.0
-
         # Parameters for the relative permeability function
         self._rel_perm_model: str = "Brooks-Corey"
         self._n1: int = 2
         self._n2: int = int(1 + 2 / self._n_b)
         self._n3: int = 1
-        # Parameters for the error function derivative
-        self._yscale: float = 1.0
-        self._xscale: float = 200
-        self._offset: float = 0.5
         # Relative permeability limited below
         self._limit_rel_perm: bool = False
         # Note: the values get cubed!
@@ -184,39 +150,16 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self._min_n_rel_perm: float = 0.01
         # Wetting saturation limited below
         self._limit_saturation: bool = False
-
         # Grid size
         self._grid_size: int = 20
         self._phys_size: int = 2
-
-        # Limit saturation change
+        # Limit saturation growth
         self._limit_saturation_change: bool = False
         """If this is set to ``True``, the Newton method fails, if the final solution
         differs from the previous timestep by more than ``self._max_saturation_change``
         in any grid cell. The timestep is then shortened and recalculated.
         """
         self._max_saturation_change: float = 0.2
-
-        # Setup logging.
-        logger.handlers.clear()  # ? Why do we need this again?
-        # Logging config
-        try:
-            os.makedirs(self.params["folder_name"])
-        except OSError:
-            pass
-        fh = logging.FileHandler(
-            os.path.join(
-                self.params["folder_name"], ".".join([self.params["file_name"], "txt"])
-            )
-        )
-        fh.setLevel(logging.DEBUG)
-        # formatter = jsonlogger.JsonFormatter()
-        # file_handler.setFormatter(formatter)
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.INFO)
-        logger.addHandler(sh)
-        logger.addHandler(fh)
-        logger.setLevel(logging.DEBUG)
 
     def prepare_simulation(self) -> None:
         self.create_grid()
@@ -242,8 +185,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self._initialize_linear_solver()
 
     def _bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
-        """Neumann conditions on three sides; Dirichlet on one side to ensure existence
-        of a unique solution."""
+        """Homogeneous Neumann conditions on three sides, Dirichlet
+        on one side to ensure existence of a unique solution."""
         south = self._domain_boundary_sides(g).south
         return pp.BoundaryCondition(g, south, "dir")
 
@@ -253,7 +196,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         array = np.zeros(g.num_faces)
         return array
 
-    def _source_w(self, g: pp.Grid) -> np.ndarray:
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
         """Volumetric wetting source.
 
         In the default model there is no source term.
@@ -262,19 +205,19 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         """
         return np.zeros(g.num_cells)
 
-    def _source_n(self, g: pp.Grid) -> np.ndarray:
+    def _n_source(self, g: pp.Grid) -> np.ndarray:
         """Volumetric wetting source.
 
         SI Units: m^d/s
         """
         return np.zeros(g.num_cells)
 
-    def _source_t(self, g: pp.Grid) -> np.ndarray:
+    def _total_source(self, g: pp.Grid) -> np.ndarray:
         """Volumetric total source; sum of the wetting and nonetting source.
 
         SI Units: m^d/s
         """
-        return self._source_w(g) + self._source_n(g)
+        return self._w_source(g) + self._n_source(g)
 
     # More matrix and phase parameters.
     def _permeability(self, g: pp.Grid) -> np.ndarray:
@@ -288,7 +231,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         return np.full(g.num_cells, 1.0)
 
     # Cap pressure and relative permeability functions.
-    def _cap_pressure(self) -> pp.ad.Operator:
+    def _cap_pressure(self, toggle: bool = True) -> pp.ad.Operator:
         r"""Capillary pressure computed with the ... model.
 
         .. math::
@@ -296,26 +239,28 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             \text{for}
             \hat{S}_w=\frac{S_w-S_w^{min}}{S_w^{max}-S_w^{min}}\\
 
+        Parameters:
+            toggle: _description_, defaults to False
         """
         s = self._ad.saturation
         normalized_s = (s - self._residual_w_saturation) / (
             1 - self._residual_n_saturation - self._residual_w_saturation
         )
-        if self._cap_pressure_model == "van Genuchten":
+        if not toggle:
+            # TODO Make this look nicer (just return zero maybe? -> Doesn't work).
+            return s * 0
+        elif self._cap_pressure_model == "van Genuchten":
             # Setup pp.ad.functions.pow
             pow_func_1 = pp.ad.Function(partial(pow, exponent=self._m_g), "pow")
             pow_func_2 = pp.ad.Function(partial(pow, exponent=-self._n_g), "pow")
             return pow_func_2(pow_func_1(normalized_s) - 1) / self._beta_g
         elif self._cap_pressure_model == "Brooks-Corey":
-            pow_func = pp.ad.Function(partial(pow, exponent=self._n_b), "pow")
+            pow_func = pp.ad.Function(partial(pow, exponent=-self._n_b), "pow")
             return pp.ad.Scalar(self._entry_pressure) * pow_func(normalized_s)
-        elif self._cap_pressure_model == "linear":
-            return self._cap_pressure_linear * normalized_s
         else:
-            # TODO Make this look nicer (just return zero maybe? -> Doesn't work).
             return s * 0
 
-    def _rel_perm_w(self) -> pp.ad.Operator:
+    def _w_rel_perm(self) -> pp.ad.Operator:
         """Wetting phase relative permeability pressure computed with the ... model.
 
         .. math::
@@ -332,11 +277,11 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         normalized_s = (s - self._residual_w_saturation) / (
             1 - self._residual_n_saturation - self._residual_w_saturation
         )
+        # TODO: Fix this so it applies to all subdomains.
         if self._rel_perm_model == "Corey":
             # TODO: Add constant factor to power law.
             cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
             if self._limit_rel_perm:
-                # TODO: Fix this so it applies to all subdomains.
                 array = np.full(
                     self.mdg.subdomains()[0].num_cells, self._min_w_rel_perm
                 )
@@ -354,7 +299,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         else:
             return s * 0
 
-    def _rel_perm_n(self) -> pp.ad.Operator:
+    def _n_rel_perm(self) -> pp.ad.Operator:
         """Non-wetting phase relative permeability pressure computed with the ... model.
 
         .. math::
@@ -371,11 +316,11 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         normalized_s = (s - self._residual_w_saturation) / (
             1 - self._residual_n_saturation - self._residual_w_saturation
         )
+        # TODO: Fix this so it applies to all subdomains.
         if self._rel_perm_model == "Corey":
             # TODO: Add constant factor to power law.
             cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
             if self._limit_rel_perm:
-                # TODO: Fix this so it applies to all subdomains.
                 min_value = np.full(
                     self.mdg.subdomains()[0].num_cells, self._min_n_rel_perm
                 )
@@ -395,6 +340,36 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             )
         else:
             return s * 0
+
+    def _w_vector_source(
+        self, g: Union[pp.Grid, pp.MortarGrid], toggle=False
+    ) -> np.ndarray:
+        """Zero vector source (gravity).
+
+        # TODO: fix this! Right now it doesn't change anything.
+        To assign a gravity-like vector source, add a non-zero contribution in
+        the last dimension:
+            vals[-1] = - pp.GRAVITY_ACCELERATION * fluid_density
+        """
+        vals = np.zeros((self.mdg.dim_max(), g.num_cells))
+        if toggle:
+            vals[-1] = -pp.GRAVITY_ACCELERATION * self._w_density
+        return vals
+
+    def _n_vector_source(
+        self, g: Union[pp.Grid, pp.MortarGrid], toggle=False
+    ) -> np.ndarray:
+        """Zero vector source (gravity).
+
+        # TODO: fix this! Right now it doesn't change anything.
+        To assign a gravity-like vector source, add a non-zero contribution in
+        the last dimension:
+            vals[-1] = - pp.GRAVITY_ACCELERATION * fluid_density
+        """
+        vals = np.zeros((self.mdg.dim_max(), g.num_cells))
+        if toggle:
+            vals[-1] = -pp.GRAVITY_ACCELERATION * self._n_density
+        return vals
 
     def create_grid(self) -> None:
         cell_dims: np.ndarray = np.array(
@@ -428,7 +403,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
                 ]
             ).T
         )
-        # logger.debug("Grid created")
+        logger.info("Grid created")
 
     def _set_parameters(self) -> None:
         """Set default (unitary/zero) parameters for the flow problem.
@@ -439,50 +414,29 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         for sd, data in self.mdg.subdomains(return_data=True):
             # Boundary conditions and parameters
             diffusivity = pp.SecondOrderTensor(self._permeability(sd))
-            all_bf, *_ = self._domain_boundary_sides(sd)
-            # Parameters that are not used for discretization.
+            gravity = self._w_vector_source(sd)
             pp.initialize_data(
                 sd,
                 data,
                 self.params_key,
                 {
-                    "source_t": self._source_t(sd),
+                    "bc": self._bc_type(sd),
+                    "bc_values": self._bc_values(sd),
+                    # ? Does this need to be total_source or wetting_source?
+                    "wetting_source": self._w_source(sd),
+                    "vector_source": gravity.ravel("F"),
+                    "second_order_tensor": diffusivity,
                     "porosity": self._porosity(sd),
-                },
-            )
-            # Parameters for wetting phase.
-            pp.initialize_data(
-                sd,
-                data,
-                self.w_flux_key,
-                {
-                    "source_w": self._source_w(sd),
-                    "bc": self._bc_type(sd),
-                    "bc_values": self._bc_values(sd),
+                    "total_source": self._total_source(sd),
                     "darcy_flux": np.ones(sd.num_faces),
-                    "second_order_tensor": diffusivity,
                 },
             )
-            # Parameters for nonwetting phase.
+            all_bf, *_ = self._domain_boundary_sides(sd)
             pp.initialize_data(
                 sd,
                 data,
-                self.n_flux_key,
+                self.cap_params_key,
                 {
-                    "source_n": self._source_n(sd),
-                    "bc": self._bc_type(sd),
-                    "bc_values": self._bc_values(sd),
-                    "darcy_flux": np.ones(sd.num_faces),
-                    "second_order_tensor": diffusivity,
-                },
-            )
-            # Parameters for capillary flux.
-            pp.initialize_data(
-                sd,
-                data,
-                self.cap_flux_key,
-                {
-                    # "bc": self._bc_type(sd),
                     "bc": pp.BoundaryCondition(sd, all_bf, "neu"),
                     "bc_values": np.zeros(sd.num_faces),
                     "second_order_tensor": diffusivity,
@@ -492,8 +446,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
     def _initial_condition(self) -> None:
         """Set initial values for wetting pressure and saturation."""
         for sd, data in self.mdg.subdomains(return_data=True):
-            pp.set_state(data, {self.pressure_w_var: np.full(sd.num_cells, 0.0)})
-            pp.set_state(data, {self.pressure_n_var: np.full(sd.num_cells, 0.0)})
+            pp.set_state(data, {self.pressure_var: np.full(sd.num_cells, 0.0)})
             pp.set_state(data, {self.saturation_var: np.full(sd.num_cells, 0.5)})
 
     def _assign_variables(self) -> None:
@@ -504,8 +457,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         for sd, data in self.mdg.subdomains(return_data=True):
             # One dof per cell for both variables
             data[pp.PRIMARY_VARIABLES] = {
-                self.pressure_w_var: {"cells": 1},
-                self.pressure_n_var: {"cells": 1},
+                self.pressure_var: {"cells": 1},
                 self.saturation_var: {"cells": 1},
             }
 
@@ -519,11 +471,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def _create_ad_variables(self) -> None:
         """Create merged variables for wetting pressure and saturation"""
-        self._ad.pressure_w = self._eq_manager.merge_variables(
-            [(sd, self.pressure_w_var) for sd in self.mdg.subdomains()]
-        )
-        self._ad.pressure_n = self._eq_manager.merge_variables(
-            [(sd, self.pressure_n_var) for sd in self.mdg.subdomains()]
+        self._ad.pressure = self._eq_manager.merge_variables(
+            [(sd, self.pressure_var) for sd in self.mdg.subdomains()]
         )
         self._ad.saturation = self._eq_manager.merge_variables(
             [(sd, self.saturation_var) for sd in self.mdg.subdomains()]
@@ -536,11 +485,11 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         if len(list(self.mdg.subdomains(dim=self.mdg.dim_max()))) != 1:
             raise NotImplementedError("This will require further work")
 
-        # Spatial discretization operators.
+        # Ad representation of discretizations
         div = pp.ad.Divergence(subdomains)
-        cap_flux_mpfa = pp.ad.MpfaAd(self.cap_flux_key, subdomains)
-        upwind_w = pp.ad.UpwindAd(self.w_flux_key, subdomains)
-        upwind_n = pp.ad.UpwindAd(self.n_flux_key, subdomains)
+        flux_mpfa = pp.ad.MpfaAd(self.params_key, subdomains)
+        upwind = pp.ad.UpwindAd(self.params_key, subdomains)
+        cap_flux_mpfa = pp.ad.MpfaAd(self.cap_params_key, subdomains)
 
         # Ad saturation variables, pressure is not needed as the flux is computed in a
         # seperate method (``_flux``).
@@ -549,239 +498,119 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         dt_s = pp.ad.time_derivatives.dt(s, dt)
 
         # Ad source
-        source_ad_w = pp.ad.ParameterArray(self.w_flux_key, "source_w", subdomains)
-        source_ad_t = pp.ad.ParameterArray(self.params_key, "source_t", subdomains)
+        w_source_ad = pp.ad.ParameterArray(
+            self.params_key, "wetting_source", subdomains
+        )
+        total_source_ad = pp.ad.ParameterArray(
+            self.params_key, "total_source", subdomains
+        )
 
         # Ad parameters
-        viscosity_ad_w = pp.ad.Scalar(self._w_viscosity)
-        viscosity_ad_n = pp.ad.Scalar(self._n_viscosity)
+        w_viscosity_ad = pp.ad.Scalar(self._w_viscosity)
+        n_viscosity_ad = pp.ad.Scalar(self._n_viscosity)
         porosity_ad = pp.ad.ParameterArray(self.params_key, "porosity", subdomains)
 
         # Compute cap pressure and relative permeabilities.
-        p_cap = self._cap_pressure()
-        p_cap_bc = pp.ad.ParameterArray(self.cap_flux_key, "bc_values", subdomains)
-        mobility_w = upwind_w.upwind * (self._rel_perm_w() / viscosity_ad_w)
-        mobility_n = upwind_n.upwind * (self._rel_perm_n() / viscosity_ad_n)
-        # Add a small :math:\epsilon to the total mobility, to avoid division by zero.
-        mobility_t = mobility_w + mobility_n  # + pp.ad.Scalar(1e-7)
+        p_cap = self._cap_pressure(toggle=False)
+        w_mobility = upwind.upwind * (self._w_rel_perm() / w_viscosity_ad)
+        n_mobility = upwind.upwind * (self._n_rel_perm() / n_viscosity_ad)
+        total_mobility = w_mobility + n_mobility
+
+        # Wetting fluid flux.
+        flux = self._wetting_flux(subdomains)
 
         # Ad equations
         if self._formulation == "w_pressure_w_saturation":
-            # Wetting fluid flux.
-            flux_w = self._flux_w(subdomains)
             pressure_eq = (
                 div
-                * (
-                    (mobility_t * flux_w)
-                    + mobility_n
-                    * (cap_flux_mpfa.flux * p_cap + cap_flux_mpfa.bound_flux * p_cap_bc)
-                )
-                - source_ad_t
+                * (total_mobility * flux + n_mobility * (cap_flux_mpfa.flux * p_cap))
+                - total_source_ad
             )
             saturation_eq = (
-                porosity_ad * dt_s + (div * (mobility_w * flux_w)) - source_ad_w
+                porosity_ad * dt_s + (div * (w_mobility * flux)) - w_source_ad
             )
-            pressure_eq.set_name("Wetting pressure equation")
-            saturation_eq.set_name("Wetting saturation equation")
+            pressure_eq.set_name("Pressure equation")
+            saturation_eq.set_name("Saturation equation")
         elif self._formulation == "n_pressure_w_saturation":
-            # Note, that for ``flux_t``, the mobility is already included.
-            flux_t = self._flux_t(subdomains)
-            flux_n = self._flux_n(subdomains)
-            pressure_eq = div * flux_t - source_ad_t
-            # pressure_eq = (
-            #     div
-            #     * (
-            #         mobility_t
-            #         * flux_n
-            #         # - mobility_w
-            #         # * (cap_flux_mpfa.flux * p_cap + cap_flux_mpfa.bound_flux * p_cap_bc)
-            #     )
-            #     - source_ad_t
-            # )
-            # This is kind of messy, but we do this to avoid inf values in the
-            # equation system, which appear when using division.
-            invert_func = pp.ad.Function(partial(pow, exponent=-1), "invert")
-            fractional_flow_w = mobility_w * invert_func(mobility_t)
-            # fractional_flow_w = mobility_w / mobility_t
-            saturation_eq = (
-                porosity_ad * dt_s
-                + div
-                * (
-                    fractional_flow_w * flux_t
-                    - fractional_flow_w * mobility_n * (cap_flux_mpfa.flux * p_cap)
-                )
-                - source_ad_w
-            )
-            pressure_eq.set_name("Nonwetting pressure equation")
-            saturation_eq.set_name("Wetting saturation equation")
-        # Update the equation list.
+            # TODO: Implement this.
+            pass
+        pressure_eq.set_name("Pressure equation")
+        saturation_eq.set_name("Saturation equation")
+        # Add to the equation list.
         self._eq_manager.equations.update(
-            {
-                "pressure_eq": pressure_eq,
-                "saturation_eq": saturation_eq,
-            }
+            {"pressure_eq": pressure_eq, "saturation_eq": saturation_eq}
         )
 
-    def _flux_w(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
-        """Wetting phase mass flux.
+    def _wetting_flux(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        """Wetting fluid mass flux.
 
         SI Units: kg/s
         """
-        p_w = self._ad.pressure_w
-        p_w_bc = pp.ad.ParameterArray(self.w_flux_key, "bc_values", subdomains)
-        # vector_source_subdomains = pp.ad.ParameterArray(
-        #     param_keyword=self.flux_key,
-        #     array_keyword="vector_source",
-        #     subdomains=subdomains,
-        # )
-        flux_mpfa = pp.ad.MpfaAd(
-            self.w_flux_key,
-            subdomains,
+        p = self._ad.pressure
+        p_bc = pp.ad.ParameterArray(self.params_key, "bc_values", subdomains)
+        vector_source_subdomains = pp.ad.ParameterArray(
+            param_keyword=self.params_key,
+            array_keyword="vector_source",
+            subdomains=subdomains,
         )
+        flux_mpfa = pp.ad.MpfaAd(self.params_key, subdomains)
         flux: pp.ad.Operator = (
-            flux_mpfa.flux * p_w
-            + flux_mpfa.bound_flux * p_w_bc
+            flux_mpfa.flux * p
+            + flux_mpfa.bound_flux * p_bc
             # + flux_mpfa.vector_source * vector_source_subdomains
         )
         flux.set_name("Wetting mass flux")
         return flux
 
-    def _flux_n(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
-        """Nonwetting phase mass flux.
-
-        SI Units: kg/s
-        """
-        p_n = self._ad.pressure_n
-        p_n_bc = pp.ad.ParameterArray(self.n_flux_key, "bc_values", subdomains)
-        # vector_source_subdomains = pp.ad.ParameterArray(
-        #     param_keyword=self.flux_key,
-        #     array_keyword="vector_source",
-        #     subdomains=subdomains,
-        # )
-        flux_mpfa = pp.ad.MpfaAd(
-            self.n_flux_key,
-            subdomains,
+    def _total_flux(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
+        p = self._ad.pressure
+        w_viscosity_ad = pp.ad.ParameterArray(
+            self.params_key, "w_viscosity", subdomains
         )
-        flux: pp.ad.Operator = (
-            flux_mpfa.flux * p_n
-            + flux_mpfa.bound_flux * p_n_bc
-            # + flux_mpfa.vector_source * vector_source_subdomains
+        n_viscosity_ad = pp.ad.ParameterArray(
+            self.params_key, "n_viscosity", subdomains
         )
-        flux.set_name("Nonwetting mass flux")
-        return flux
-
-    def _flux_t(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
-        """Total mass flux.
-
-        This is always calculated in terms of the nonwetting pressure and the capillary
-        pressure (i.e. in terms of the wetting Saturation). Note that, unlike in the
-        phase flux functions, the mobilities are already included in this formulation.
-
-        SI Units: kg/s
-        """
-        # Variables and parameters.
-        p_n = self._ad.pressure_n
-        p_bc = pp.ad.ParameterArray(self.n_flux_key, "bc_values", subdomains)
-        p_cap_bc = pp.ad.ParameterArray(self.cap_flux_key, "bc_values", subdomains)
-        viscosity_ad_w = pp.ad.Scalar(self._w_viscosity)
-        viscosity_ad_n = pp.ad.Scalar(self._n_viscosity)
-        # Spatial discretization operators.
-        flux_mpfa = pp.ad.MpfaAd(self.n_flux_key, subdomains)
-        cap_flux_mpfa = pp.ad.MpfaAd(self.cap_flux_key, subdomains)
-        upwind_w = pp.ad.UpwindAd(self.w_flux_key, subdomains)
-        upwind_n = pp.ad.UpwindAd(self.n_flux_key, subdomains)
+        upwind = pp.ad.UpwindAd(self.params_key, subdomains)
         # Compute cap pressure and relative permeabilities.
-        p_cap = self._cap_pressure()
-        mobility_w = upwind_w.upwind * (self._rel_perm_w() / viscosity_ad_w)
-        mobility_n = upwind_n.upwind * (self._rel_perm_n() / viscosity_ad_n)
-        # Add a small :math:\epsilon to the total mobility, to avoid division by zero.
-        mobility_t = mobility_w + mobility_n + pp.ad.Scalar(1e-7)
-        # Compute flux.
-        flux_n: pp.ad.Operator = flux_mpfa.flux * p_n + flux_mpfa.bound_flux * p_bc
-        flux_p_cap: pp.ad.Operator = (
-            cap_flux_mpfa.flux * p_cap + cap_flux_mpfa.bound_flux * p_cap_bc
-        )
-        total_flux = mobility_t * flux_n - mobility_w * flux_p_cap
+        p_cap = self._cap_pressure(toggle=False)
+        w_mobility = upwind.upwind * (self._w_rel_perm() / w_viscosity_ad)
+        n_mobility = upwind.upwind * (self._n_rel_perm() / n_viscosity_ad)
+        total_mobility = w_mobility + n_mobility
+        p_bc = pp.ad.ParameterArray(self.params_key, "bc_values", subdomains)
+        flux_mpfa = pp.ad.MpfaAd(self.params_key, subdomains)
+        w_flux: pp.ad.Operator = flux_mpfa.flux * p + flux_mpfa.bound_flux * p_bc
+        cap_flux: pp.ad.Operator = flux_mpfa.flux * p_cap
+        total_flux = total_mobility * w_flux - w_mobility * cap_flux
         total_flux.set_name("Total mass flux")
         return total_flux
 
     def _discretize(self) -> None:
         """Discretize all terms"""
-        # t = time.time()
+        logger.info(f"Discretizing and assembling")
+        t = time.time()
         self._eq_manager.discretize(self.mdg)
-        # Fluid flux induced by the secondary variable. This needs to be discretized
-        # once s.t. the Darcy flux can be computed for the secondary variable, s.t.
-        # the upwind operator works correctly.
-        if self._formulation == "w_pressure_w_saturation":
-            flux_n = self._flux_n(self.mdg.subdomains())
-            flux_n.discretize(self.mdg)
-        elif self._formulation == "n_pressure_w_saturation":
-            flux_w = self._flux_w(self.mdg.subdomains())
-            flux_w.discretize(self.mdg)
-        # logger.debug(f"Discretized in {time.time() - t} seconds")
-
-    def assemble_linear_system(self) -> None:
-        """Assemble the linearized system.
-
-        The linear system is defined by the current state of the model.
-
-        Attributes:
-            linear_system is assigned.
-
-        """
-        t_0 = time.time()
-        if self._use_ad:
-            # Solve either for wetting or nonwetting pressure.
-            if self.primary_pressure_var == self.pressure_w_var:
-                variables = [self._ad.pressure_w, self._ad.saturation]
-            elif self.primary_pressure_var == self.pressure_n_var:
-                variables = [self._ad.pressure_n, self._ad.saturation]
-            A, b = self._eq_manager.assemble_subsystem(
-                eq_names=["pressure_eq", "saturation_eq"],
-                variables=variables,
-            )
-        # A, b = self._eq_manager.assemble()
-        self.linear_system = (A, b)
-        # print(f"A: {A.todense()}")
-        # print(f"b: {b}")
-        logger.debug(f"Assembled linear system in {t_0-time.time():.2e} seconds.")
+        logger.info(f"Discretized in {time.time() - t} seconds")
 
     # Newton loop.
     def before_newton_loop(self) -> None:
         """Set the starting estimate to the solution from the previous timestep."""
-        logger.debug(
-            f'{{"time step": {self.time_manager.time_index}, "time": {self.time_manager.time}}}'
+        logger.info(
+            f"Time step {self.time_manager.time_index} at time \
+                {self.time_manager.time:.1e} of {self.time_manager.time_final:.1e} \
+                with time step {self.time_manager.dt:.1e}"
         )
         self.time_manager._recomp_sol = False
         self._nonlinear_iteration = 0
         for sd, data in self.mdg.subdomains(return_data=True):
-            assembled_variables = self.dof_manager.assemble_variable(
-                grids=[sd],
-                from_iterate=False,
+            variables_assembled = self.dof_manager.assemble_variable(
+                grids=[sd], from_iterate=False
             )
             pp.set_iterate(
-                data, {self.pressure_w_var: assembled_variables[: sd.num_cells]}
+                data, {self.pressure_var: variables_assembled[: sd.num_cells]}
             )
             pp.set_iterate(
-                data,
-                {
-                    self.pressure_n_var: assembled_variables[
-                        sd.num_cells : sd.num_cells * 2
-                    ]
-                },
+                data, {self.saturation_var: variables_assembled[sd.num_cells :]}
             )
-            pp.set_iterate(
-                data,
-                {self.saturation_var: assembled_variables[sd.num_cells * 2 :]},
-            )
-            # pp.set_iterate(
-            #     data,
-            #     {self.pressure_w_var: assembled_variables[: sd.num_cells]},
-            # )
-            # pp.set_iterate(
-            #     data,
-            #     {self.saturation_var: assembled_variables[sd.num_cells :]},
-            # )
         if self._limit_saturation_change:
             self._prev_saturation: np.ndarray = self.dof_manager.assemble_variable(
                 variables=[self.saturation_var], from_iterate=False
@@ -789,48 +618,16 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def before_newton_iteration(self) -> None:
         """Compute Darcy flux based on previous pressure solution to determine upstream
-        direction.
-
-        To evaluate the phase-mobilities separately, both the wetting as well as the
-        nonwetting flux need to be computed.
-
-        """
+        direction."""
         # ? Does this suffice at each time step instead? -> Needs to happen at each
         # Newton iteration, because we are starting with a bad guess (previous timestep)
         # and improve towards the solution. We want to use discretization and Darcy flux
-        # Evaluate the pressure of the secondary variable.
-        secondary_pressure = self._ad.pressure_n - self._cap_pressure()
-        secondary_pressure_sol = secondary_pressure.evaluate(self.dof_manager).val
-        # Add padding for the two other variables.
-        num_dof_one_var = self.mdg.subdomains()[0].num_cells
-        if self.secondary_pressure_var == self.pressure_w_var:
-            solution = np.insert(
-                np.zeros(num_dof_one_var * 3), 0, secondary_pressure_sol
-            )
-        elif self.secondary_pressure_var == self.pressure_n_var:
-            solution = np.insert(
-                np.zeros(num_dof_one_var * 3), num_dof_one_var, secondary_pressure_sol
-            )
-        self.dof_manager.distribute_variable(
-            solution,
-            variables=[self.secondary_pressure_var],
-            # Not additive, since we evaluate the current iterative variables to obtain
-            # the solution.
-            additive=False,
-            to_iterate=True,
-        )
+        # based on the best approximation.
         pp.fvutils.compute_darcy_flux(
             self.mdg,
-            keyword=self.w_flux_key,
-            keyword_store=self.w_flux_key,
-            p_name=self.pressure_w_var,
-            from_iterate=True,
-        )
-        pp.fvutils.compute_darcy_flux(
-            self.mdg,
-            keyword=self.n_flux_key,
-            keyword_store=self.n_flux_key,
-            p_name=self.pressure_n_var,
+            keyword=self.params_key,
+            keyword_store=self.params_key,
+            p_name=self.pressure_var,
             from_iterate=True,
         )
         self._discretize()
@@ -841,16 +638,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         Parameters:
             solution_vector (np.array): solution vector for the current iterate.
         """
-        # Insert the secondary pressure variable into the solution.
-        num_dof_one_var = self.mdg.subdomains()[0].num_cells
-        if self.secondary_pressure_var == self.pressure_w_var:
-            solution = np.insert(solution, 0, np.zeros(num_dof_one_var))
-        elif self.secondary_pressure_var == self.pressure_n_var:
-            solution = np.insert(solution, num_dof_one_var, np.zeros(num_dof_one_var))
-        # Distribute pressure and saturation variable.
         self.dof_manager.distribute_variable(
             solution,
-            # variables=[self.primary_pressure_var, self.saturation_var],
             additive=True,
             to_iterate=True,
         )
@@ -882,33 +671,26 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
                 # ``run_time_dependent_model`` without the code getting really messy.
                 self.time_manager._recomp_sol = True
                 self.convergence_status = False
-                logger.debug(
+                logger.info(
                     "Saturation grew to quickly. Trying again with a smaller time step."
                 )
                 return None
-
-        # Distribute pressure and saturation variable.
         timestep_solution = self.dof_manager.assemble_variable(from_iterate=True)
         self.dof_manager.distribute_variable(timestep_solution, to_iterate=False)
-
         self.convergence_status = True
         self._export()
-        logger.debug(f'{{"converged": {"true"}}}')
 
     def after_newton_failure(
         self, solution: np.ndarray, errors: float, iteration_counter: int
     ) -> None:
-        logger.debug(f"Failed on timestep {self.time_manager.time_index}")
-        logger.debug(f"Error {errors} Newton iteration {iteration_counter}")
-        logger.debug(f'{{"converged": {"false"}}}')
+        logger.info(f"Failed on timestep {self.time_manager.time_index}")
+        logger.info(f"Error {errors} Newton iteration {iteration_counter}")
         raise ValueError("Newton iterations did not converge")
 
     def _export(self):
         if hasattr(self, "exporter"):
             self.exporter.write_vtu(
-                # [self.pressure_w_var, self.pressure_n_var, self.saturation_var],
-                # [self.pressure_n_var, self.saturation_var],
-                [self.pressure_w_var, self.saturation_var],
+                [self.pressure_var, self.saturation_var],
                 time_step=self.time_manager.time_index,
             )
 
@@ -917,9 +699,3 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def after_simulation(self):
         pass
-
-    def _error_function_deriv(self) -> pp.ad.Operator:
-        s = self._ad.saturation
-        exp_func = pp.ad.Function(pp.ad.functions.exp, "exp")
-        square_func = pp.ad.Function(partial(pow, exponent=2), "square")
-        return self._yscale * exp_func(-self._xscale * square_func(s - self._offset))
