@@ -4,8 +4,16 @@ import logging
 from typing import Union
 
 import porepy as pp
-from src.tpf_lab.numerics.nonlinear.nonlinear_solvers import NewtonSolver
 
+from src.tpf_lab.numerics.nonlinear.nonlinear_solvers import NewtonSolver
+from src.tpf_lab.utils import is_notebook
+
+if is_notebook():
+    import tqdm.notebook as tqdm
+else:
+    import tqdm
+
+# Module-wide logger
 logger = logging.getLogger("__name__")
 
 
@@ -59,11 +67,23 @@ def run_time_dependent_model(model, params) -> None:
         solver = pp.LinearSolver(params)
 
     # Time loop
+    expected_timesteps: int = (
+        int((model._schedule[-1] - model._schedule[0]) / model._time_step)
+    ) + 1
+    time_bar = tqdm.trange(
+        expected_timesteps,
+        desc="time loop",
+        position=0,
+    )
     while model.time_manager.time < model.time_manager.time_final:
         model.time_manager.increase_time()
         model.time_manager.increase_time_index()
+        time_bar.set_description_str(
+            f"Time step {model.time_manager.time_index}"
+            + f" at time {model.time_manager.time:.1e}"
+        )
+        time_bar.update(n=1)
         solver.solve(model)
-
         model.time_manager.compute_time_step()
 
     model.after_simulation()
@@ -102,13 +122,10 @@ def _run_iterative_model(model, params: dict) -> None:
         model.time_manager.increase_time()
         model.time_manager.increase_time_index()
         model.before_propagation_loop()
-        logger.info(
-            "\nTime step {} at time {:.1e} of {:.1e} with time step {:.1e}".format(
-                model.time_manager.time_index,
-                model.time_manager.time,
-                model.time_manager.time_final,
-                model.time_manager.dt,
-            )
+        logger.debug(
+            f"\nTime step {model.time_manager.time_index} at time"
+            + f" {model.time_manager.time:.1e} of {model.time_manager.time_final:.1e}"
+            + f" with time step {model.time_manager.dt:.1e}"
         )
         while model.keep_propagating():
             model.propagation_index += 1

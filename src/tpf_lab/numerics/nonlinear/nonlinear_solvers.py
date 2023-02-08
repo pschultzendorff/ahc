@@ -6,7 +6,13 @@ Implemented classes
 import logging
 
 import numpy as np
-import tqdm
+
+from src.tpf_lab.utils import is_notebook
+
+if is_notebook():
+    import tqdm.notebook as tqdm
+else:
+    import tqdm
 
 # Module-wide logger
 logger = logging.getLogger(__name__)
@@ -36,7 +42,12 @@ class NewtonSolver:
         init_sol = prev_sol
         errors = []
         error_norm = 1
-        progress_bar = tqdm.tqdm(range(self.params["max_iterations"]))
+        progress_bar = tqdm.trange(
+            self.params["max_iterations"],
+            desc="Newton loop",
+            position=1,
+            leave=False,
+        )
         for iteration_counter in progress_bar:
             progress_bar.set_description_str(
                 f"Newton iteration number {iteration_counter} of \
@@ -55,12 +66,20 @@ class NewtonSolver:
             )
             prev_sol = sol
             errors.append(error_norm)
+            logger.debug(
+                f'{{"Newton iteration": {model._nonlinear_iteration},'
+                + f' "error norm": {error_norm}}}'
+            )
             progress_bar.set_postfix_str(f"Error {error_norm}")
 
             if is_diverged:
+                # If the process finishes early, the tqdm bar needs to be manually
+                # closed. See https://stackoverflow.com/a/73175351.
+                progress_bar.close()
                 model.after_newton_failure(sol, errors, iteration_counter)
                 break
             elif is_converged:
+                progress_bar.close()
                 model.after_newton_convergence(sol, errors, iteration_counter)
                 break
 
@@ -79,5 +98,4 @@ class NewtonSolver:
         # Assemble and solve
         model.assemble_linear_system()
         sol = model.solve_linear_system()
-
         return sol
