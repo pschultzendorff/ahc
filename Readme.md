@@ -3,6 +3,8 @@
 This repo contains a working two-phase flow model in PorePy, as well as functionality to
 include neural networks into PorePy models.
 
+As of now this works with PorePy commit f7d60163a124b3bf67722ba484cf476df686a2a5.
+
 
 ### Code
 In ``./src`` the adaptions to PorePy are found; most notably a two-phase flow model

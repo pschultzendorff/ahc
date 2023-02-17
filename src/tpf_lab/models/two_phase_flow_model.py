@@ -1,4 +1,4 @@
-"""This module contains an implementation of a base model for two-phase flow problems.
+r"""This module contains an implementation of a base model for two-phase flow problems.
 
 The model uses the pressure-saturation formulation for the wetting fluid:
     .. math:
@@ -14,7 +14,7 @@ Units:
     Collection of the SI units for all parameters. Not thoroughly checked if this all
     makes sense.
     saturation: dimensionless
-    pressure: pascal=kg/(m*s^2)
+    pressure: pascal=kg/(m*s^2)S
     density: kg/m^3
     viscosity: kg/(m*s)
     permeability: m^2
@@ -33,7 +33,8 @@ from typing import Optional, Union
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-from pythonjsonlogger import jsonlogger
+
+# from pythonjsonlogger import jsonlogger
 
 from src.tpf_lab.numerics.ad.functions import pow
 
@@ -254,7 +255,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
     def _bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """Neumann conditions on three sides; Dirichlet on one side to ensure existence
         of a unique solution."""
-        south = self._domain_boundary_sides(g).south
+        south = self._domain_boundary_sides(g)[5]
         return pp.BoundaryCondition(g, south, "dir")
 
     def _bc_values(self, g: pp.Grid) -> np.ndarray:

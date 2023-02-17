@@ -9,7 +9,7 @@ from src.tpf_lab.ml.ml_ad import nn_wrapper
 # from src.tpf_lab.ml.nn import BaseNN
 
 
-class TestNN_Linear(nn.Module):
+class NN_Linear(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(1, 2, bias=False)
@@ -19,7 +19,7 @@ class TestNN_Linear(nn.Module):
         return self.fc2(self.fc1(x))
 
 
-class TestNN_NonLinear(nn.Module):
+class NN_NonLinear(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.fc1 = nn.Linear(1, 2, bias=False)
@@ -31,7 +31,7 @@ class TestNN_NonLinear(nn.Module):
 
 
 def test_nn_wrapper_scalar():
-    model = TestNN_Linear()
+    model = NN_Linear()
     fc1 = list(model.fc1.parameters())[0].numpy(force=True)
     fc2 = list(model.fc2.parameters())[0].numpy(force=True)
 
@@ -43,7 +43,7 @@ def test_nn_wrapper_scalar():
 
 
 def test_nn_wrapper_advar():
-    model = TestNN_Linear()
+    model = NN_Linear()
     fc1 = list(model.fc1.parameters())[0].numpy(force=True)
     fc2 = list(model.fc2.parameters())[0].numpy(force=True)
 
@@ -56,7 +56,7 @@ def test_nn_wrapper_advar():
 
 
 def test_nn_wrapper_vector():
-    model = TestNN_Linear()
+    model = NN_Linear()
     fc1 = list(model.fc1.parameters())[0].numpy(force=True)
     fc2 = list(model.fc2.parameters())[0].numpy(force=True)
 
@@ -73,7 +73,7 @@ def test_nn_wrapper_vector():
 
 
 def test_nn_wrapper_vector_nonlinear():
-    model = TestNN_NonLinear()
+    model = NN_NonLinear()
     fc1 = list(model.fc1.parameters())[0].numpy(force=True)
     fc2 = list(model.fc2.parameters())[0].numpy(force=True)
 
