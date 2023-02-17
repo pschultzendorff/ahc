@@ -43,7 +43,7 @@ model = TwoPhaseFlow_Dirichlet(
 # Test run with wetting source
 class TwoPhaseFlow_WSource(TwoPhaseFlow):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[209] = 0.2
         return array
 
@@ -66,7 +66,7 @@ model = TwoPhaseFlow_WSource(
 
 class TwoPhaseFlow_WSource_Dir(TwoPhaseFlow_Dirichlet):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[209] = 0.2
         return array
 
@@ -90,7 +90,7 @@ model = TwoPhaseFlow_WSource_Dir(
 # Test run with non-wetting source
 class TwoPhaseFlow_NWSource(TwoPhaseFlow):
     def _n_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._n_source(g)
+        array: np.ndarray = super()._source_n(g)
         array[209] = 0.2
         return array
 
@@ -116,7 +116,7 @@ model._schedule: np.ndarray = np.array([0, 100.0])
 
 class TwoPhaseFlow_NWSource_Dir(TwoPhaseFlow_Dirichlet):
     def _n_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[209] = 0.2
         return array
 
@@ -187,7 +187,7 @@ class TwoPhaseFlow_Ext(TwoPhaseFlow):
         self._schedule: np.ndarray = np.array([0, 10.0])
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[309] = -0.2
         return array
 
@@ -209,7 +209,7 @@ class TwoPhaseFlow_Ext_Dir(TwoPhaseFlow_Dirichlet):
         self._schedule: np.ndarray = np.array([0, 10.0])
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[309] = -0.2
         return array
 
@@ -232,7 +232,7 @@ class TwoPhaseFlow_InjExt(TwoPhaseFlow):
         self._schedule: np.ndarray = np.array([0, 10.0])
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[109] = 0.2
         array[309] = -0.2
         return array
@@ -262,7 +262,7 @@ class TwoPhaseFlow_InjExt_Dir(TwoPhaseFlow_Dirichlet):
         self._schedule: np.ndarray = np.array([0, 10.0])
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[109] = 0.2
         array[309] = -0.2
         return array

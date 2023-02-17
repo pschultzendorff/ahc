@@ -43,7 +43,7 @@ class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
         return nn_func(s)
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[209] = 0.3
         return array
 
@@ -81,7 +81,7 @@ class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
         return nn_func(s)
 
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[209] = 0.3
         return array
 
@@ -107,7 +107,7 @@ run_time_dependent_model(
 
 class TwoPhaseFlow_WSource(TwoPhaseFlow):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._w_source(g)
+        array: np.ndarray = super()._source_w(g)
         array[209] = 0.3
         return array
 
