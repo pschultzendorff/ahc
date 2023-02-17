@@ -84,8 +84,18 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
+        self._formulation: str
+        """Choose which formulation of two-phase flow shall be run. Note, that his has
+        (!!!) to be passed as a parameter. Changing it after initialization may result
+        in wrong results. "
+        
+        Valid values:
+            'w_pressure_w_saturation':
+            'n_pressure_w_saturation':
+
+        """
         if params is not None and "formulation" in params:
-            self._formulation: str = params["formulation"]
+            self._formulation = params["formulation"]
         else:
             self._formulation = "w_pressure_w_saturation"
         # Variables
@@ -563,7 +573,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         mobility_w = upwind_w.upwind * (self._rel_perm_w() / viscosity_ad_w)
         mobility_n = upwind_n.upwind * (self._rel_perm_n() / viscosity_ad_n)
         # Add a small :math:\epsilon to the total mobility, to avoid division by zero.
-        mobility_t = mobility_w + mobility_n  # + pp.ad.Scalar(1e-7)
+        mobility_t = mobility_w + mobility_n + pp.ad.Scalar(1e-7)
 
         # Ad equations
         if self._formulation == "w_pressure_w_saturation":
@@ -600,9 +610,9 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             # )
             # This is kind of messy, but we do this to avoid inf values in the
             # equation system, which appear when using division.
-            invert_func = pp.ad.Function(partial(pow, exponent=-1), "invert")
-            fractional_flow_w = mobility_w * invert_func(mobility_t)
-            # fractional_flow_w = mobility_w / mobility_t
+            # invert_func = pp.ad.Function(partial(pow, exponent=-1), "invert")
+            # fractional_flow_w = mobility_w * invert_func(mobility_t)
+            fractional_flow_w = mobility_w / mobility_t
             saturation_eq = (
                 porosity_ad * dt_s
                 + div
