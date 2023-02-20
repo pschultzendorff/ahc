@@ -2,6 +2,10 @@
 Nonlinear solvers to be used with model classes.
 Implemented classes
     NewtonSolver
+
+This is mostly just a copy of the PorePy module, but with tqdm functionality for
+displaying the Newton iteration and the error norm.
+
 """
 import logging
 
@@ -37,11 +41,18 @@ class NewtonSolver:
         iteration_counter = 0
 
         is_converged = False
+        if hasattr(model, "dof_manager"):
+            # Old without ad
+            assert not model._use_ad
+            prev_sol = model.dof_manager.assemble_variable(from_iterate=False)
+        else:
+            # Old with ad or new.
+            prev_sol = model.equation_system.get_variable_values(from_iterate=False)
 
-        prev_sol = model.dof_manager.assemble_variable(from_iterate=False)
         init_sol = prev_sol
         errors = []
         error_norm = 1
+
         progress_bar = tqdm.trange(
             self.params["max_iterations"],
             desc="Newton loop",
@@ -53,7 +64,6 @@ class NewtonSolver:
                 f"Newton iteration number {iteration_counter} of \
                     {self.params['max_iterations']}"
             )
-
             # Re-discretize the nonlinear term
             model.before_newton_iteration()
 

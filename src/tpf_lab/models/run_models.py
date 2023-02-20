@@ -1,4 +1,9 @@
-""" This module contains functions to run stationary and time-dependent models."""
+""" This module contains functions to run stationary and time-dependent models.
+
+This is mostly just a copy of the PorePy module, but with tqdm functionality for
+displaying the time step.
+
+"""
 
 import logging
 from typing import Union
@@ -13,15 +18,13 @@ if is_notebook():
 else:
     import tqdm
 
-# Module-wide logger
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 def run_stationary_model(model, params: dict) -> None:
-    """
-    Run a stationary model.
+    """Run a stationary model.
 
-    Args:
+    Parameters:
         model: Model class containing all information on parameters, variables,
             discretization, geometry. Various methods such as those relating to solving
             the system, see the appropriate model for documentation.
@@ -43,11 +46,10 @@ def run_stationary_model(model, params: dict) -> None:
     model.after_simulation()
 
 
-def run_time_dependent_model(model, params) -> None:
-    """
-    Run a time dependent model.
+def run_time_dependent_model(model, params: dict) -> None:
+    """Run a time dependent model.
 
-    Args:
+    Parameters:
         model: Model class containing all information on parameters, variables,
             discretization, geometry. Various methods such as those relating to solving
             the system, see the appropriate solver for documentation.
@@ -75,6 +77,7 @@ def run_time_dependent_model(model, params) -> None:
         desc="time loop",
         position=0,
     )
+
     while model.time_manager.time < model.time_manager.time_final:
         model.time_manager.increase_time()
         model.time_manager.increase_time_index()
@@ -83,6 +86,11 @@ def run_time_dependent_model(model, params) -> None:
             + f" at time {model.time_manager.time:.1e}"
         )
         time_bar.update(n=1)
+        logger.debug(
+            f"\nTime step {model.time_manager.time_index} at time"
+            + f" {model.time_manager.time:.1e} of {model.time_manager.time_final:.1e}"
+            + f" with time step {model.time_manager.dt:.1e}"
+        )
         solver.solve(model)
         model.time_manager.compute_time_step()
 
@@ -90,13 +98,12 @@ def run_time_dependent_model(model, params) -> None:
 
 
 def _run_iterative_model(model, params: dict) -> None:
-    """
-    Run an iterative model.
+    """Run an iterative model.
 
     The intended use is for multi-step models with iterative couplings. Only known instance
     so far is the combination of fracture deformation and propagation.
 
-    Args:
+    Parameters:
         model: Model class containing all information on parameters, variables,
             discretization, geometry. Various methods such as those relating to solving
             the system, see the appropriate solver for documentation.

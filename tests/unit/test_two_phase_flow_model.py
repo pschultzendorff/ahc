@@ -7,7 +7,7 @@ import scipy.sparse as sps
 from porepy.models.run_models import run_time_dependent_model
 from porepy.numerics.ad.forward_mode import Ad_array
 
-from src.tpf_lab.models.two_phase_flow_model import TwoPhaseFlow
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
 from src.tpf_lab.numerics.ad import functions as af
 from src.tpf_lab.numerics.ad.functions import pow
 

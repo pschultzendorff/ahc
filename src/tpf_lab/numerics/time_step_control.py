@@ -85,6 +85,9 @@ Algorithm Workflow in Pseudocode:
 
     RETURN dt
 
+This is mostly just a copy of the PorePy module, but with some functionality for
+adaptive time stepping.
+
 """
 
 

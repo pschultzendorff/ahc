@@ -6,8 +6,6 @@ import torch.nn as nn
 
 from src.tpf_lab.ml.ml_ad import nn_wrapper
 
-# from src.tpf_lab.ml.nn import BaseNN
-
 
 class NN_Linear(nn.Module):
     def __init__(self) -> None:
