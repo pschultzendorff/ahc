@@ -52,6 +52,7 @@ from src.tpf_lab.numerics.ad.functions import pow
 
 # from pythonjsonlogger import jsonlogger
 
+# logger = logging.getLogger()
 
 logger = logging.getLogger("__name__")
 
@@ -231,24 +232,24 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         self._max_saturation_change: float = 0.2
 
         # Setup logging.
-        logger.handlers.clear()  # ? Why do we need this again?
-        try:
-            os.makedirs(self.params["folder_name"])
-        except OSError:
-            pass
-        fh = logging.FileHandler(
-            os.path.join(
-                self.params["folder_name"], ".".join([self.params["file_name"], "txt"])
-            )
-        )
-        fh.setLevel(logging.DEBUG)
-        # formatter = jsonlogger.JsonFormatter()
-        # file_handler.setFormatter(formatter)
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.DEBUG)
-        logger.addHandler(sh)
-        logger.addHandler(fh)
-        logger.setLevel(logging.DEBUG)
+        # logger.handlers.clear()  # ? Why do we need this again?
+        # try:
+        #     os.makedirs(self.params["folder_name"])
+        # except OSError:
+        #     pass
+        # fh = logging.FileHandler(
+        #     os.path.join(
+        #         self.params["folder_name"], ".".join([self.params["file_name"], "txt"])
+        #     )
+        # )
+        # fh.setLevel(logging.DEBUG)
+        # # formatter = jsonlogger.JsonFormatter()
+        # # file_handler.setFormatter(formatter)
+        # sh = logging.StreamHandler()
+        # sh.setLevel(logging.DEBUG)
+        # logger.addHandler(sh)
+        # logger.addHandler(fh)
+        # logger.setLevel(logging.DEBUG)
 
     def prepare_simulation(self) -> None:
         """This setups the model, s.t. a simulation can be run.
@@ -777,14 +778,14 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         t_0 = time.time()
         if self._use_ad:
             self.linear_system = self._equation_subsystem.assemble()
-        logger.debug(f"Assembled linear system in {t_0-time.time():.2e} seconds.")
+        # logger.debug(f"Assembled linear system in {t_0-time.time():.2e} seconds.")
 
     # Newton loop.
     def before_newton_loop(self) -> None:
         """Set the starting estimate to the solution from the previous timestep."""
-        logger.debug(
-            f'{{"time step": {self.time_manager.time_index}, "time": {self.time_manager.time}}}'
-        )
+        # logger.debug(
+        #     f'{{"time step": {self.time_manager.time_index}, "time": {self.time_manager.time}}}'
+        # )
         self.time_manager._recomp_sol = False
         self._nonlinear_iteration = 0
         assembled_variables = self.equation_system.get_variable_values(
@@ -875,9 +876,9 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
                 # without the code getting really messy.
                 self.time_manager._recomp_sol = True
                 self.convergence_status = False
-                logger.debug(
-                    "Saturation grew to quickly. Trying again with a smaller time step."
-                )
+                # logger.debug(
+                #     "Saturation grew to quickly. Trying again with a smaller time step."
+                # )
                 return None
         # Distribute both pressure variables and the saturation variable.
         timestep_solution = self.equation_system.get_variable_values(from_iterate=True)
@@ -887,14 +888,14 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
         self.convergence_status = True
         self._export()
-        logger.debug(f'{{"converged": {"true"}}}')
+        # logger.debug(f'{{"converged": {"true"}}}')
 
     def after_newton_failure(
         self, solution: np.ndarray, errors: float, iteration_counter: int
     ) -> None:
-        logger.debug(f"Failed on timestep {self.time_manager.time_index}")
-        logger.debug(f"Error {errors} Newton iteration {iteration_counter}")
-        logger.debug(f'{{"converged": {"false"}}}')
+        # logger.debug(f"Failed on timestep {self.time_manager.time_index}")
+        # logger.debug(f"Error {errors} Newton iteration {iteration_counter}")
+        # logger.debug(f'{{"converged": {"false"}}}')
         raise ValueError("Newton iterations did not converge")
 
     def _export(self):
