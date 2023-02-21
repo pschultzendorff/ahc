@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import date
 from typing import Optional, Union
@@ -7,10 +8,41 @@ import numpy as np
 import porepy as pp
 
 from src.tpf_lab.models.run_models import run_time_dependent_model
-
-# from porepy.models.run_models import run_time_dependent_model
 from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.utils import logging_redirect_tqdm, rm_out_padding
 
+# rm_out_padding()
+
+cap_pressure_model = "Brooks-Corey"
+params = {
+    "formulation": "n_pressure_w_saturation",
+    "file_name": f"pcap_{cap_pressure_model}",
+    "folder_name": os.path.join(
+        "results",
+        "setup_tests",
+        f"{date.today().strftime('%Y-%m-%d')}_pcap_{cap_pressure_model}",
+    ),
+}
+
+# Setup logging.
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+# logger.handlers.clear()
+# try:
+#     os.makedirs(params["folder_name"])
+# except OSError:
+#     pass
+# fh = logging.FileHandler(
+#     os.path.join(params["folder_name"], ".".join([params["file_name"], "txt"]))
+# )
+# fh.setLevel(logging.DEBUG)
+# # formatter = jsonlogger.JsonFormatter()
+# # file_handler.setFormatter(formatter)
+# sh = logging.StreamHandler()
+# sh.setLevel(logging.DEBUG)
+# logger.addHandler(sh)
+# logger.addHandler(fh)
+# logger.setLevel(logging.DEBUG)
 
 w_source_cell_index = 209
 
@@ -27,19 +59,7 @@ class ModifiedModel(TwoPhaseFlow):
         return array
 
 
-cap_pressure_model = "Brooks-Corey"
-
-model = ModifiedModel(
-    {
-        "formulation": "n_pressure_w_saturation",
-        "file_name": f"{date.today().strftime('%Y-%m-%d')}",
-        "folder_name": os.path.join(
-            "results",
-            "setup_tests",
-            f"{date.today().strftime('%Y-%m-%d')}_pcap_{cap_pressure_model}",
-        ),
-    }
-)
+model = ModifiedModel(params)
 
 model._grid_size = 20
 model._phys_size = 2
@@ -47,4 +67,5 @@ model._cap_pressure_model = cap_pressure_model
 model._time_step = 0.1
 model._schedule = np.array([0, 30.0])
 model.prepare_simulation()
-run_time_dependent_model(model, {"nl_convergence_tol": 1e-10, "max_iterations": 30})
+with logging_redirect_tqdm([logger]):
+    run_time_dependent_model(model, {"nl_convergence_tol": 1e-10, "max_iterations": 30})

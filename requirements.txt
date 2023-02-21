@@ -1,6 +1,6 @@
 torch>=1.13
 tqdm
-python-json-logger
+# python-json-logger
 ipython
 jupyter
 deepdiff
