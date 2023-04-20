@@ -8,44 +8,44 @@ import numpy as np
 
 import porepy as pp
 from src.tpf_lab.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow_model import TwoPhaseFlow
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
 from src.tpf_lab.ml.pp_nn import BaseNN
 from src.tpf_lab.ml.ml_ad import nn_wrapper
 
 
-class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
-    def _w_rel_perm(self) -> pp.ad.Operator:
-        """Wetting phase relative permeability pressure computed with a nn."""
-        s = self._ad.saturation
-        model = BaseNN({"depth": 1, "act": "linear"})
-        model.load_state_dict(
-            torch.load(
-                os.path.join(
-                    "saved_models",
-                    "BaseNN_RelPermW_BrooksCorey_1HiddenLayers.pt",
-                )
-            )
-        )
-        nn_func = pp.ad.Function(nn_wrapper(model), "w_nn")
-        return nn_func(s)
+# class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
+#     def _w_rel_perm(self) -> pp.ad.Operator:
+#         """Wetting phase relative permeability pressure computed with a nn."""
+#         s = self._ad.saturation
+#         model = BaseNN({"depth": 1, "act": "linear"})
+#         model.load_state_dict(
+#             torch.load(
+#                 os.path.join(
+#                     "saved_models",
+#                     "BaseNN_RelPermW_BrooksCorey_1HiddenLayers.pt",
+#                 )
+#             )
+#         )
+#         nn_func = pp.ad.Function(nn_wrapper(model), "w_nn")
+#         return nn_func(s)
 
-    def _n_rel_perm(self) -> pp.ad.Operator:
-        s = self._ad.saturation
-        model = BaseNN({"depth": 1, "act": "linear"})
-        model.load_state_dict(
-            torch.load(
-                os.path.join(
-                    "saved_models", "BaseNN_RelPermN_BrooksCorey_1HiddenLayers.pt"
-                )
-            )
-        )
-        nn_func = pp.ad.Function(nn_wrapper(model), "nw_nn")
-        return nn_func(s)
+#     def _n_rel_perm(self) -> pp.ad.Operator:
+#         s = self._ad.saturation
+#         model = BaseNN({"depth": 1, "act": "linear"})
+#         model.load_state_dict(
+#             torch.load(
+#                 os.path.join(
+#                     "saved_models", "BaseNN_RelPermN_BrooksCorey_1HiddenLayers.pt"
+#                 )
+#             )
+#         )
+#         nn_func = pp.ad.Function(nn_wrapper(model), "nw_nn")
+#         return nn_func(s)
 
-    def _w_source(self, g: pp.Grid) -> np.ndarray:
-        array: np.ndarray = super()._source_w(g)
-        array[209] = 0.3
-        return array
+#     def _w_source(self, g: pp.Grid) -> np.ndarray:
+#         array: np.ndarray = super()._source_w(g)
+#         array[209] = 0.3
+#         return array
 
 
 # Simple test run
@@ -67,8 +67,8 @@ model._schedule = [0, 100.0]
 
 
 class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
-    def _n_rel_perm(self) -> pp.ad.Operator:
-        s = self._ad.saturation
+    def __init__(self, params: Optional[dict] = None) -> None:
+        super().__init__(params)
         model = BaseNN({"depth": 1, "act": "linear"})
         model.load_state_dict(
             torch.load(
@@ -77,10 +77,18 @@ class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
                 )
             )
         )
-        nn_func = pp.ad.Function(nn_wrapper(model), "nw_nn")
-        return nn_func(s)
 
-    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        wrapped_model = nn_wrapper(model)
+
+        self.nn_func = pp.ad.Function(
+            wrapped_model, "nonwetting_relative_permeability_nn"
+        )
+
+    def nonwetting_relative_permeability(self) -> pp.ad.Operator:
+        s = self._ad.saturation
+        return self.nn_func(s)
+
+    def _source_w(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._source_w(g)
         array[209] = 0.3
         return array

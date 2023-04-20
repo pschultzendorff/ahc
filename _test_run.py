@@ -16,7 +16,7 @@ from src.tpf_lab.utils import logging_redirect_tqdm, rm_out_padding
 cap_pressure_model = "Brooks-Corey"
 params = {
     "formulation": "n_pressure_w_saturation",
-    "file_name": f"pcap_{cap_pressure_model}",
+    "file_name": f"pcap_{cap_pressure_model}_gravity_off",
     "folder_name": os.path.join(
         "results",
         "setup_tests",
@@ -50,7 +50,7 @@ w_source_cell_index = 209
 class ModifiedModel(TwoPhaseFlow):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._w_source(g)
-        array[w_source_cell_index] = 0.0
+        array[w_source_cell_index] = 0.5
         return array
 
     def _source_w(self, g: pp.Grid) -> np.ndarray:
@@ -65,7 +65,9 @@ model._grid_size = 20
 model._phys_size = 2
 model._cap_pressure_model = cap_pressure_model
 model._time_step = 0.1
-model._schedule = np.array([0, 30.0])
+model._schedule = np.array([0, 100.0])
 model.prepare_simulation()
 with logging_redirect_tqdm([logger]):
-    run_time_dependent_model(model, {"nl_convergence_tol": 1e-10, "max_iterations": 30})
+    run_time_dependent_model(
+        model, {"nl_convergence_tol": 1e-10, "max_iterations": 100}
+    )

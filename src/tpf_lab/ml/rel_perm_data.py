@@ -1,4 +1,5 @@
 import os
+from functools import partial
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -9,19 +10,20 @@ import tqdm
 from torch.utils.data import DataLoader
 
 from pp_nn import BaseNN
-
+from rel_perm import brookscorey_n, brookscorey_w
 from train import train
 
-
 # Direct input
-plt.rcParams["text.latex.preamble"] = [r"\usepackage{lmodern}"]
+plt.rcParams["text.latex.preamble"] = r"\usepackage{lmodern}"
 # Options
-params = {
-    "text.usetex": True,
-    "font.size": 11,
-    "font.family": "lmodern",
-    "text.latex.unicode": True,
-}
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.size": 11,
+        "font.family": "lmodern",
+        "text.latex.unicode": True,
+    }
+)
 
 
 class RelPermDatasetW(torch.utils.data.Dataset):
@@ -77,11 +79,17 @@ class BrooksCoreyW(nn.Module):
         """Wetting residual saturation."""
         self.n_res_sat: float = params.get("n_res_sat", 0.0)
         """Nonwetting residual saturation."""
+        self.function = partial(
+            brookscorey_w,
+            n_1=self.n_1,
+            n_2=self.n_2,
+            n_3=self.n_3,
+            residual_sat_w=self.w_res_sat,
+            residual_sat_n=self.n_res_sat,
+        )
 
-    def forward(self, s_w: torch.Tensor) -> torch.Tensor:
-        normalized_s_w = (s_w - self.w_res_sat) / (1 - self.n_res_sat - self.w_res_sat)
-        k_rw = normalized_s_w ** (self.n_1 + self.n_2 * self.n_3)
-        return k_rw
+    def forward(self, S_w: torch.Tensor) -> torch.Tensor:
+        return self.function(S_w)
 
 
 class BrooksCoreyN(nn.Module):
@@ -96,13 +104,17 @@ class BrooksCoreyN(nn.Module):
         """Wetting residual saturation."""
         self.n_res_sat: float = params.get("n_res_sat", 0.0)
         """Nonwetting residual saturation."""
+        self.function = partial(
+            brookscorey_n,
+            n_1=self.n_1,
+            n_2=self.n_2,
+            n_3=self.n_3,
+            residual_sat_w=self.w_res_sat,
+            residual_sat_n=self.n_res_sat,
+        )
 
-    def forward(self, s_w: torch.Tensor) -> torch.Tensor:
-        normalized_s_w = (s_w - self.w_res_sat) / (1 - self.n_res_sat - self.w_res_sat)
-        k_rn = (1 - normalized_s_w) ** self.n_1 * (
-            1 - normalized_s_w**self.n_2
-        ) ** self.n_3
-        return k_rn
+    def forward(self, S_w: torch.Tensor) -> torch.Tensor:
+        return brookscorey_n(S_w)
 
 
 # Wetting

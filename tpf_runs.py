@@ -8,7 +8,7 @@ import numpy as np
 
 import porepy as pp
 from porepy.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow_model import TwoPhaseFlow
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
 
 
 # Simple test run
@@ -39,6 +39,7 @@ model = TwoPhaseFlow_Dirichlet(
     }
 )
 # run_time_dependent_model(model, {})
+
 
 # Test run with wetting source
 class TwoPhaseFlow_WSource(TwoPhaseFlow):
@@ -276,6 +277,7 @@ model = TwoPhaseFlow_InjExt_Dir(
 )
 # run_time_dependent_model(model, {})
 
+
 # Test run with more complicated geometry
 class TwoPhaseFlow_Geom(TwoPhaseFlow_WSource):
     def _permeability(self, g: pp.Grid) -> np.ndarray:
@@ -303,6 +305,7 @@ run_time_dependent_model(
         "nl_divergence_tol": 1e5,
     },
 )
+
 
 # Test run on triangle grid
 class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow_WSource):

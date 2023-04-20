@@ -54,7 +54,7 @@ def logging_redirect_tqdm(
     """
     This is a slightly modified version of
     ``tqdm.contrib.logging.logging_redirect_tqdm``, as the original function does not
-    inheret the logging level. There are multiple PRs waiting for acception. As soon as
+    inherit the logging level. There are multiple PRs waiting for acception. As soon as
     they are implemented, this function can be deleted.
     https://github.com/tqdm/tqdm/issues/1272
 
