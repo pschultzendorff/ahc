@@ -392,6 +392,28 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         return np.full(g.num_cells, 1.0)
 
     # Cap pressure and relative permeability functions.
+    def _s_normalized(self) -> pp.ad.Operator:
+        r"""Normalize the wetting saturation by the residual saturations.
+
+        .. math::
+            \hat{S}_w=\frac{S_w - S_w^{min}}{S_w^{max} - S_w^{min}},
+
+        which is equal to
+
+        .. math::
+            \hat{S}_w=\frac{S_w - S_{w,res}}{1 - S_{n,res}  S_{w,res}}.
+
+
+        Returns:
+            s_normalized: Normalized wetting saturation.
+
+        """
+        s = self._ad.saturation
+        s_normalized = (s - self._residual_saturation_w) / (
+            1 - self._residual_saturation_n - self._residual_saturation_w
+        )
+        return s_normalized
+
     def _cap_pressure(self) -> pp.ad.Operator:
         r"""Capillary pressure function.
 
@@ -411,15 +433,12 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
         All three models are computed in terms of the normalized saturation
         .. math::
-            \hat{S}_w=\frac{S_w-S_w^{min}}{S_w^{max}-S_w^{min}}
+            \hat{S}_w=\frac{S_w - S_w^{min}}{S_w^{max} - S_w^{min}},
 
         If none of the models is chosen, the capillary pressure is set to 0.
 
         """
-        s = self._ad.saturation
-        s_normalized = (s - self._residual_saturation_w) / (
-            1 - self._residual_saturation_n - self._residual_saturation_w
-        )
+        s_normalized = self._s_normalized()
         if self._cap_pressure_model == "Brooks-Corey":
             # Setup pp.ad.functions.pow
             pow_func = pp.ad.Function(partial(pow, exponent=self._n_b), "pow")
@@ -433,8 +452,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             return pow_func_2(pow_func_1(s_normalized) - 1) / self._beta_g
         else:
             # Return cap. pressure 0.
-            # TODO Make this look nicer (just return zero maybe? -> Doesn't work).
-            return s * 0
+            return s_normalized * 0
 
     def _rel_perm_w(self) -> pp.ad.Operator:
         r"""Wetting phase relative permeability.
@@ -468,9 +486,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             Wetting phase relative permeability.
         """
         s = self._ad.saturation
-        s_normalized = (s - self._residual_saturation_w) / (
-            1 - self._residual_saturation_n - self._residual_saturation_w
-        )
+        s_normalized = self._s_normalized()
         if self._rel_perm_model == "Corey":
             cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
             rel_perm = cube_func(s)
@@ -524,9 +540,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
             Nonwetting phase relative permeability.
         """
         s = self._ad.saturation
-        s_normalized = (s - self._residual_saturation_w) / (
-            1 - self._residual_saturation_n - self._residual_saturation_w
-        )
+        s_normalized = self._s_normalized()
         if self._rel_perm_model == "Corey":
             cube_func = pp.ad.Function(
                 partial(pow, exponent=self._rel_perm_power), "cube"
@@ -637,9 +651,6 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
                 data,
                 self.cap_flux_key,
                 {
-                    # "bc": self._bc_type(sd),
-                    # TODO: Change this to dir on the southern boundary?
-                    # "bc": pp.BoundaryCondition(sd, all_bf, "neu"),
                     "bc": self._bc_type_pressure_c(sd),
                     "bc_values": np.zeros(sd.num_faces),
                     "second_order_tensor": diffusivity,
@@ -767,7 +778,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def _mobility_w(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         viscosity_ad_w = pp.ad.Scalar(self._viscosity_w)
-        # ! For now, bc for both saturations are identical (logically since S_w=0.5)!
+        # ! For now, bc for both mobilities are identical!
         mobility_bc = pp.ad.ParameterArray(
             self.params_key, "bc_values_mobility_t", subdomains
         )
@@ -780,7 +791,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def _mobility_n(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         viscosity_ad_n = pp.ad.Scalar(self._viscosity_n)
-        # ! For now, bc for both saturations are identical (logically since S_w=0.5)!
+        # ! For now, bc for both mobilities are identical!
         mobility_bc = pp.ad.ParameterArray(
             self.params_key, "bc_values_mobility_t", subdomains
         )
@@ -856,7 +867,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
         SI Units: kg/s
         """
-        # Variables and parameters.
+        # Variables, parameters and bc.
         p_n = self._ad.pressure_n
         p_bc = pp.ad.ParameterArray(self.n_flux_key, "bc_values", subdomains)
         p_cap_bc = pp.ad.ParameterArray(self.cap_flux_key, "bc_values", subdomains)
@@ -868,7 +879,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         )
         # Spatial discretization operators.
         flux_mpfa = pp.ad.MpfaAd(self.n_flux_key, subdomains)
-        cap_flux_mpfa = pp.ad.TpfaAd(self.cap_flux_key, subdomains)
+        # NOTE: We use TPFA for discretization of the capillary flux.
+        cap_flux_tpfa = pp.ad.TpfaAd(self.cap_flux_key, subdomains)
         # Cap pressure and relative permeabilities.
         p_cap = self._cap_pressure()
         mobility_w = self._mobility_w(subdomains)
@@ -876,11 +888,11 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         mobility_t = self._mobility_t(subdomains)
         # Compute flux.
         flux_n: pp.ad.Operator = flux_mpfa.flux * p_n + flux_mpfa.bound_flux * p_bc
+        flux_p_cap: pp.ad.Operator = (
+            cap_flux_tpfa.flux * p_cap + cap_flux_tpfa.bound_flux * p_cap_bc
+        )
         flux_buoyancy_w: pp.ad.Operator = flux_mpfa.vector_source * vector_source_w
         flux_buoyancy_n: pp.ad.Operator = flux_mpfa.vector_source * vector_source_n
-        flux_p_cap: pp.ad.Operator = (
-            cap_flux_mpfa.flux * p_cap + cap_flux_mpfa.bound_flux * p_cap_bc
-        )
         total_flux = (
             mobility_t * flux_n
             - mobility_w * flux_p_cap
@@ -892,10 +904,10 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
 
     def _discretize(self) -> None:
         """Discretize all terms"""
-        # t = time.time()
+        # t_0 = time.time()
         self.equation_system.discretize()
         # Fluid flux induced by the secondary variable. This needs to be discretized
-        # once s.t. the Darcy flux can be computed for the secondary variable, s.t.
+        # once s.t. the Darcy flux can be computed for the secondary variable s.t.
         # the upwind operator works correctly.
         if self._formulation == "w_pressure_w_saturation":
             flux_n = self._flux_n(self.mdg.subdomains())
@@ -903,7 +915,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         elif self._formulation == "n_pressure_w_saturation":
             flux_w = self._flux_w(self.mdg.subdomains())
             flux_w.discretize(self.mdg)
-        # logger.debug(f"Discretized in {time.time() - t} seconds")
+        # logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
     def assemble_linear_system(self) -> None:
         """Assemble the linearized system.
@@ -917,7 +929,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         t_0 = time.time()
         if self._use_ad:
             self.linear_system = self._equation_subsystem.assemble()
-        # logger.debug(f"Assembled linear system in {t_0-time.time():.2e} seconds.")
+        # logger.debug(f"Assembled linear system in {time.time() - t_0:.2e} seconds")
 
     # Newton loop.
     def before_newton_loop(self) -> None:
@@ -940,7 +952,7 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         """Compute Darcy flux based on previous pressure solution to determine upstream
         direction.
 
-        To evaluate the phase-mobilities separately, both the wetting as well as the
+        To evaluate the phase-mobilities separately, both the wetting, as well as the
         nonwetting flux need to be computed.
 
         """

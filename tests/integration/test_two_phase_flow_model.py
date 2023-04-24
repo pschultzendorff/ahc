@@ -116,6 +116,25 @@ def pressure_w_init() -> np.ndarray:
 
 
 @pytest.fixture
+def s_normalized_jac(saturation_w_init, model: TwoPhaseFlow_with_source) -> np.ndarray:
+    """Normalized saturation Jacobian w.r.t. saturation."""
+    A = np.eye(saturation_w_init.shape[0]) / (
+        1 - model._residual_saturation_w - model._residual_saturation_n
+    )
+    return A
+
+
+def test_normalized_s(
+    model: TwoPhaseFlow_with_source,
+    s_normalized_jac: np.ndarray,
+) -> None:
+    """The model uses the normalized saturation for the rel. perm. and cap. pressure
+    functions. We check that its Jacobian is calculated correctly."""
+    s_normalized_system = model._s_normalized().evaluate(model.equation_system)
+    assert np.allclose(s_normalized_system.jac.todense()[:, -4:], s_normalized_jac)
+
+
+@pytest.fixture
 def cap_pressure_val(
     normalized_saturation_w_init: np.ndarray, model: TwoPhaseFlow_with_source
 ) -> np.ndarray:
@@ -203,8 +222,6 @@ def mobility_t(
     # boundary condition is taken into account by both the wetting/nonwetting mobility.
     mobility_t[6:8] = 0.5
     # Inside interfaces. Calculated based on the initial pressure :math:`S_0=0.5`.
-    # The :math:`\epsilon=1e-7` is added in the model to prevent division by zero, hence
-    # we add it here as well.
     mobility_t[
         [
             1,
@@ -215,7 +232,9 @@ def mobility_t(
     ] = (
         rel_perm_w / model._viscosity_w + rel_perm_n / model._viscosity_n
     )
-    return mobility_t
+    # The :math:`\epsilon=1e-7` is added in the model to prevent division by zero, hence
+    # we add it here as well.
+    return mobility_t + 1e-7
 
 
 def test_mobility_t(model: TwoPhaseFlow_with_source, mobility_t: np.ndarray) -> None:
@@ -227,7 +246,6 @@ def test_mobility_t(model: TwoPhaseFlow_with_source, mobility_t: np.ndarray) -> 
     assert np.allclose(
         model._mobility_t(subdomains).evaluate(model.equation_system).val,
         mobility_t,
-        atol=1e-6,
     )
 
 
@@ -309,16 +327,25 @@ def test_mobility_n(model: TwoPhaseFlow_with_source, mobility_n: np.ndarray) -> 
 
 
 @pytest.fixture
+def tpfa_array() -> np.ndarray:
+    """Array of the divergence of the TPFA array, including Dirichlet bc at the bottom."""
+    return np.asarray([[4, -1, -1, 0], [-1, 4, 0, -1], [-1, 0, 2, -1], [0, -1, -1, 2]])
+
+
+def test_tpfa(tpfa_array: np.ndarray, model: TwoPhaseFlow_with_source) -> None:
+    """Test that TPFA works correctly."""
+    subdomains = model.mdg.subdomains()
+    tpfa = pp.ad.TpfaAd(model.w_flux_key, subdomains)
+    div = pp.ad.Divergence(subdomains)
+    tpfa_system = (div * tpfa.flux).evaluate(model.equation_system)
+    assert np.allclose(tpfa_system.todense(), tpfa_array)
+
+
+@pytest.fixture
 def flux_pressure_val() -> np.ndarray:
     """Residual of the divergence of the pressure flux at t=0. Calculated by hand."""
     b = np.zeros(4)
     return b
-
-
-@pytest.fixture
-def tpfa_array() -> np.ndarray:
-    """Array of the divergence of the TPFA array, including Dirichlet bc at the bottom."""
-    return np.asarray([[4, -1, -1, 0], [-1, 4, 0, -1], [-1, 0, 2, -1], [0, -1, -1, 2]])
 
 
 @pytest.fixture
@@ -355,6 +382,45 @@ def test_flux_n(
     assert np.allclose(b, -flux_pressure_val)
 
 
+@pytest.fixture
+def flux_cap_jac_wrt_saturation(
+    tpfa_array: np.ndarray, model: TwoPhaseFlow_with_source
+) -> np.ndarray:
+    """Jac of div of flux induced by cap. pressure w.r.t. saturation.
+
+    NOTE: Calculated without any mobilities.
+
+    """
+    A_1 = (
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
+    ) * tpfa_array
+    A_2 = (
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
+    ) * np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
+    return A_1 - A_2
+
+
+def test_flux_cap_pressure(
+    model: TwoPhaseFlow_with_source,
+    flux_cap_jac_wrt_saturation: np.ndarray,
+) -> None:
+    """Test the Jacobian w.r.t. saturation of the divergence of the capillary flux.
+
+    NOTE: We ignore mobility for this test.
+
+    """
+    subdomains = model.mdg.subdomains()
+    cap_flux_tpfa = pp.ad.TpfaAd(model.cap_flux_key, subdomains)
+    div = pp.ad.Divergence(subdomains)
+    div_flux_system = (div * cap_flux_tpfa.flux * model._cap_pressure()).evaluate(
+        model.equation_system
+    )
+    A, b = div_flux_system.jac, div_flux_system.val
+    assert np.allclose(A.todense()[:, -4:], flux_cap_jac_wrt_saturation)
+
+
 def test_vector_source(
     model: TwoPhaseFlow_with_source, flux_pressure_jac: np.ndarray
 ) -> None:
@@ -388,25 +454,45 @@ def flow_equation_val(
 def flow_equation_jac_wrt_pressure(
     tpfa_array: np.ndarray, mobility_t: np.ndarray
 ) -> np.ndarray:
-    """Jacobian of the flow equation w.r.t. to :math:`p_n` at t=0. Calculated by hand."""
+    """Jacobian of the flow equation w.r.t. to :math:`p_n` at t=0. Calculated by
+    hand."""
     # Total flow induced inside the domain. The total mobility is takem from one of the
     # inner interfaces (they are equal for all).
-    A_1 = tpfa_array * mobility_t[1]
+    A_1 = mobility_t[1] * tpfa_array
     # Total flow induced by the Dirichlet bc for the southern two cells. The total
     # mobility is takem from one of the two southern boundaries (they are equal for
     # both). We substract the total mobility of an inner interface, to not count the
     # flow twice (it is already included in ``A_1``).
-    A_2 = np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]) * (
-        mobility_t[6] - mobility_t[1]
+    A_2 = (mobility_t[6] - mobility_t[1]) * np.asarray(
+        [[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
     )
     return A_1 + A_2
 
 
 @pytest.fixture
-def flow_equation_jac_wrt_saturation() -> np.ndarray:
-    """Jacobian of the flow equation w.r.t. to :math:`S_w` at t=0. Calculated by hand."""
-    A = np.zeros((4, 4))
-    return A
+def flow_equation_jac_wrt_saturation(
+    tpfa_array: np.ndarray, mobility_w: np.ndarray, model: TwoPhaseFlow_with_source
+) -> np.ndarray:
+    """Jacobian of the flow equation w.r.t. to :math:`S_w` at t=0. Calculated by
+    hand."""
+    A_1 = (
+        -1
+        * mobility_w[1]
+        * (
+            model._cap_pressure_linear_param
+            / (1 - model._residual_saturation_w - model._residual_saturation_n)
+        )
+        * tpfa_array
+    )
+    A_2 = (
+        mobility_w[1]
+        * (
+            model._cap_pressure_linear_param
+            / (1 - model._residual_saturation_w - model._residual_saturation_n)
+        )
+        * np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
+    )
+    return A_1 + A_2
 
 
 def test_flow_equation(
@@ -443,40 +529,49 @@ def transport_equation_val(source_w: np.ndarray) -> np.ndarray:
 
 @pytest.fixture
 def transport_equation_jac_wrt_pressure(
-    tpfa_array: np.ndarray, mobility_t: np.ndarray, mobility_w: np.ndarray
+    tpfa_array: np.ndarray, mobility_w: np.ndarray
 ) -> np.ndarray:
     """Jacobian of the transport equation w.r.t. to :math:`p_n` at t=0. Calculated by
     hand."""
     # Total flow induced inside the domain. The fractional flow is takem from one of the
     # inner interfaces (they are equal for all).
-    A_1 = tpfa_array * (mobility_w[1] / mobility_t[1])
+    A_1 = mobility_w[1] * tpfa_array
     # Total flow induced by the Dirichlet bc for the southern two cells. The total
     # mobility is takem from one of the two southern boundaries (they are equal for
     # both). We substract the total mobility of an inner interface, to not count the
     # flow twice (it is already included in ``A_1``).
-    A_2 = np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]) * (
-        (mobility_w[6] / mobility_t[6]) - (mobility_w[1] / mobility_t[1])
+    A_2 = (mobility_w[6] - mobility_w[1]) * np.asarray(
+        [[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
     )
     return A_1 + A_2
 
 
 @pytest.fixture
 def transport_equation_jac_wrt_saturation(
-    tpfa_array: np.ndarray, mobility_t: np.ndarray, mobility_w: np.ndarray
+    tpfa_array: np.ndarray,
+    mobility_t: np.ndarray,
+    mobility_w: np.ndarray,
+    model: TwoPhaseFlow_with_source,
 ) -> np.ndarray:
     """Jacobian of the transport equation w.r.t. to :math:`S_w` at t=0. Calculated by
     hand."""
-    # Total flow induced inside the domain. The fractional flow is takem from one of the
-    # inner interfaces (they are equal for all).
-    A_1 = tpfa_array * (mobility_w[1] / mobility_t[1])
-    # Total flow induced by the Dirichlet bc for the southern two cells. The total
-    # mobility is takem from one of the two southern boundaries (they are equal for
-    # both). We substract the total mobility of an inner interface, to not count the
-    # flow twice (it is already included in ``A_1``).
-    A_2 = np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]) * (
-        (mobility_w[6] / mobility_t[6]) - (mobility_w[1] / mobility_t[1])
+    A_1 = (
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
+        * -1
+        * mobility_w[1]
+        * tpfa_array
     )
-    return A_1 + A_2
+    # The capillary pressure induces no flow at the southern boundary (homogeneous
+    # Neumann bc), hence we add the corresponding term again (TPFA calculates it).
+    A_2 = (
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
+        * mobility_w[1]
+        * np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
+    )
+    # NOTE: The domain's porosity is homogeneous and equals 1.
+    return (1.0 / model._time_step) * np.eye(A_1.shape[0]) + (A_1 + A_2)
 
 
 def test_transport_equation(
@@ -490,8 +585,10 @@ def test_transport_equation(
         equations=["Transport equation"], variables=[model.primary_pressure_var]
     )
     assert np.allclose(A.todense(), transport_equation_jac_wrt_pressure)
-    A, _ = model.equation_system.assemble_subsystem(
+    A, b = model.equation_system.assemble_subsystem(
         equations=["Transport equation"], variables=[model.saturation_var]
     )
-    # assert np.allclose(A.todense(), transport_equation_jac_wrt_saturation)
+    # Add some tolerance, as the model divides by :math:`\lambda_t + 1e-7`, but
+    # multiplies by :math:`\lambda_t`. We skip this step in the exact calculation.
+    assert np.allclose(A.todense(), transport_equation_jac_wrt_saturation, atol=1e-5)
     assert np.allclose(b, -flow_equation_val)
