@@ -40,14 +40,12 @@ Units:
 from __future__ import annotations
 
 import logging
-import os
 import time
 from functools import partial
 from typing import Optional, Literal
 
 import numpy as np
 import porepy as pp
-import scipy.sparse as sps
 
 from src.tpf_lab.numerics.ad.functions import pow, minimum
 
@@ -764,8 +762,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
                     * mobility_n
                     * (
                         cap_flux_mpfa.flux * p_cap
-                        + flux_mpfa_w.vector_source * vector_source_w
-                        - flux_mpfa_n.vector_source * vector_source_n
+                        - flux_mpfa_w.vector_source * vector_source_w
+                        + flux_mpfa_n.vector_source * vector_source_n
                     )
                 )
                 - source_ad_w
@@ -896,8 +894,8 @@ class TwoPhaseFlow(pp.models.abstract_model.AbstractModel):
         total_flux = (
             mobility_t * flux_n
             - mobility_w * flux_p_cap
-            - mobility_w * flux_buoyancy_w
-            - mobility_n * flux_buoyancy_n
+            + mobility_w * flux_buoyancy_w
+            + mobility_n * flux_buoyancy_n
         )
         total_flux.set_name("Total volume flux")
         return total_flux

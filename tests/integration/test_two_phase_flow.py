@@ -24,8 +24,7 @@ at the top, right and left and homogeneous Dirichlet bc (i.e. :math:`p=0,\lambda
 at the bottom. As initial conditions, the pressure is set to :math:`p=0` and the
 saturation to :math:`S=0.5` on the entire grid.
 
-See the ``two_phase_flow_calculations.md`` and the ``two_phase_flow_setup.png`` files
-for more details.
+See the ``model_integration_test.md`` file for more details.
 
 NOTE: As of now, everything is tested without gravity.
 
@@ -37,11 +36,18 @@ Thus, we need to always multiply the residual by -1.
 """
 
 
+from functools import partial
+
 import numpy as np
 import porepy as pp
 import pytest
+import scipy.sparse as sps
+from porepy.models.run_models import run_time_dependent_model
+from porepy.numerics.ad.forward_mode import Ad_array
 
 from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.numerics.ad import functions as af
+from src.tpf_lab.numerics.ad.functions import pow
 
 
 class TwoPhaseFlow_with_source(TwoPhaseFlow):
