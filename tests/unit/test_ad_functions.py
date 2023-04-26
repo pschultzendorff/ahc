@@ -1,16 +1,14 @@
 import numpy as np
 import pytest
 import scipy.sparse as sps
-from porepy.numerics.ad.forward_mode import Ad_array
+from porepy.numerics.ad.forward_mode import AdArray
 
-from src.tpf_lab.numerics.ad import functions as af
+from src.tpflab.numerics.ad import functions as af
 
 
 # Function: pow
 def test_pow_scalar():
-    # NOTE: Calling ``Ad_array`` with two ints is depracated (although it still works
-    # here).
-    a = Ad_array(3, 0)
+    a = AdArray(np.array([3]), np.array([[0]]))
     assert a.val == 3 and a.jac == 0
 
     # Positive exponent
@@ -27,7 +25,7 @@ def test_pow_scalar():
 
 
 def test_pow_advar():
-    a = Ad_array(2, 3)
+    a = AdArray(np.array([2]), np.array([[3]]))
     assert a.val == 2 and a.jac == 3
 
     # Positive exponent
@@ -49,7 +47,7 @@ def test_pow_advar():
 def test_pow_vector():
     val = np.array([1, 2, 3])
     J = np.array([[3, 2, 1], [5, 6, 1], [2, 3, 5]])
-    a = Ad_array(val, sps.csc_matrix(J))
+    a = AdArray(val, sps.csc_matrix(J))
     assert np.all(J == np.array([[3, 2, 1], [5, 6, 1], [2, 3, 5]]))
 
     # Positive exponent
@@ -73,7 +71,7 @@ def test_pow_vector():
 def test_pow_sparse_jac():
     val = np.array([1, 2, 3])
     J = sps.csc_matrix(np.array([[3, 2, 1], [5, 6, 1], [2, 3, 5]]))
-    a = Ad_array(val, J)
+    a = AdArray(val, J)
 
     # Positive exponent
     b = af.pow(a, 3)
@@ -95,7 +93,7 @@ def test_pow_scalar_times_ad_var():
     # Why use ``jac.A`` and ``np.allclose`` here?
     val = np.array([1, 2, 3])
     J = sps.diags(np.array([1, 1, 1]))
-    a = Ad_array(val, J)
+    a = AdArray(val, J)
     c = 2
     assert np.all(a.val == [1, 2, 3]) and np.all(a.jac.A == J.A)
 
@@ -119,9 +117,9 @@ def test_pow_scalar_times_ad_var():
     assert np.all(b.val == 1 / np.power(c * val, 3)) and np.allclose(b.jac.A, jac.A)
 
 
-def test_minimum_Ad_array_scalar():
-    """Test ``minimum`` for inputs of type ``Ad_array`` and ``int``/``float``."""
-    a = Ad_array(np.array([3]), sps.csr_matrix([[3]]))
+def test_minimum_AdArray_scalar():
+    """Test ``minimum`` for inputs of type ``AdArray`` and ``int``/``float``."""
+    a = AdArray(np.array([3]), sps.csr_matrix([[3]]))
 
     # Second scalar is minimum.
     # As ``np.ndarray([0])`` does not have a jacobian, it's jacobian is set to zero.
@@ -154,11 +152,11 @@ def test_minimum_ndarray_ndarray():
     assert np.all(c == np.minimum(a, b))
 
 
-def test_minimum_Ad_array_ndarray():
-    """Test ``minimum`` for inputs of type ``Ad_array`` and ``np.ndarray``."""
+def test_minimum_AdArray_ndarray():
+    """Test ``minimum`` for inputs of type ``AdArray`` and ``np.ndarray``."""
     val_a = np.array([1, 2, 3])
     J_a = np.array([[3, 2, 1], [5, 6, 1], [2, 3, 5]])
-    a = Ad_array(val_a, sps.csc_matrix(J_a))
+    a = AdArray(val_a, sps.csc_matrix(J_a))
 
     b = np.array([3, 2, 1])
     # As ``np.ndarray`` does not have a jacobian, it's jacobian is set to zero.
@@ -171,15 +169,15 @@ def test_minimum_Ad_array_ndarray():
     assert np.all(c.jac.todense() == jac)
 
 
-def test_minimum_Ad_array_Ad_array():
-    """Test ``minimum`` for inputs of type ``Ad_array`` and ``Ad_array``."""
+def test_minimum_AdArray_AdArray():
+    """Test ``minimum`` for inputs of type ``AdArray`` and ``AdArray``."""
     val_a = np.array([1, 2, 3])
     J_a = np.array([[3, 2, 1], [5, 6, 1], [2, 3, 5]])
-    a = Ad_array(val_a, sps.csc_matrix(J_a))
+    a = AdArray(val_a, sps.csc_matrix(J_a))
 
     val_b = np.array([3, 2, 1])
     J_b = np.array([[1, 0, -1], [7, 8, 9], [1, 2, 3]])
-    b = Ad_array(val_b, sps.csc_matrix(J_b))
+    b = AdArray(val_b, sps.csc_matrix(J_b))
 
     # The jacobian of the minimum corresponds to the rows of the inputs, depending on
     # which is the pointwise minimum. If both values are equal at a point, the row of

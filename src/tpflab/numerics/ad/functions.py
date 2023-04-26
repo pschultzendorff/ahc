@@ -12,7 +12,7 @@ in an ad Function using partial evaluation:
 with var being some ad variable.
 
 Note that while the argument to AdFunction is a pp.ad.Operator, the wrapping in
-pp.ad.Function implies that upon parsing, the argument passed to f will be an Ad_array.
+pp.ad.Function implies that upon parsing, the argument passed to f will be an AdArray.
 """
 from __future__ import annotations
 
@@ -21,16 +21,14 @@ from typing import Callable, Union
 import numpy as np
 import scipy.sparse as sps
 
-# import porepy_adaptions as pp
 import porepy as pp
-from porepy.numerics.ad.forward_mode import Ad_array
-from porepy.numerics.ad.functions import exp, maximum
+from porepy.numerics.ad.forward_mode import AdArray
 
-__all__ = ["pow"]
+__all__ = ["pow", "minimum"]
 
 
 def pow(var, exponent: float):
-    if isinstance(var, Ad_array):
+    if isinstance(var, AdArray):
         if exponent >= 0:
             val = np.power(var.val, exponent)
         else:
@@ -45,12 +43,12 @@ def pow(var, exponent: float):
                 casting="unsafe",
             )
         if exponent - 1 >= 0:
-            der = var.diagvec_mul_jac(exponent * np.power(var.val, exponent - 1))
+            der = var._diagvec_mul_jac(exponent * np.power(var.val, exponent - 1))
         else:
             # Calculate the power expression explicitely with dtype=np.float64 to avoid
             # integer division (which can result in integer results).
             power = np.power(var.val, 1 - exponent, dtype=np.float64)
-            der = var.diagvec_mul_jac(
+            der = var._diagvec_mul_jac(
                 np.divide(
                     exponent,
                     power,
@@ -59,7 +57,7 @@ def pow(var, exponent: float):
                     casting="unsafe",
                 )
             )
-        return Ad_array(val, der)
+        return AdArray(val, der)
     else:
         if exponent >= 0:
             return np.power(var, exponent)
@@ -74,9 +72,7 @@ def pow(var, exponent: float):
             )
 
 
-def minimum(
-    var_0: pp.ad.Ad_array, var_1: pp.ad.Ad_array | np.ndarray
-) -> pp.ad.Ad_array:
+def minimum(var_0: AdArray, var_1: AdArray | np.ndarray) -> AdArray:
     """Ad minimum function represented as an ``AdArray``.
 
     The arguments can be either ``AdArrays`` or ``ndarrays``, this duality is needed to
@@ -103,7 +99,7 @@ def minimum(
 
     """
     # If neither var_0 or var_1 are ``AdArrays``, return the ``np.minimum`` function.
-    if not isinstance(var_0, Ad_array) and not isinstance(var_1, Ad_array):
+    if not isinstance(var_0, AdArray) and not isinstance(var_1, AdArray):
         # FIXME: According to the type hints, this should not be possible.
         return np.minimum(var_0, var_1)
 
@@ -112,16 +108,16 @@ def minimum(
     # above parsing of ``np.ndarrays``. Keep it for now, but we should revisit once we
     # know clearer how the Ad-machinery should be used.
     zero_jac = 0
-    if isinstance(var_0, Ad_array):
+    if isinstance(var_0, AdArray):
         zero_jac = sps.csr_matrix(var_0.jac.shape)
-    elif isinstance(var_1, Ad_array):
+    elif isinstance(var_1, AdArray):
         zero_jac = sps.csr_matrix(var_1.jac.shape)
 
     # Collect values and Jacobians.
     vals = []
     jacs = []
     for var in [var_0, var_1]:
-        if isinstance(var, Ad_array):
+        if isinstance(var, AdArray):
             v = var.val
             j = var.jac
         else:
@@ -136,7 +132,7 @@ def minimum(
             # Both var_0 and var_1 are scalars. Treat vals as an ``ndarray`` to
             # return the minimum. The Jacobian of a scalar is 0.
             val = np.min(vals)
-            return pp.ad.Ad_array(val, 0)
+            return AdArray(val, 0)
         else:
             # ``var_0`` is a scalar, but ``var_1`` is not. Broadcast to shape of
             # ``var_1``.
@@ -162,7 +158,7 @@ def minimum(
     if isinstance(jacs[0], (float, int)):
         assert np.isclose(jacs[0], 0)
         assert np.isclose(jacs[1], 0)
-        return pp.ad.Ad_array(min_val, 0)
+        return AdArray(min_val, 0)
 
     # Start from ``var_0``, then change entries corresponding to inds.
     min_jac = jacs[0].copy()
@@ -176,7 +172,7 @@ def minimum(
     else:
         min_jac[inds] = jacs[1][inds]
 
-    return pp.ad.Ad_array(min_val, min_jac)
+    return AdArray(min_val, min_jac)
 
 
 def bump_function(var, r_1: float, r_2: float):
@@ -196,7 +192,7 @@ def bump_function(var, r_1: float, r_2: float):
         r_2: _description_
 
     """
-    if isinstance(var, Ad_array):
+    if isinstance(var, AdArray):
         # Restrict the var to 1.
         # TODO restrict the var to 0 from below.
         # restrict_var = maximum(var, 1)

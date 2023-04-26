@@ -11,7 +11,7 @@ import logging
 
 import numpy as np
 
-from src.tpf_lab.utils import is_notebook
+from src.tpflab.utils import is_notebook
 
 if is_notebook():
     import tqdm.notebook as tqdm
@@ -47,7 +47,7 @@ class NewtonSolver:
             prev_sol = model.dof_manager.assemble_variable(from_iterate=False)
         else:
             # Old with ad or new.
-            prev_sol = model.equation_system.get_variable_values(from_iterate=False)
+            prev_sol = model.equation_system.get_variable_values(time_step_index=0)
 
         init_sol = prev_sol
         errors = []

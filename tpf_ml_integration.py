@@ -7,10 +7,10 @@ import torch
 import numpy as np
 
 import porepy as pp
-from src.tpf_lab.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
-from src.tpf_lab.ml.pp_nn import BaseNN
-from src.tpf_lab.ml.ml_ad import nn_wrapper
+from src.tpflab.models.run_models import run_time_dependent_model
+from src.tpflab.models.two_phase_flow import TwoPhaseFlow
+from tpflab.ml.nn import BaseNN
+from tpflab.ml.nn_ad import nn_wrapper
 
 
 # class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):

@@ -100,6 +100,8 @@ class RelPermW_BrooksCorey(nn.Module):
 
     Default values correspond to the Brooks-Corey-Burdine model.
 
+    The return values are limited above and below.
+
     """
 
     def __init__(self, params: Optional[dict] = None) -> None:  #
@@ -118,7 +120,10 @@ class RelPermW_BrooksCorey(nn.Module):
         S_w_normalized = (S_w - self._residual_saturation_w) / (
             1 - self._residual_saturation_w - self._residual_saturation_n
         )
-        return S_w_normalized ** (self.n_1 + self.n_2 * self.n_3)
+        out = S_w_normalized ** (self.n_1 + self.n_2 * self.n_3)  #
+        out = torch.where(out > 0.99, 0.99, out)
+        out = torch.where(out < 0.01, 0.01, out)
+        return out
 
 
 class RelPermN_BrooksCorey(nn.Module):
@@ -126,6 +131,8 @@ class RelPermN_BrooksCorey(nn.Module):
 
     Default values correspond to the Brooks-Corey-Burdine model.
 
+    The return values are limited above and below.
+
     """
 
     def __init__(self, params: Optional[dict] = None) -> None:  #
@@ -144,7 +151,12 @@ class RelPermN_BrooksCorey(nn.Module):
         S_w_normalized = (S_w - self._residual_saturation_w) / (
             1 - self._residual_saturation_w - self._residual_saturation_n
         )
-        return S_w_normalized ** (self.n_1 + self.n_2 * self.n_3)
+        out = ((1 - S_w_normalized) ** self.n_1) * (
+            (1 - S_w_normalized**self.n_2) ** self.n_3
+        )
+        out = torch.where(out > 0.99, 0.99, out)
+        out = torch.where(out < 0.01, 0.01, out)
+        return out
 
 
 def power_w(S_w: torch.Tensor) -> torch.Tensor:

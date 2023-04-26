@@ -8,7 +8,7 @@ import numpy as np
 
 import porepy as pp
 from porepy.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpflab.models.two_phase_flow import TwoPhaseFlow
 
 
 # Simple test run
@@ -78,14 +78,14 @@ model = TwoPhaseFlow_WSource_Dir(
         "folder_name": os.path.join("two_phase_flow_runs", "w_source_dir"),
     }
 )
-# run_time_dependent_model(
-#     model,
-#     {
-#         "max_iterations": 30,
-#         "nl_convergence_tol": 1e-5,
-#         "nl_divergence_tol": 1e5,
-#     },
-# )
+run_time_dependent_model(
+    model,
+    {
+        "max_iterations": 30,
+        "nl_convergence_tol": 1e-5,
+        "nl_divergence_tol": 1e5,
+    },
+)
 
 
 # Test run with non-wetting source
@@ -297,14 +297,14 @@ model = TwoPhaseFlow_Geom(
     }
 )
 model._schedule = [0, 100.0]
-run_time_dependent_model(
-    model,
-    {
-        "max_iterations": 30,
-        "nl_convergence_tol": 1e-4,
-        "nl_divergence_tol": 1e5,
-    },
-)
+# run_time_dependent_model(
+#     model,
+#     {
+#         "max_iterations": 30,
+#         "nl_convergence_tol": 1e-4,
+#         "nl_divergence_tol": 1e5,
+#     },
+# )
 
 
 # Test run on triangle grid

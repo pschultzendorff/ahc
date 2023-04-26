@@ -10,8 +10,8 @@ from typing import Union
 
 import porepy as pp
 
-from src.tpf_lab.numerics.nonlinear.nonlinear_solvers import NewtonSolver
-from src.tpf_lab.utils import is_notebook
+from src.tpflab.numerics.nonlinear.nonlinear_solvers import NewtonSolver
+from src.tpflab.utils import is_notebook
 
 if is_notebook():
     import tqdm.notebook as tqdm
