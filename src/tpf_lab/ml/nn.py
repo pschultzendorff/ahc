@@ -6,6 +6,8 @@ from typing import Optional
 
 
 class BaseNN(nn.Module):
+    """Base nn with one input and one output. Depth can be chosen."""
+
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__()
         if params is None:
@@ -15,14 +17,14 @@ class BaseNN(nn.Module):
         self.fcs = nn.ModuleList(
             [
                 nn.Linear(self._hidden_size, self._hidden_size)
-                for i in range(self._depth - 1)
+                for _ in range(self._depth - 1)
             ]
         )
         self.fcs.insert(0, nn.Linear(1, self._hidden_size))
         self.fcs.append(nn.Linear(self._hidden_size, 1))
-        # Use sigmoid for the final layer, to enforce :math:`0\leq S_w\leq1`.
         self.act1 = nn.Sigmoid()
-        if params.get("act", "sigmoid") == "linear":
+        # Use sigmoid for the final layer, to enforce :math:`0\leq S_w\leq1`.
+        if params.get("final_act", "sigmoid") == "linear":
             self.act2: nn.Identity | nn.Sigmoid = nn.Identity()
         else:
             self.act2 = nn.Sigmoid()
