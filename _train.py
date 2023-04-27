@@ -9,10 +9,10 @@ import tqdm
 from torch.utils.data import DataLoader
 
 
-from tpflab.ml.nn import BaseNN
+from tpf_lab.ml.nn import BaseNN
 
 
-from tpflab.ml.datasets import (
+from tpf_lab.ml.datasets import (
     DatasetWithNoise,
     IterableDatasetWithNoise,
     RelPermW_BrooksCorey,

@@ -9,13 +9,13 @@ import torch.optim as optim
 import tqdm
 from torch.utils.data import DataLoader
 
-from tpflab.ml.nn import BaseNN
-from tpflab.ml.datasets import (
+from tpf_lab.ml.nn import BaseNN
+from tpf_lab.ml.datasets import (
     DatasetWithNoise,
     RelPermW_BrooksCorey,
     RelPermN_BrooksCorey,
 )
-from src.tpflab.ml.train import train
+from src.tpf_lab.ml.train import train
 
 # Direct input
 plt.rcParams["text.latex.preamble"] = r"\usepackage{lmodern}"

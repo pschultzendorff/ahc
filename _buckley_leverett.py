@@ -9,9 +9,9 @@ from typing import Any
 import numpy as np
 import porepy as pp
 
-from src.tpflab.models.run_models import run_time_dependent_model
-from src.tpflab.models.two_phase_flow import TwoPhaseFlow
-from src.tpflab.utils import logging_redirect_tqdm, rm_out_padding
+from src.tpf_lab.models.run_models import run_time_dependent_model
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.utils import logging_redirect_tqdm, rm_out_padding
 
 # Angle of the tube.
 ANGLE: float = math.pi / 4
@@ -35,7 +35,7 @@ class BuckleyLeverett(TwoPhaseFlow):
         self.domain = pp.Domain(
             bounding_box={
                 "xmin": 0,
-                "xmax": -10 + phys_dims[0],
+                "xmax": phys_dims[0],
                 "ymin": 0,
                 "ymax": 0,
             }
@@ -50,7 +50,7 @@ class BuckleyLeverett(TwoPhaseFlow):
             vals[-1] = - pp.GRAVITY_ACCELERATION * self._w_density
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
-        vals[0] = pp.GRAVITY_ACCELERATION * math.cos(ANGLE) * self._density_w._value
+        vals[0] = pp.GRAVITY_ACCELERATION * math.cos(ANGLE) * self._density_w
         return vals.ravel()
 
     def _vector_source_n(self, g: pp.Grid) -> np.ndarray:
@@ -64,7 +64,7 @@ class BuckleyLeverett(TwoPhaseFlow):
             vals[-1] = - pp.GRAVITY_ACCELERATION * self._n_density
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
-        vals[0] = pp.GRAVITY_ACCELERATION * math.cos(ANGLE) * self._density_n._value
+        vals[0] = pp.GRAVITY_ACCELERATION * math.cos(ANGLE) * self._density_n
         return vals.ravel()
 
     def _bc_type_pressure_w(self, g: pp.Grid) -> pp.BoundaryCondition:
@@ -108,25 +108,10 @@ class BuckleyLeverett(TwoPhaseFlow):
         array = np.zeros(g.num_faces)
         return array
 
-    def _source_w(self, g: pp.Grid) -> np.ndarray:
-        """Volumetric wetting source.
-
-        In the default model there is no source term.
-
-        SI Units: m^d/s
-        """
-        array = np.zeros(g.num_cells)
-        array[500] = 1.0
-        return array
-
     def _initial_condition(self) -> None:
         super()._initial_condition()
-        initial_saturation = np.full(
-            self._grid_size, 1 - self._residual_saturation_n._value
-        )
-        initial_saturation[
-            : int(self._grid_size / 2)
-        ] = self._residual_saturation_w._value
+        initial_saturation = np.full(self._grid_size, 1 - self._residual_saturation_n)
+        initial_saturation[: int(self._grid_size / 2)] = self._residual_saturation_w
         self.equation_system.set_variable_values(
             initial_saturation,
             [self._ad.saturation],

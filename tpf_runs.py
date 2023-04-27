@@ -8,7 +8,7 @@ import numpy as np
 
 import porepy as pp
 from porepy.models.run_models import run_time_dependent_model
-from src.tpflab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
 
 
 # Simple test run

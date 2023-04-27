@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 
-from src.tpflab.models.run_models import run_time_dependent_model
-from src.tpflab.models.two_phase_flow import TwoPhaseFlow
-from src.tpflab.utils import logging_redirect_tqdm
+from src.tpf_lab.models.run_models import run_time_dependent_model
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.utils import logging_redirect_tqdm
 
 w_source_cell_index = 209
 

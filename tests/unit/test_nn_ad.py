@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from porepy.numerics.ad.forward_mode import AdArray
 
-from src.tpflab.ml.nn_ad import nn_wrapper
+from src.tpf_lab.ml.nn_ad import nn_wrapper
 
 
 class NN_Linear(nn.Module):

@@ -47,8 +47,8 @@ from typing import Optional, Literal
 import numpy as np
 import porepy as pp
 
-from src.tpflab.models.abstract_model import AbstractModel
-from src.tpflab.numerics.ad.functions import pow, minimum
+from src.tpf_lab.models.abstract_model import AbstractModel
+from src.tpf_lab.numerics.ad.functions import pow, minimum
 
 # from pythonjsonlogger import jsonlogger
 

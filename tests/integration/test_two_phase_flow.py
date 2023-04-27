@@ -44,9 +44,9 @@ import pytest
 import scipy.sparse as sps
 from porepy.numerics.ad.forward_mode import AdArray
 
-from src.tpflab.models.two_phase_flow import TwoPhaseFlow
-from src.tpflab.numerics.ad import functions as af
-from src.tpflab.numerics.ad.functions import pow
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.numerics.ad import functions as af
+from src.tpf_lab.numerics.ad.functions import pow
 
 
 class TwoPhaseFlow_with_source(TwoPhaseFlow):
