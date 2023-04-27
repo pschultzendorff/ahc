@@ -112,8 +112,8 @@ def saturation_w_init() -> np.ndarray:
 def normalized_saturation_w_init(
     saturation_w_init: np.ndarray, model: TwoPhaseFlow_with_source
 ) -> np.ndarray:
-    return (saturation_w_init - model._residual_saturation_w._value) / (
-        1 - model._residual_saturation_w._value - model._residual_saturation_n._value
+    return (saturation_w_init - model._residual_saturation_w) / (
+        1 - model._residual_saturation_w - model._residual_saturation_n
     )
 
 
@@ -126,7 +126,7 @@ def pressure_w_init() -> np.ndarray:
 def s_normalized_jac(saturation_w_init, model: TwoPhaseFlow_with_source) -> np.ndarray:
     """Normalized saturation Jacobian w.r.t. saturation."""
     A = np.eye(saturation_w_init.shape[0]) / (
-        1 - model._residual_saturation_w._value - model._residual_saturation_n._value
+        1 - model._residual_saturation_w - model._residual_saturation_n
     )
     return A
 
@@ -146,7 +146,7 @@ def cap_pressure_val(
     normalized_saturation_w_init: np.ndarray, model: TwoPhaseFlow_with_source
 ) -> np.ndarray:
     """Linear cap. pressure model residual."""
-    return normalized_saturation_w_init * model._cap_pressure_linear_param._value
+    return normalized_saturation_w_init * model._cap_pressure_linear_param
 
 
 @pytest.fixture
@@ -156,12 +156,8 @@ def cap_pressure_jac(
     """Linear cap. pressure model Jacobian."""
     A_wrt_saturation = (
         np.eye(saturation_w_init.shape[0])
-        / (
-            1
-            - model._residual_saturation_w._value
-            - model._residual_saturation_n._value
-        )
-        * model._cap_pressure_linear_param._value
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
+        * model._cap_pressure_linear_param
     )
     # Add zero Jacobians for both pressure variables
     A = np.concatenate(
@@ -241,7 +237,7 @@ def mobility_t(
             9,
         ]
     ] = (
-        rel_perm_w / model._viscosity_w._value + rel_perm_n / model._viscosity_n._value
+        rel_perm_w / model._viscosity_w + rel_perm_n / model._viscosity_n
     )
     # The :math:`\epsilon=1e-7` is added in the model to prevent division by zero, hence
     # we add it here as well.
@@ -283,7 +279,7 @@ def mobility_w(model: TwoPhaseFlow_with_source, rel_perm_w: np.ndarray) -> np.nd
             9,
         ]
     ] = (
-        rel_perm_w / model._viscosity_w._value
+        rel_perm_w / model._viscosity_w
     )
 
     return mobility_w
@@ -322,7 +318,7 @@ def mobility_n(model: TwoPhaseFlow_with_source, rel_perm_n: np.ndarray) -> np.nd
             9,
         ]
     ] = (
-        rel_perm_n / model._viscosity_n._value
+        rel_perm_n / model._viscosity_n
     )
     return mobility_n
 
@@ -403,20 +399,12 @@ def flux_cap_jac_wrt_saturation(
 
     """
     A_1 = (
-        model._cap_pressure_linear_param._value
-        / (
-            1
-            - model._residual_saturation_w._value
-            - model._residual_saturation_n._value
-        )
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
     ) * tpfa_array
     A_2 = (
-        model._cap_pressure_linear_param._value
-        / (
-            1
-            - model._residual_saturation_w._value
-            - model._residual_saturation_n._value
-        )
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
     ) * np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
     return A_1 - A_2
 
@@ -481,24 +469,16 @@ def flow_equation_jac_wrt_saturation(
         -1
         * mobility_w[1]
         * (
-            model._cap_pressure_linear_param._value
-            / (
-                1
-                - model._residual_saturation_w._value
-                - model._residual_saturation_n._value
-            )
+            model._cap_pressure_linear_param
+            / (1 - model._residual_saturation_w - model._residual_saturation_n)
         )
         * tpfa_array
     )
     A_2 = (
         mobility_w[1]
         * (
-            model._cap_pressure_linear_param._value
-            / (
-                1
-                - model._residual_saturation_w._value
-                - model._residual_saturation_n._value
-            )
+            model._cap_pressure_linear_param
+            / (1 - model._residual_saturation_w - model._residual_saturation_n)
         )
         * np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
     )
@@ -563,12 +543,8 @@ def transport_equation_jac_wrt_saturation(
     """Jacobian of the transport equation w.r.t. to :math:`S_w` at t=0. Calculated by
     hand."""
     A_1 = (
-        model._cap_pressure_linear_param._value
-        / (
-            1
-            - model._residual_saturation_w._value
-            - model._residual_saturation_n._value
-        )
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
         * -1
         * mobility_w[1]
         * tpfa_array
@@ -576,12 +552,8 @@ def transport_equation_jac_wrt_saturation(
     # The capillary pressure induces no flow at the southern boundary (homogeneous
     # Neumann bc), hence we add the corresponding term again (TPFA calculates it).
     A_2 = (
-        model._cap_pressure_linear_param._value
-        / (
-            1
-            - model._residual_saturation_w._value
-            - model._residual_saturation_n._value
-        )
+        model._cap_pressure_linear_param
+        / (1 - model._residual_saturation_w - model._residual_saturation_n)
         * mobility_w[1]
         * np.asarray([[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]])
     )

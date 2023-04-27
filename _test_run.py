@@ -56,9 +56,9 @@ model = ModifiedModel(params)
 
 model._grid_size = 20
 model._phys_size = 2
-model._cap_pressure_model = cap_pressure_model
 model._time_step = 0.1
 model._schedule = np.array([0, 120.0])
+model._cap_pressure_model = cap_pressure_model
 model.prepare_simulation()
 with logging_redirect_tqdm([logger]):
     run_time_dependent_model(

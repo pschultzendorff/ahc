@@ -159,34 +159,31 @@ class TwoPhaseFlow(AbstractModel):
         self._schedule: np.ndarray = np.array([0, 20.0])
 
         # Phase parameters:
-        self._viscosity_w: pp.ad.Scalar = pp.ad.Scalar(params.get("viscosity_w", 1.0))
+        self._viscosity_w: float = params.get("viscosity_w", 1.0)
         """Wetting fluid viscosity.
 
         SI Units: kg/(m*s)
         """
-        self._viscosity_n: pp.ad.Scalar = pp.ad.Scalar(params.get("viscosity_n", 1.0))
+        self._viscosity_n: float = params.get("viscosity_n", 1.0)
         """Nonetting fluid viscosity.
 
         SI Units: kg/(m*s)
         """
-        self._density_w: pp.ad.Scalar = pp.ad.Scalar(params.get("density_w", 0.0))
+        self._density_w: float = params.get("density_w", 0.0)
         """Wetting fluid density.
 
         SI Units: kg/m^3
         """
-        self._density_n: pp.ad.Scalar = pp.ad.Scalar(params.get("density_n", 0.0))
+        self._density_n: float = params.get("density_n", 0.0)
         """Nonetting fluid density.
 
         SI Units: kg/m^3
         """
 
         # Residual saturations:
-        self._residual_saturation_w: pp.ad.Scalar = pp.ad.Scalar(
-            params.get("residual_saturation_w", 0.3)
-        )
-        self._residual_saturation_n: pp.ad.Scalar = pp.ad.Scalar(
-            params.get("residual_saturation_n", 0.3)
-        )
+        self._residual_saturation_w: float = params.get("residual_saturation_w", 0.3)
+
+        self._residual_saturation_n: float = params.get("residual_saturation_n", 0.3)
 
         # Model selection and parameters for the capillary pressure function:
         self._cap_pressure_model: Literal[
@@ -195,28 +192,28 @@ class TwoPhaseFlow(AbstractModel):
         # van Genuchten model
         self._n_g: float = 2.0
         self._m_g: float = 2 / 3
-        self._beta_g: pp.ad.Scalar = pp.ad.Scalar(params.get("beta_g", 1.0))
+        self._beta_g: float = params.get("beta_g", 1.0)
         # Brooks-Corey model
         self._entry_pressure: float = 0.1
         self._n_b: int = 1
         # linear model
-        self._cap_pressure_linear_param: pp.ad.Scalar = pp.ad.Scalar(
-            params.get("_cap_pressure_linear_param", 0.1)
+        self._cap_pressure_linear_param: float = params.get(
+            "_cap_pressure_linear_param", 0.1
         )
+
         # NOTE: Using the default values, the linear model and the Brooks-Corey model
         # are identical.
 
         # Model selection and parameters for the relative permeability function:
-        self._rel_perm_model: str = "Brooks-Corey"
+        self._rel_perm_model: Literal["Brooks-Corey", "Corey"] = "Brooks-Corey"
         # Brooks-Corey model
         self._n1: int = 2
         self._n2: int = int(1 + 2 / self._n_b)
         self._n3: int = 1
         # Power law (Corey model)
         self._rel_perm_power: int = 3
-        self._rel_perm_linear_param: pp.ad.Scalar = pp.ad.Scalar(
-            params.get("rel_perm_linear_param", 0.1)
-        )
+        self._rel_perm_linear_param: float = params.get("rel_perm_linear_param", 1.0)
+
         # Lower and upper limits for the rel.perm
         # If the ``limit_rel_perm`` parameter is set to ``False``, these values are
         # ignored.
@@ -227,9 +224,9 @@ class TwoPhaseFlow(AbstractModel):
         self._rel_perm_n_min: float = 0.01
 
         # Parameters for the error function derivative:
-        self._yscale: pp.ad.Scalar = pp.ad.Scalar(params.get("yscale", 1.0))
-        self._xscale: pp.ad.Scalar = pp.ad.Scalar(params.get("xscale", 200))
-        self._offset: pp.ad.Scalar = pp.ad.Scalar(params.get("offset", 0.5))
+        self._yscale: float = params.get("yscale", 1.0)
+        self._xscale: float = params.get("xscale", 200)
+        self._offset: float = params.get("offset", 0.5)
 
         # Grid size:
         self._grid_size: int = 20
@@ -321,23 +318,25 @@ class TwoPhaseFlow(AbstractModel):
         """
         return pp.BoundaryCondition(g)
 
-    def _bc_values_pressure(self, g: pp.Grid) -> pp.ad.DenseArray:
+    def _bc_values_pressure_w(self, g: pp.Grid) -> np.ndarray:
         """Homogeneous boundary values. Dirichlet pressure equals the initial state
-        pressure.
-
-        For now, the wetting and nonwetting flux have the same boundary values.
-
-        """
+        pressure."""
         array = np.zeros(g.num_faces)
-        return pp.ad.DenseArray(array)
+        return array
 
-    def _bc_values_cap_pressure(self, g: pp.Grid) -> pp.ad.DenseArray:
+    def _bc_values_pressure_n(self, g: pp.Grid) -> np.ndarray:
+        """Homogeneous boundary values. Dirichlet pressure equals the initial state
+        pressure."""
+        array = np.zeros(g.num_faces)
+        return array
+
+    def _bc_values_cap_pressure(self, g: pp.Grid) -> np.ndarray:
         """Homogeneous boundary values. Dirichlet pressure equals the initial state
         pressure"""
         array = np.zeros(g.num_faces)
-        return pp.ad.DenseArray(array)
+        return array
 
-    def _bc_values_mobility_t(self, g: pp.Grid) -> pp.ad.DenseArray:
+    def _bc_values_mobility_t(self, g: pp.Grid) -> np.ndarray:
         """Mobility at the Dirichlet boundary.
 
         The value is chosen by hand and equal to half of  the initial total mobility. As
@@ -349,7 +348,7 @@ class TwoPhaseFlow(AbstractModel):
 
         """
         array = np.full(g.num_faces, -0.25)
-        return pp.ad.DenseArray(array)
+        return array
 
     def _source_w(self, g: pp.Grid) -> np.ndarray:
         """Volumetric wetting source.
@@ -428,8 +427,10 @@ class TwoPhaseFlow(AbstractModel):
 
         """
         s = self._ad.saturation
-        s_normalized = (s - self._residual_saturation_w) / (
-            pp.ad.Scalar(1) - self._residual_saturation_n - self._residual_saturation_w
+        residual_saturation_w = pp.ad.Scalar(self._residual_saturation_w)
+        residual_saturation_n = pp.ad.Scalar(self._residual_saturation_n)
+        s_normalized = (s - residual_saturation_w) / (
+            pp.ad.Scalar(1) - residual_saturation_n - residual_saturation_w
         )
         return s_normalized
 
@@ -459,16 +460,19 @@ class TwoPhaseFlow(AbstractModel):
         """
         s_normalized = self._s_normalized()
         if self._cap_pressure_model == "Brooks-Corey":
+            entry_pressure = pp.ad.Scalar(self._entry_pressure)
             # Setup pp.ad.functions.pow
             pow_func = pp.ad.Function(partial(pow, exponent=self._n_b), "pow")
-            return pp.ad.Scalar(self._entry_pressure) * pow_func(s_normalized)
+            return entry_pressure * pow_func(s_normalized)
         elif self._cap_pressure_model == "linear":
-            return self._cap_pressure_linear_param * s_normalized
+            cap_pressure_linear_param = pp.ad.Scalar(self._cap_pressure_linear_param)
+            return cap_pressure_linear_param * s_normalized
         elif self._cap_pressure_model == "van Genuchten":
+            beta_g = pp.ad.Scalar(self._beta_g)
             # Setup pp.ad.functions.pow
             pow_func_1 = pp.ad.Function(partial(pow, exponent=self._m_g), "pow")
             pow_func_2 = pp.ad.Function(partial(pow, exponent=-self._n_g), "pow")
-            return pow_func_2(pow_func_1(s_normalized) - pp.ad.Scalar(1)) / self._beta_g
+            return pow_func_2(pow_func_1(s_normalized) - pp.ad.Scalar(1)) / beta_g
         else:
             # Return cap. pressure 0.
             return s_normalized * pp.ad.Scalar(0)
@@ -507,8 +511,9 @@ class TwoPhaseFlow(AbstractModel):
         s = self._ad.saturation
         s_normalized = self._s_normalized()
         if self._rel_perm_model == "Corey":
+            rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param)
             cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
-            rel_perm = cube_func(s)
+            rel_perm = cube_func(s) * rel_perm_linear_param
         elif self._rel_perm_model == "Brooks-Corey":
             power_func = pp.ad.Function(
                 partial(pow, exponent=self._n1 + self._n2 * self._n3), "power"
@@ -561,10 +566,11 @@ class TwoPhaseFlow(AbstractModel):
         s = self._ad.saturation
         s_normalized = self._s_normalized()
         if self._rel_perm_model == "Corey":
+            rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param)
             cube_func = pp.ad.Function(
                 partial(pow, exponent=self._rel_perm_power), "cube"
             )
-            rel_perm = cube_func(pp.ad.Scalar(1) - s) * self._rel_perm_linear_param
+            rel_perm = cube_func(pp.ad.Scalar(1) - s) * rel_perm_linear_param
         elif self._rel_perm_model == "Brooks-Corey":
             power_func1 = pp.ad.Function(partial(pow, exponent=self._n1), "power")
             power_func2 = pp.ad.Function(partial(pow, exponent=self._n2), "power")
@@ -644,7 +650,7 @@ class TwoPhaseFlow(AbstractModel):
                 {
                     "source_w": self._source_w(sd),
                     "bc": self._bc_type_pressure_w(sd),
-                    "bc_values": self._bc_values_pressure(sd),
+                    "bc_values": self._bc_values_pressure_w(sd),
                     "darcy_flux": np.ones(sd.num_faces),
                     "second_order_tensor": diffusivity,
                 },
@@ -657,7 +663,7 @@ class TwoPhaseFlow(AbstractModel):
                 {
                     "source_n": self._source_n(sd),
                     "bc": self._bc_type_pressure_n(sd),
-                    "bc_values": self._bc_values_pressure(sd),
+                    "bc_values": self._bc_values_pressure_n(sd),
                     "darcy_flux": np.ones(sd.num_faces),
                     "second_order_tensor": diffusivity,
                 },
@@ -744,7 +750,7 @@ class TwoPhaseFlow(AbstractModel):
 
         # Compute cap pressure and relative permeabilities.
         p_cap = self._cap_pressure()
-        p_cap_bc = self._bc_values_cap_pressure(subdomains[0])
+        p_cap_bc = pp.ad.DenseArray(self._bc_values_cap_pressure(subdomains[0]))
         mobility_w = self._mobility_w(subdomains=subdomains)
         mobility_n = self._mobility_n(subdomains=subdomains)
         mobility_t = self._mobility_t(subdomains=subdomains)
@@ -795,10 +801,11 @@ class TwoPhaseFlow(AbstractModel):
 
     def _mobility_w(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         # ! For now, bc for both mobilities are identical!
-        mobility_bc = self._bc_values_mobility_t(subdomains[0])
+        mobility_bc = pp.ad.DenseArray(self._bc_values_mobility_t(subdomains[0]))
+        viscosity_w = pp.ad.Scalar(self._viscosity_w)
         upwind_w = pp.ad.UpwindAd(self.w_flux_key, subdomains)
         mobility_w = (
-            upwind_w.upwind @ (self._rel_perm_w() / self._viscosity_w)
+            upwind_w.upwind @ (self._rel_perm_w() / viscosity_w)
             + upwind_w.bound_transport_dir @ mobility_bc
         )
         return mobility_w
@@ -806,9 +813,10 @@ class TwoPhaseFlow(AbstractModel):
     def _mobility_n(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         # ! For now, bc for both mobilities are identical!
         mobility_bc = self._bc_values_mobility_t(subdomains[0])
+        viscosity_n = pp.ad.Scalar(self._viscosity_w)
         upwind_n = pp.ad.UpwindAd(self.n_flux_key, subdomains)
         mobility_n = (
-            upwind_n.upwind @ (self._rel_perm_n() / self._viscosity_n)
+            upwind_n.upwind @ (self._rel_perm_n() / viscosity_n)
             + upwind_n.bound_transport_dir @ mobility_bc
         )
         return mobility_n
@@ -829,7 +837,7 @@ class TwoPhaseFlow(AbstractModel):
         SI Units: kg/s
         """
         p_w = self._ad.pressure_w
-        p_w_bc = self._bc_values_pressure(subdomains[0])
+        p_w_bc = pp.ad.DenseArray(self._bc_values_pressure_w(subdomains[0]))
         vector_source_w = pp.ad.DenseArray(self._vector_source_w(subdomains[0]))
         flux_mpfa = pp.ad.MpfaAd(
             self.w_flux_key,
@@ -851,7 +859,7 @@ class TwoPhaseFlow(AbstractModel):
         SI Units: kg/s
         """
         p_n = self._ad.pressure_n
-        p_n_bc = self._bc_values_pressure(subdomains[0])
+        p_n_bc = pp.ad.DenseArray(self._bc_values_pressure_n(subdomains[0]))
         vector_source_n = pp.ad.DenseArray(self._vector_source_n(subdomains[0]))
         flux_mpfa = pp.ad.MpfaAd(
             self.n_flux_key,
@@ -876,10 +884,10 @@ class TwoPhaseFlow(AbstractModel):
         """
         # Variables, parameters and bc.
         p_n = self._ad.pressure_n
-        p_bc = self._bc_values_pressure(subdomains[0])
-        p_cap_bc = self._bc_values_cap_pressure(subdomains[0])
-        vector_source_w = self._vector_source_w(subdomains[0])
-        vector_source_n = self._vector_source_n(subdomains[0])
+        p_bc_w = pp.ad.DenseArray(self._bc_values_pressure_w(subdomains[0]))
+        p_cap_bc = pp.ad.DenseArray(self._bc_values_cap_pressure(subdomains[0]))
+        vector_source_w = pp.ad.DenseArray(self._vector_source_w(subdomains[0]))
+        vector_source_n = pp.ad.DenseArray(self._vector_source_n(subdomains[0]))
         # Spatial discretization operators.
         flux_mpfa = pp.ad.MpfaAd(self.n_flux_key, subdomains)
         # NOTE: We use TPFA for discretization of the capillary flux.
@@ -890,7 +898,7 @@ class TwoPhaseFlow(AbstractModel):
         mobility_n = self._mobility_n(subdomains)
         mobility_t = self._mobility_t(subdomains)
         # Compute flux.
-        flux_n: pp.ad.Operator = flux_mpfa.flux @ p_n + flux_mpfa.bound_flux @ p_bc
+        flux_n: pp.ad.Operator = flux_mpfa.flux @ p_n + flux_mpfa.bound_flux @ p_bc_w
         flux_p_cap: pp.ad.Operator = (
             cap_flux_tpfa.flux @ p_cap + cap_flux_tpfa.bound_flux @ p_cap_bc
         )
@@ -1091,11 +1099,12 @@ class TwoPhaseFlow(AbstractModel):
         models.
 
         Returns:
-            Derivative of the error function in terms of :math:S_w.
+            Derivative of the error function in terms of :math:`S_w`.
         """
         s = self._ad.saturation
+        yscale = pp.ad.Scalar(self._yscale)
+        xscale = pp.ad.Scalar(self._xscale)
+        offset = pp.ad.Scalar(self._offset)
         exp_func = pp.ad.Function(pp.ad.functions.exp, "exp")
         square_func = pp.ad.Function(partial(pow, exponent=2), "square")
-        return self._yscale * exp_func(
-            pp.ad.Scalar(-1) * self._xscale * square_func(s - self._offset)
-        )
+        return yscale * exp_func(pp.ad.Scalar(-1) * xscale * square_func(s - offset))
