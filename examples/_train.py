@@ -19,13 +19,13 @@ from tpf_lab.ml.datasets import (
     RelPermN_BrooksCorey,
 )
 
-model = BaseNN()
-trainer = optim.Adam(model.parameters())
+model = RelPermW_BrooksCorey()
+model_nn = BaseNN()
+trainer = optim.Adam(model_nn.parameters())
 
-
-w_train_data: RelPermDataset = RelPermDataset(len=200)
+w_train_data: DatasetWithNoise = DatasetWithNoise(len=200, model="Brooks-Corey-W")
 w_train_dataloader: DataLoader = DataLoader(w_train_data, batch_size=64)
-nw_train_data: RelPermDataset = RelPermDataset(len=200, model="power_nw")
+nw_train_data: DatasetWithNoise = DatasetWithNoise(len=200, model="power_nw")
 nw_train_dataloader: DataLoader = DataLoader(nw_train_data, batch_size=64)
 
 # w_train_data: IterableRelPermDataset = IterableRelPermDataset()
@@ -42,8 +42,8 @@ nw_train_dataloader: DataLoader = DataLoader(nw_train_data, batch_size=64)
 # )
 
 x = torch.arange(0, 1, 0.01).unsqueeze(-1)
-truth = power(x)
-y = model(x)
+truth = model(x)
+y = model_nn(x)
 plt.plot(x.numpy(force=True), truth.numpy(force=True), label="Ground truth")
 plt.plot(x.numpy(force=True), y.numpy(force=True), label="NN")
 plt.legend()

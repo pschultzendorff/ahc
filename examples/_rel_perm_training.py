@@ -17,11 +17,10 @@ from tpf_lab.ml.datasets import (
 )
 from src.tpf_lab.ml.train import train
 
-# Direct input
-plt.rcParams["text.latex.preamble"] = r"\usepackage{lmodern}"
-# Options
+# LaTeX options
 plt.rcParams.update(
     {
+        "text.latex.preamble": r"\usepackage{lmodern}",
         "text.usetex": True,
         "font.size": 11,
         "font.family": "lmodern",
@@ -31,8 +30,8 @@ plt.rcParams.update(
 
 
 # Wetting
-brooks_corey_w = BrooksCoreyW()
-w_train_data = RelPermDatasetW(len=64)
+brooks_corey_w = RelPermW_BrooksCorey()
+w_train_data = DatasetWithNoise(len=1000, model="Brooks-Corey-W")
 w_train_dataloader = DataLoader(w_train_data, batch_size=64)
 
 model = BaseNN({"depth": 1, "act": "linear"})
