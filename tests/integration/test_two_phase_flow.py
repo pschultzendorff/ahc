@@ -19,6 +19,8 @@ The following parts of the equations are tested separately
     - flow/pressure equation
     - transport/saturation equation
 
+All of the tests are without gravity. The last two tests are repeated with gravity on.
+
 Everything is tested on a 2x2 grid. The boundary conditions are homogeneous Neumann bc
 at the top, right and left and homogeneous Dirichlet bc (i.e. :math:`p=0,\lambda_t=0.5`)
 at the bottom. As initial conditions, the pressure is set to :math:`p=0` and the
@@ -34,19 +36,11 @@ to denote its residual. ``PorePy`` provides them in the form :math:`A=J` and
 Thus, we need to always multiply the residual by -1.
 
 """
-
-
-from functools import partial
-
 import numpy as np
 import porepy as pp
 import pytest
-import scipy.sparse as sps
-from porepy.numerics.ad.forward_mode import AdArray
 
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
-from src.tpf_lab.numerics.ad import functions as af
-from src.tpf_lab.numerics.ad.functions import pow
+from tpf_lab.models.two_phase_flow import TwoPhaseFlow
 
 
 class TwoPhaseFlow_with_source(TwoPhaseFlow):
@@ -73,9 +67,40 @@ class TwoPhaseFlow_with_source(TwoPhaseFlow):
         return vals.ravel()
 
 
+class TwoPhaseFlow_with_source_and_gravity(TwoPhaseFlow_with_source):
+    def _vector_source_w(self, g: pp.Grid) -> np.ndarray:
+        """Vector volume source (gravity). Corresponds to the wetting buoyancy flow."""
+        vals = np.zeros((self.mdg.dim_max(), g.num_cells))
+        vals[:, -1] = pp.GRAVITY_ACCELERATION * self._density_w
+        return vals.ravel()
+
+    def _vector_source_n(self, g: pp.Grid) -> np.ndarray:
+        """Vector volume source (gravity). Corresponds to the nonwetting buoyancy
+        flow."""
+        vals = np.zeros((self.mdg.dim_max(), g.num_cells))
+        vals[:, -1] = pp.GRAVITY_ACCELERATION * self._density_n
+        return vals.ravel()
+
+
 @pytest.fixture(scope="module")
 def model() -> TwoPhaseFlow_with_source:
     model = TwoPhaseFlow_with_source({"formulation": "n_pressure_w_saturation"})
+    model._cap_pressure_model = "linear"
+    model._rel_perm_model = "Brooks-Corey"
+    model._limit_rel_perm = "False"
+    model._grid_size = 2
+    model._phys_size = 2
+    model.prepare_simulation()
+    model.before_newton_loop()
+    model.before_newton_iteration()
+    return model
+
+
+@pytest.fixture(scope="module")
+def model_with_gravity() -> TwoPhaseFlow_with_source:
+    model = TwoPhaseFlow_with_source_and_gravity()(
+        {"formulation": "n_pressure_w_saturation", "density_w": 1.0, "density_n": 2.0}
+    )
     model._cap_pressure_model = "linear"
     model._rel_perm_model = "Brooks-Corey"
     model._limit_rel_perm = "False"
@@ -99,7 +124,7 @@ def test_source(model: TwoPhaseFlow_with_source, source_w):
 
     """
     source_ad_t = pp.ad.DenseArray(model._source_t(model.mdg.subdomains()[0]))
-    source_system = source_ad_t.evaluate(model.equation_system)
+    source_system = source_ad_t.evaluate(model.equation_system_full)
     assert np.all(source_system == source_w)
 
 
@@ -137,7 +162,7 @@ def test_normalized_s(
 ) -> None:
     """The model uses the normalized saturation for the rel. perm. and cap. pressure
     functions. We check that its Jacobian is calculated correctly."""
-    s_normalized_system = model._s_normalized().evaluate(model.equation_system)
+    s_normalized_system = model._s_normalized().evaluate(model.equation_system_full)
     assert np.allclose(s_normalized_system.jac.todense()[:, -4:], s_normalized_jac)
 
 
@@ -183,7 +208,7 @@ def test_cap_pressure_function(
         model: _description_
 
     """
-    p_cap_system = model._cap_pressure().evaluate(model.equation_system)
+    p_cap_system = model._cap_pressure().evaluate(model.equation_system_full)
     A, b = p_cap_system.jac, p_cap_system.val
     assert np.allclose(b, cap_pressure_val)
     assert np.allclose(A.todense()[-4:], cap_pressure_jac)
@@ -222,11 +247,10 @@ def mobility_t(
 
     """
     domain = model.mdg.subdomains()[0]
-    # Neumann bc
-    mobility_t = np.zeros(domain.num_faces)
-    # Dirichlet bc. Applies at the bottom, i.e., interfaces 6 and 7. This equals double
-    # the fixed boundary value we set in ``_bc_values_mobility_t`` in the model. As the
-    # boundary condition is taken into account by both the wetting/nonwetting mobility.
+    # Homogeneous Neumann bc.
+    mobility_t = np.full(domain.num_faces, 0.0)
+    # Dirichlet bc. Applies at the bottom, i.e., interfaces 6 and 7.
+    # NOTE: When wetting outflow occurs, the mobility equals the one in the inside cell.
     mobility_t[6:8] = 0.5
     # Inside interfaces. Calculated based on the initial pressure :math:`S_0=0.5`.
     mobility_t[
@@ -251,7 +275,7 @@ def test_mobility_t(model: TwoPhaseFlow_with_source, mobility_t: np.ndarray) -> 
     # Set ``atol`` high s.t. the epsilon in the total mobility does not influence the
     # comparison.
     assert np.allclose(
-        model._mobility_t(subdomains).evaluate(model.equation_system).val,
+        model._mobility_t(subdomains).evaluate(model.equation_system_full).val,
         mobility_t,
     )
 
@@ -263,12 +287,15 @@ def mobility_w(model: TwoPhaseFlow_with_source, rel_perm_w: np.ndarray) -> np.nd
     We differentiate between inside interfaces, boundary interfaces with homogeneous
     Dirichlet bc and boundary interfaces with homogeneous Neumann bc.
 
+    Note that the value at the Dirichlet boundaries is scaled with the flux.
+    TODO: Find out why this makes sense!
+
     """
     domain = model.mdg.subdomains()[0]
-    # Neumann bc
-    mobility_w = np.zeros(domain.num_faces)
-    # Dirichlet bc. Applies at the bottom, i.e., interfaces 6 and 7. This equals the
-    # fixed boundary value we set in ``_bc_values_mobility_t`` in the model.
+    # Homogeneous Neumann bc.
+    mobility_w = np.full(domain.num_faces, 0.0)
+    # Dirichlet bc. Applies at the bottom, i.e., interfaces 6 and 7.
+    # NOTE: When wetting outflow occurs, the mobility equals the one in the inside cell.
     mobility_w[6:8] = 0.25
     # Inside interfaces. Calculated based on the initial pressure :math:`S_0=0.5`.
     mobility_w[
@@ -290,7 +317,7 @@ def test_mobility_w(model: TwoPhaseFlow_with_source, mobility_w: np.ndarray) -> 
     hand."""
     subdomains = model.mdg.subdomains()
     assert np.allclose(
-        model._mobility_w(subdomains).evaluate(model.equation_system).val,
+        model._mobility_w(subdomains).evaluate(model.equation_system_full).val,
         mobility_w,
     )
 
@@ -302,9 +329,12 @@ def mobility_n(model: TwoPhaseFlow_with_source, rel_perm_n: np.ndarray) -> np.nd
     We differentiate between inside interfaces, boundary interfaces with homogeneous
     Dirichlet bc and boundary interfaces with homogeneous Neumann bc.
 
+    Note that the value at the Dirichlet boundaries is scaled with the flux.
+    TODO: Find out why this makes sense!
+
     """
     domain = model.mdg.subdomains()[0]
-    # Neumann bc
+    # Homogeneous Neumann bc
     mobility_n = np.zeros(domain.num_faces)
     # Dirichlet bc. Applies at the bottom, i.e., interfaces 6 and 7. This equals the
     # fixed boundary value we set in ``_bc_values_mobility_t`` in the model.
@@ -328,7 +358,7 @@ def test_mobility_n(model: TwoPhaseFlow_with_source, mobility_n: np.ndarray) -> 
     hand."""
     subdomains = model.mdg.subdomains()
     assert np.allclose(
-        model._mobility_n(subdomains).evaluate(model.equation_system).val,
+        model._mobility_n(subdomains).evaluate(model.equation_system_full).val,
         mobility_n,
     )
 
@@ -344,7 +374,7 @@ def test_tpfa(tpfa_array: np.ndarray, model: TwoPhaseFlow_with_source) -> None:
     subdomains = model.mdg.subdomains()
     tpfa = pp.ad.TpfaAd(model.w_flux_key, subdomains)
     div = pp.ad.Divergence(subdomains)
-    tpfa_system = (div * tpfa.flux).evaluate(model.equation_system)
+    tpfa_system = (div * tpfa.flux).evaluate(model.equation_system_full)
     assert np.allclose(tpfa_system.todense(), tpfa_array)
 
 
@@ -383,7 +413,9 @@ def test_flux_n(
     """
     subdomains = model.mdg.subdomains()
     div = pp.ad.Divergence(subdomains)
-    div_flux_system = (div @ model._flux_n(subdomains)).evaluate(model.equation_system)
+    div_flux_system = (div @ model._flux_n(subdomains)).evaluate(
+        model.equation_system_full
+    )
     A, b = div_flux_system.jac, div_flux_system.val
     assert np.allclose(A.todense(), flux_pressure_jac)
     assert np.allclose(b, -flux_pressure_val)
@@ -422,7 +454,7 @@ def test_flux_cap_pressure(
     cap_flux_tpfa = pp.ad.TpfaAd(model.cap_flux_key, subdomains)
     div = pp.ad.Divergence(subdomains)
     div_flux_system = (div @ cap_flux_tpfa.flux @ model._cap_pressure()).evaluate(
-        model.equation_system
+        model.equation_system_full
     )
     A, b = div_flux_system.jac, div_flux_system.val
     assert np.allclose(A.todense()[:, -4:], flux_cap_jac_wrt_saturation)
@@ -492,11 +524,11 @@ def test_flow_equation(
     flow_equation_val: np.ndarray,
 ) -> None:
     """Test the flow equation; both w.r.t. to :math:`p` and w.r.t. :math:`S`."""
-    A, _ = model.equation_system.assemble_subsystem(
+    A, _ = model.equation_system_full.assemble_subsystem(
         equations=["Flow equation"], variables=[model.primary_pressure_var]
     )
     assert np.allclose(A.todense(), flow_equation_jac_wrt_pressure)
-    A, b = model.equation_system.assemble_subsystem(
+    A, b = model.equation_system_full.assemble_subsystem(
         equations=["Flow equation"], variables=[model.saturation_var]
     )
     assert np.allclose(A.todense(), flow_equation_jac_wrt_saturation)
@@ -568,11 +600,34 @@ def test_transport_equation(
     transport_equation_jac_wrt_saturation: np.ndarray,
 ) -> None:
     """Test the transport equation; both w.r.t. to :math:`p` and w.r.t. :math:`S`."""
-    A, b = model.equation_system.assemble_subsystem(
+    A, b = model.equation_system_full.assemble_subsystem(
         equations=["Transport equation"], variables=[model.primary_pressure_var]
     )
     assert np.allclose(A.todense(), transport_equation_jac_wrt_pressure)
-    A, b = model.equation_system.assemble_subsystem(
+    A, b = model.equation_system_full.assemble_subsystem(
+        equations=["Transport equation"], variables=[model.saturation_var]
+    )
+    # Add some tolerance, as the model divides by :math:`\lambda_t + 1e-7`, but
+    # multiplies by :math:`\lambda_t`. We skip this step in the exact calculation.
+    assert np.allclose(A.todense(), transport_equation_jac_wrt_saturation, atol=1e-5)
+    assert np.allclose(b, -flow_equation_val)
+
+
+# Now we repeat the last two tests with gravity.
+
+
+def test_transport_equation_w_gravity(
+    model: TwoPhaseFlow_with_source,
+    flow_equation_val: np.ndarray,
+    transport_equation_jac_wrt_pressure: np.ndarray,
+    transport_equation_jac_wrt_saturation: np.ndarray,
+) -> None:
+    """Test the transport equation; both w.r.t. to :math:`p` and w.r.t. :math:`S`."""
+    A, b = model.equation_system_full.assemble_subsystem(
+        equations=["Transport equation"], variables=[model.primary_pressure_var]
+    )
+    assert np.allclose(A.todense(), transport_equation_jac_wrt_pressure)
+    A, b = model.equation_system_full.assemble_subsystem(
         equations=["Transport equation"], variables=[model.saturation_var]
     )
     # Add some tolerance, as the model divides by :math:`\lambda_t + 1e-7`, but

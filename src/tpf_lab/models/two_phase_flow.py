@@ -1,7 +1,7 @@
 r"""This module contains an implementation of a base model for two-phase flow problems.
 
 Both the nonwetting pressure-wetting saturation formulation
-    .. math:
+    .. math::
         -\nabla\cdot\left(\lambda_t\nabla p_n - \lambda_n\nabla p_c
         - \lambda_w\nabla\rho_w\bm{g} - \lambda_n\nabla\rho_n\bm{g}\right) = \bm{q}_t,\\
         \phi\frac{\partial S_w}{\partial t} + \nabla\cdot\left(f_w\bm{u}
@@ -9,7 +9,7 @@ Both the nonwetting pressure-wetting saturation formulation
 
 as well as the wetting pressure-wetting saturation formulation
 
-    .. math:
+    .. math::
         -\nabla\cdot\left(\lambda_t\nabla p_w + \lambda_n\nabla p_c
         - \lambda_w\nabla\rho_w\bm{g} - \lambda_n\nabla\rho_n\bm{g}\right) = \bm{q}_t,\\
         \phi\frac{\partial S_w}{\partial t}
@@ -22,8 +22,8 @@ Furthermore, multiple different models for both the capillary pressure, as well 
 relative permeability are implemented.
 
 TODO:
-    - Implement gravity.
     - Change bc_values to `ad.BoundaryCondition`
+    - Make the model suitable for multi-grid domains.
     
 Units:
     Collection of the SI units for all parameters.
@@ -61,8 +61,6 @@ class _AdVariables:
     pressure_w: pp.ad.MixedDimensionalVariable
     pressure_n: pp.ad.MixedDimensionalVariable
     saturation: pp.ad.MixedDimensionalVariable
-    flow_eq: pp.ad.Operator
-    transport_eq: pp.ad.Operator
     # Do we need the flux_discretization?
     flux_discretization: pp.ad.MpfaAd | pp.ad.TpfaAd
     subdomains: list[pp.Grid]
@@ -151,7 +149,7 @@ class TwoPhaseFlow(AbstractModel):
         # Managers and exporter:
         self._ad = _AdVariables()
         self.exporter: pp.Exporter
-        self.equation_system: pp.ad.EquationSystem
+        self.equation_system_full: pp.ad.EquationSystem
         self.time_manager: pp.TimeManager
 
         # Time schedule:
@@ -205,7 +203,8 @@ class TwoPhaseFlow(AbstractModel):
         # are identical.
 
         # Model selection and parameters for the relative permeability function:
-        self._rel_perm_model: Literal["Brooks-Corey", "Corey"] = "Brooks-Corey"
+        # NOTE: "power" and "Corey" are the same model.
+        self._rel_perm_model: Literal["Brooks-Corey", "Corey", "power"] = "Brooks-Corey"
         # Brooks-Corey model
         self._n1: int = 2
         self._n2: int = int(1 + 2 / self._n_b)
@@ -273,7 +272,7 @@ class TwoPhaseFlow(AbstractModel):
         self._set_parameters()
         self._assign_equations()
         # Create the subsystem for the formulation we want to solve.
-        self._equation_subsystem = self.equation_system.SubSystem(
+        self.equation_system = self.equation_system_full.SubSystem(
             variable_names=[self.primary_pressure_var, self.saturation_var]
         )
         #
@@ -318,15 +317,43 @@ class TwoPhaseFlow(AbstractModel):
         """
         return pp.BoundaryCondition(g)
 
-    def _bc_values_pressure_w(self, g: pp.Grid) -> np.ndarray:
-        """Homogeneous boundary values. Dirichlet pressure equals the initial state
-        pressure."""
+    def _dirichlet_bc_values_pressure_w(self, g: pp.Grid) -> np.ndarray:
+        """Homogeneous Dirichlet boundary values. Equals the initial state pressure."""
         array = np.zeros(g.num_faces)
         return array
 
-    def _bc_values_pressure_n(self, g: pp.Grid) -> np.ndarray:
-        """Homogeneous boundary values. Dirichlet pressure equals the initial state
-        pressure."""
+    def _dirichlet_bc_values_pressure_n(self, g: pp.Grid) -> np.ndarray:
+        """Homogeneous Dirichlet boundary values. Equals the initial state pressure."""
+        array = np.zeros(g.num_faces)
+        return array
+
+    def _neumann_bc_values_flux_w(self, g: pp.Grid) -> np.ndarray:
+        """Homogeneous Neumann boundary values.
+
+        NOTE: In the wetting pressure-wetting saturation formulation, Neumann bc values
+        correspond to ``_flux_w``, i.e. the mobility is already incorporated. In other
+        formulations this is less clear, however the bc are not needed there. They are
+        not needed for upwinding.
+
+        NOTE: We set the values independently from the Dirichlet bc, because otherwise
+        they would be counted twice on the RHS (once by ``mpfa.bound_flux`` and once by
+        ``upwind.bound_transport_neu``).
+
+        """
+        array = np.zeros(g.num_faces)
+        return array
+
+    def _neumann_bc_values_flux_n(self, g: pp.Grid) -> np.ndarray:
+        """Homogeneous Neumann boundary values.
+
+        NOTE: Neumann bc values correspond to ``_flux_t``, i.e. the mobility is already
+        incorporated.
+
+        NOTE: We set the values independently from the Dirichlet bc, because otherwise
+        they would be counted twice on the RHS (once by ``mpfa.bound_flux`` and once by
+        ``upwind.bound_transport_neu``).
+
+        """
         array = np.zeros(g.num_faces)
         return array
 
@@ -336,12 +363,26 @@ class TwoPhaseFlow(AbstractModel):
         array = np.zeros(g.num_faces)
         return array
 
-    def _bc_values_mobility_t(self, g: pp.Grid) -> np.ndarray:
-        """Mobility at the Dirichlet boundary.
+    def _bc_values_mobility_w(self, g: pp.Grid) -> np.ndarray:
+        """Wetting mobility at the boundaries.
 
-        The value is chosen by hand and equal to half of  the initial total mobility. As
-        the bc is taken into account by both ``_mobility_w`` and ``mobility_n``, the bc
-        in ``_mobility_t```will equal double of the value here.
+        NOTE: These are both for Dirichlet bc and Neumann bc. The latter one is needed
+        to compute the fractional flow at the boundaries. However, it does not affect
+        the Neumann flux.
+
+        NOTE: For some reason, we must choose the negative of the value to get a
+        positive mobility at the boundary.
+
+        """
+        array = np.full(g.num_faces, -0.25)
+        return array
+
+    def _bc_values_mobility_n(self, g: pp.Grid) -> np.ndarray:
+        """Nonwetting mobility at the boundaries.
+
+        NOTE: These are both for Dirichlet bc and Neumann bc. The latter one is needed
+        to compute the fractional flow at the boundaries.However, it does not affect
+        the Neumann flux.
 
         NOTE: For some reason, we must choose the negative of the value to get a
         positive mobility at the boundary.
@@ -378,7 +419,7 @@ class TwoPhaseFlow(AbstractModel):
 
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
-            vals[-1] = - pp.GRAVITY_ACCELERATION * self._w_density
+            vals[-1] = pp.GRAVITY_ACCELERATION * self._w_density
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
         # vals[-1] = pp.GRAVITY_ACCELERATION * self._density_w
@@ -391,7 +432,7 @@ class TwoPhaseFlow(AbstractModel):
 
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
-            vals[-1] = - pp.GRAVITY_ACCELERATION * self._n_density
+            vals[-1] = pp.GRAVITY_ACCELERATION * self._n_density
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
         # vals[-1] = pp.GRAVITY_ACCELERATION * self._density_n
@@ -404,10 +445,10 @@ class TwoPhaseFlow(AbstractModel):
 
         SI Units: m^2
         """
-        return np.full(g.num_cells, 1)
+        return np.full(g.num_cells, 1.0)
 
-    def _porosity(self, g: pp.Grid) -> pp.ad.DenseArray:
-        return pp.ad.DenseArray(np.full(g.num_cells, 1.0))
+    def _porosity(self, g: pp.Grid) -> np.ndarray:
+        return np.full(g.num_cells, 1.0)
 
     # Cap pressure and relative permeability functions.
     def _s_normalized(self) -> pp.ad.Operator:
@@ -496,7 +537,7 @@ class TwoPhaseFlow(AbstractModel):
 
         Corey model
         .. math::
-            k_{r,w}(S_w)=S_w^3
+            k_{r,w}(S_w)=\hat{S}_w^3
 
         To avoid ill-conditioned equation systems and crashing of the Newton solver at
         unphysical saturations (i.e., :math:`S_w\not\in[0,1]`), the nonwetting rel.
@@ -510,10 +551,10 @@ class TwoPhaseFlow(AbstractModel):
         """
         s = self._ad.saturation
         s_normalized = self._s_normalized()
-        if self._rel_perm_model == "Corey":
+        if self._rel_perm_model in ["Corey", "power"]:
             rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param)
             cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
-            rel_perm = cube_func(s) * rel_perm_linear_param
+            rel_perm = cube_func(s_normalized) * rel_perm_linear_param
         elif self._rel_perm_model == "Brooks-Corey":
             power_func = pp.ad.Function(
                 partial(pow, exponent=self._n1 + self._n2 * self._n3), "power"
@@ -551,7 +592,7 @@ class TwoPhaseFlow(AbstractModel):
 
         Corey model
         .. math::
-            k_{r,n}(S_w)=(1-S_w)^3
+            k_{r,n}(S_w)=(1-\hat{S}_w)^3
 
         To avoid ill-conditioned equation systems and crashing of the Newton solver at
         unphysical saturations (i.e., :math:`S_w\not\in[0,1]`), the nonwetting rel.
@@ -565,12 +606,12 @@ class TwoPhaseFlow(AbstractModel):
         """
         s = self._ad.saturation
         s_normalized = self._s_normalized()
-        if self._rel_perm_model == "Corey":
+        if self._rel_perm_model in ["Corey", "power"]:
             rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param)
             cube_func = pp.ad.Function(
                 partial(pow, exponent=self._rel_perm_power), "cube"
             )
-            rel_perm = cube_func(pp.ad.Scalar(1) - s) * rel_perm_linear_param
+            rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
         elif self._rel_perm_model == "Brooks-Corey":
             power_func1 = pp.ad.Function(partial(pow, exponent=self._n1), "power")
             power_func2 = pp.ad.Function(partial(pow, exponent=self._n2), "power")
@@ -630,7 +671,7 @@ class TwoPhaseFlow(AbstractModel):
         for sd, data in self.mdg.subdomains(return_data=True):
             # Boundary conditions and parameters
             diffusivity = pp.SecondOrderTensor(self._permeability(sd))
-            all_bf, *_ = self._domain_boundary_sides(sd)
+            # all_bf, *_ = self._domain_boundary_sides(sd)
             # Parameters that are not used for discretization.
             pp.initialize_data(
                 sd,
@@ -639,7 +680,8 @@ class TwoPhaseFlow(AbstractModel):
                 {
                     "source_t": self._source_t(sd),
                     "porosity": self._porosity(sd),
-                    "bc_values_mobility_t": self._bc_values_mobility_t(sd),
+                    "bc_values_mobility_w": self._bc_values_mobility_w(sd),
+                    "bc_values_mobility_n": self._bc_values_mobility_n(sd),
                 },
             )
             # Parameters for wetting phase.
@@ -650,7 +692,7 @@ class TwoPhaseFlow(AbstractModel):
                 {
                     "source_w": self._source_w(sd),
                     "bc": self._bc_type_pressure_w(sd),
-                    "bc_values": self._bc_values_pressure_w(sd),
+                    "bc_values": self._dirichlet_bc_values_pressure_w(sd),
                     "darcy_flux": np.ones(sd.num_faces),
                     "second_order_tensor": diffusivity,
                 },
@@ -663,7 +705,7 @@ class TwoPhaseFlow(AbstractModel):
                 {
                     "source_n": self._source_n(sd),
                     "bc": self._bc_type_pressure_n(sd),
-                    "bc_values": self._bc_values_pressure_n(sd),
+                    "bc_values": self._dirichlet_bc_values_pressure_n(sd),
                     "darcy_flux": np.ones(sd.num_faces),
                     "second_order_tensor": diffusivity,
                 },
@@ -683,13 +725,13 @@ class TwoPhaseFlow(AbstractModel):
     def _create_variables(self) -> None:
         """Create primary variables (wetting pressure, nonwetting pressure, saturation)."""
         subdomains = self.mdg.subdomains()
-        self._ad.pressure_w = self.equation_system.create_variables(
+        self._ad.pressure_w = self.equation_system_full.create_variables(
             self.pressure_w_var, {"cells": 1}, subdomains
         )
-        self._ad.pressure_n = self.equation_system.create_variables(
+        self._ad.pressure_n = self.equation_system_full.create_variables(
             self.pressure_n_var, {"cells": 1}, subdomains
         )
-        self._ad.saturation = self.equation_system.create_variables(
+        self._ad.saturation = self.equation_system_full.create_variables(
             self.saturation_var, {"cells": 1}, subdomains
         )
 
@@ -697,17 +739,17 @@ class TwoPhaseFlow(AbstractModel):
         """Set initial values for pressure and saturation."""
         # TODO: Update this for multiple subdomains.
         sd = self.mdg.subdomains()[0]
-        self.equation_system.set_variable_values(
+        self.equation_system_full.set_variable_values(
             np.full(sd.num_cells, 0.0),
             [self._ad.pressure_w],
             time_step_index=self.time_manager.time_index,
         )
-        self.equation_system.set_variable_values(
+        self.equation_system_full.set_variable_values(
             np.full(sd.num_cells, 0.0),
             [self._ad.pressure_n],
             time_step_index=self.time_manager.time_index,
         )
-        self.equation_system.set_variable_values(
+        self.equation_system_full.set_variable_values(
             np.full(sd.num_cells, 0.5),
             [self._ad.saturation],
             time_step_index=self.time_manager.time_index,
@@ -715,7 +757,7 @@ class TwoPhaseFlow(AbstractModel):
 
     def _create_managers(self) -> None:
         """Create an ``EquationSystem`` and a ``TimeManager``."""
-        self.equation_system = pp.ad.EquationSystem(self.mdg)
+        self.equation_system_full = pp.ad.EquationSystem(self.mdg)
         self.time_manager = pp.TimeManager(
             self._schedule, self._time_step, constant_dt=True
         )
@@ -726,6 +768,9 @@ class TwoPhaseFlow(AbstractModel):
         # self._ad.subdomains = subdomains
         if len(list(self.mdg.subdomains(dim=self.mdg.dim_max()))) != 1:
             raise NotImplementedError("This will require further work")
+
+        # Neumann boundary conditions. Dirichlet bc are included in the flux
+        p_w_neu_bc = pp.ad.DenseArray(self._neumann_bc_values_flux_w(subdomains[0]))
 
         # Spatial discretization operators.
         div = pp.ad.Divergence(subdomains)
@@ -746,7 +791,7 @@ class TwoPhaseFlow(AbstractModel):
         source_ad_t = pp.ad.DenseArray(self._source_t(subdomains[0]))
 
         # Ad parameters
-        porosity_ad = self._porosity(subdomains[0])
+        porosity_ad = pp.ad.DenseArray(self._porosity(subdomains[0]))
 
         # Compute cap pressure and relative permeabilities.
         p_cap = self._cap_pressure()
@@ -761,15 +806,22 @@ class TwoPhaseFlow(AbstractModel):
             flux_w = self._flux_w(subdomains)
             flow_equation = (
                 div
-                * (
-                    (mobility_t * flux_w)
+                @ (
+                    (mobility_t @ flux_w + upwind_w.bound_transport_neu @ p_w_neu_bc)
                     + mobility_n
-                    * (cap_flux_mpfa.flux * p_cap + cap_flux_mpfa.bound_flux * p_cap_bc)
+                    * (cap_flux_mpfa.flux @ p_cap + cap_flux_mpfa.bound_flux @ p_cap_bc)
                 )
                 - source_ad_t
             )
+            # Add the flux at faces with Neumann bc. For PorePy reasons the bc need to
+            # be negative.
             transport_equation = (
-                porosity_ad * dt_s + (div * (mobility_w * flux_w)) - source_ad_w
+                porosity_ad * dt_s
+                + (
+                    div
+                    @ (mobility_w * flux_w - upwind_w.bound_transport_neu @ p_w_neu_bc)
+                )
+                - source_ad_w
             )
         elif self._formulation == "n_pressure_w_saturation":
             # Note, that for ``flux_t``, the mobility is already included.
@@ -796,28 +848,42 @@ class TwoPhaseFlow(AbstractModel):
         flow_equation.set_name("Flow equation")
         transport_equation.set_name("Transport equation")
         # Update the equation list.
-        self.equation_system.set_equation(flow_equation, subdomains, {"cells": 1})
-        self.equation_system.set_equation(transport_equation, subdomains, {"cells": 1})
+        self.equation_system_full.set_equation(flow_equation, subdomains, {"cells": 1})
+        self.equation_system_full.set_equation(
+            transport_equation, subdomains, {"cells": 1}
+        )
 
     def _mobility_w(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
-        # ! For now, bc for both mobilities are identical!
-        mobility_bc = pp.ad.DenseArray(self._bc_values_mobility_t(subdomains[0]))
+        # TODO: Does it make more sense to get this from the dictionary? Would need to
+        # change ``BuckleyLeverett`` then, as the mobilities are updated at iterations
+        # via ``self._bc_values_mobility_w``.
+        mobility_w_bc = pp.ad.DenseArray(self._bc_values_mobility_w(subdomains[0]))
         viscosity_w = pp.ad.Scalar(self._viscosity_w)
         upwind_w = pp.ad.UpwindAd(self.w_flux_key, subdomains)
+        # Neumann bc are included here. They don't influence total, wetting or
+        # nonwetting flux at the Neumann boundaries, as those are fixed and independent
+        # of the mobilities. However, they influence the fractional flow.
         mobility_w = (
             upwind_w.upwind @ (self._rel_perm_w() / viscosity_w)
-            + upwind_w.bound_transport_dir @ mobility_bc
+            + upwind_w.bound_transport_dir @ mobility_w_bc
+            + upwind_w.bound_transport_neu @ mobility_w_bc
         )
         return mobility_w
 
     def _mobility_n(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
-        # ! For now, bc for both mobilities are identical!
-        mobility_bc = self._bc_values_mobility_t(subdomains[0])
+        # TODO: Does it make more sense to get this from the dictionary? Would need to
+        # change ``BuckleyLeverett`` then, as the mobilities are updated at iterations
+        # via ``self._bc_values_mobility_n``.
+        mobility_n_bc = self._bc_values_mobility_n(subdomains[0])
         viscosity_n = pp.ad.Scalar(self._viscosity_w)
         upwind_n = pp.ad.UpwindAd(self.n_flux_key, subdomains)
+        # Neumann bc are included here. They don't influence total, wetting or
+        # nonwetting flux at the Neumann boundaries, as those are fixed and independent
+        # of the mobilities. However, they influence the fractional flow.
         mobility_n = (
             upwind_n.upwind @ (self._rel_perm_n() / viscosity_n)
-            + upwind_n.bound_transport_dir @ mobility_bc
+            + upwind_n.bound_transport_dir @ mobility_n_bc
+            + upwind_n.bound_transport_neu @ mobility_n_bc
         )
         return mobility_n
 
@@ -832,12 +898,12 @@ class TwoPhaseFlow(AbstractModel):
     def _flux_w(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Wetting phase volume flux.
 
-        TODO: Add gravity.
-
         SI Units: kg/s
         """
         p_w = self._ad.pressure_w
-        p_w_bc = pp.ad.DenseArray(self._bc_values_pressure_w(subdomains[0]))
+        p_w_dir_bc = pp.ad.DenseArray(
+            self._dirichlet_bc_values_pressure_w(subdomains[0])
+        )
         vector_source_w = pp.ad.DenseArray(self._vector_source_w(subdomains[0]))
         flux_mpfa = pp.ad.MpfaAd(
             self.w_flux_key,
@@ -845,8 +911,8 @@ class TwoPhaseFlow(AbstractModel):
         )
         flux: pp.ad.Operator = (
             flux_mpfa.flux @ p_w
-            + flux_mpfa.bound_flux @ p_w_bc
-            + flux_mpfa.vector_source @ vector_source_w
+            + flux_mpfa.bound_flux @ p_w_dir_bc
+            - flux_mpfa.vector_source @ vector_source_w
         )
         flux.set_name("Wetting volume flux")
         return flux
@@ -854,12 +920,12 @@ class TwoPhaseFlow(AbstractModel):
     def _flux_n(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Nonwetting phase volume flux.
 
-        TODO: Add gravity.
-
         SI Units: kg/s
         """
         p_n = self._ad.pressure_n
-        p_n_bc = pp.ad.DenseArray(self._bc_values_pressure_n(subdomains[0]))
+        p_n_dir_bc = pp.ad.DenseArray(
+            self._dirichlet_bc_values_pressure_n(subdomains[0])
+        )
         vector_source_n = pp.ad.DenseArray(self._vector_source_n(subdomains[0]))
         flux_mpfa = pp.ad.MpfaAd(
             self.n_flux_key,
@@ -867,8 +933,8 @@ class TwoPhaseFlow(AbstractModel):
         )
         flux: pp.ad.Operator = (
             flux_mpfa.flux @ p_n
-            + flux_mpfa.bound_flux @ p_n_bc
-            + flux_mpfa.vector_source @ vector_source_n
+            + flux_mpfa.bound_flux @ p_n_dir_bc
+            - flux_mpfa.vector_source @ vector_source_n
         )
         flux.set_name("Nonwetting volume flux")
         return flux
@@ -884,12 +950,16 @@ class TwoPhaseFlow(AbstractModel):
         """
         # Variables, parameters and bc.
         p_n = self._ad.pressure_n
-        p_bc_w = pp.ad.DenseArray(self._bc_values_pressure_w(subdomains[0]))
+        flux_n_bc_neu = pp.ad.DenseArray(self._neumann_bc_values_flux_n(subdomains[0]))
+        p_n_bc_dir = pp.ad.DenseArray(
+            self._dirichlet_bc_values_pressure_n(subdomains[0])
+        )
         p_cap_bc = pp.ad.DenseArray(self._bc_values_cap_pressure(subdomains[0]))
         vector_source_w = pp.ad.DenseArray(self._vector_source_w(subdomains[0]))
         vector_source_n = pp.ad.DenseArray(self._vector_source_n(subdomains[0]))
         # Spatial discretization operators.
         flux_mpfa = pp.ad.MpfaAd(self.n_flux_key, subdomains)
+        upwind_n = pp.ad.UpwindAd(self.n_flux_key, subdomains)
         # NOTE: We use TPFA for discretization of the capillary flux.
         cap_flux_tpfa = pp.ad.TpfaAd(self.cap_flux_key, subdomains)
         # Cap pressure and relative permeabilities.
@@ -898,7 +968,9 @@ class TwoPhaseFlow(AbstractModel):
         mobility_n = self._mobility_n(subdomains)
         mobility_t = self._mobility_t(subdomains)
         # Compute flux.
-        flux_n: pp.ad.Operator = flux_mpfa.flux @ p_n + flux_mpfa.bound_flux @ p_bc_w
+        flux_n: pp.ad.Operator = (
+            flux_mpfa.flux @ p_n + flux_mpfa.bound_flux @ p_n_bc_dir
+        )
         flux_p_cap: pp.ad.Operator = (
             cap_flux_tpfa.flux @ p_cap + cap_flux_tpfa.bound_flux @ p_cap_bc
         )
@@ -906,27 +978,30 @@ class TwoPhaseFlow(AbstractModel):
         flux_buoyancy_n: pp.ad.Operator = flux_mpfa.vector_source @ vector_source_n
         total_flux = (
             mobility_t * flux_n
+            # Add the flux at faces with Neumann bc. For PorePy reasons this needs to be
+            # negative.
+            - upwind_n.bound_transport_neu @ flux_n_bc_neu
             - mobility_w * flux_p_cap
-            + mobility_w * flux_buoyancy_w
-            + mobility_n * flux_buoyancy_n
+            - mobility_w * flux_buoyancy_w
+            - mobility_n * flux_buoyancy_n
         )
         total_flux.set_name("Total volume flux")
         return total_flux
 
     def _discretize(self) -> None:
         """Discretize all terms"""
-        # t_0 = time.time()
-        self.equation_system.discretize()
+        t_0 = time.time()
+        self.equation_system_full.discretize()
         # Fluid flux induced by the secondary variable. This needs to be discretized
-        # once s.t. the Darcy flux can be computed for the secondary variable s.t.
-        # the upwind operator works correctly.
+        # each Newton iteration s.t. the Darcy flux can be computed for the secondary
+        # variable s.t. the upwind operator works correctly.
         if self._formulation == "w_pressure_w_saturation":
             flux_n = self._flux_n(self.mdg.subdomains())
             flux_n.discretize(self.mdg)
         elif self._formulation == "n_pressure_w_saturation":
             flux_w = self._flux_w(self.mdg.subdomains())
             flux_w.discretize(self.mdg)
-        # logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
+        logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
     def assemble_linear_system(self) -> None:
         """Assemble the linearized system.
@@ -939,24 +1014,23 @@ class TwoPhaseFlow(AbstractModel):
         """
         t_0 = time.time()
         if self._use_ad:
-            self.linear_system = self._equation_subsystem.assemble()
-        # logger.debug(f"Assembled linear system in {time.time() - t_0:.2e} seconds")
+            self.linear_system = self.equation_system.assemble()
+        logger.debug(f"Assembled linear system in {time.time() - t_0:.2e} seconds")
 
     # Newton loop.
     def before_newton_loop(self) -> None:
         """Set the starting estimate to the solution from the previous timestep."""
-        # logger.debug(
-        #     f'{{"time step": {self.time_manager.time_index}, "time": {self.time_manager.time}}}'
-        # )
         self.time_manager._recomp_sol = False
         self._nonlinear_iteration = 0
-        assembled_variables = self.equation_system.get_variable_values(
+        assembled_variables = self.equation_system_full.get_variable_values(
             time_step_index=0
         )
 
-        self.equation_system.set_variable_values(
+        self.equation_system_full.set_variable_values(
             assembled_variables, iterate_index=0, additive=False
         )
+        # TODO: Change this to work with ``equation_system`` instead of the
+        # ``dof_manager``.
         if self._limit_saturation_change:
             self._prev_saturation: np.ndarray = self.dof_manager.assemble_variable(
                 variables=[self.saturation_var], from_iterate=False
@@ -973,12 +1047,14 @@ class TwoPhaseFlow(AbstractModel):
 
         # Evaluate the pressure of the secondary pressure variable.
         secondary_pressure = self._ad.pressure_n - self._cap_pressure()
-        secondary_pressure_sol = secondary_pressure.evaluate(self.equation_system).val
+        secondary_pressure_sol = secondary_pressure.evaluate(
+            self.equation_system_full
+        ).val
 
         # Update the iterate of the secondary pressure variable. As the values were
         # computed with the additive value of the primary pressure and saturation
         # variable, we set ``additive=False``.
-        self.equation_system.set_variable_values(
+        self.equation_system_full.set_variable_values(
             secondary_pressure_sol,
             variables=[self.secondary_pressure_var],
             iterate_index=0,
@@ -991,10 +1067,10 @@ class TwoPhaseFlow(AbstractModel):
         # flux.
         for sd, data in self.mdg.subdomains(return_data=True):
             # Update wetting flux.
-            vals = self._flux_w([sd]).evaluate(self.equation_system).val
+            vals = self._flux_w([sd]).evaluate(self.equation_system_full).val
             data[pp.PARAMETERS][self.w_flux_key].update({"darcy_flux": vals})
             # Update nonwetting flux.
-            vals = self._flux_n([sd]).evaluate(self.equation_system).val
+            vals = self._flux_n([sd]).evaluate(self.equation_system_full).val
             data[pp.PARAMETERS][self.n_flux_key].update({"darcy_flux": vals})
         # pp.fvutils.compute_darcy_flux(
         #     self.mdg,
@@ -1020,7 +1096,7 @@ class TwoPhaseFlow(AbstractModel):
         """
         # Distribute pressure and saturation variable. Secondary pressure variable is
         # distributed before the newton iteration.
-        self._equation_subsystem.set_variable_values(
+        self.equation_system.set_variable_values(
             solution,
             iterate_index=0,
             additive=True,
@@ -1040,6 +1116,8 @@ class TwoPhaseFlow(AbstractModel):
             iteration_counter: _description_
         """
         # If the saturation changes to much, decrease the time step and calculate again.
+        # TODO: Change this to work with ``equation_system`` instead of the
+        # ``dof_manager``.
         if self._limit_saturation_change:
             new_saturation: np.ndarray = self.dof_manager.assemble_variable(
                 variables=[self.saturation_var], from_iterate=True
@@ -1060,21 +1138,23 @@ class TwoPhaseFlow(AbstractModel):
                 # )
                 return None
         # Distribute both pressure variables and the saturation variable.
-        timestep_solution = self.equation_system.get_variable_values(iterate_index=0)
-        self.equation_system.set_variable_values(
+        timestep_solution = self.equation_system_full.get_variable_values(
+            iterate_index=0
+        )
+        self.equation_system_full.set_variable_values(
             timestep_solution, time_step_index=0, additive=False
         )
 
         self.convergence_status = True
         self._export()
-        # logger.debug(f'{{"converged": {"true"}}}')
+        logger.debug(f'{{"converged": {"true"}}}')
 
     def after_newton_failure(
         self, solution: np.ndarray, errors: float, iteration_counter: int
     ) -> None:
-        # logger.debug(f"Failed on timestep {self.time_manager.time_index}")
-        # logger.debug(f"Error {errors} Newton iteration {iteration_counter}")
-        # logger.debug(f'{{"converged": {"false"}}}')
+        logger.debug(f"Failed on timestep {self.time_manager.time_index}")
+        logger.debug(f"Error {errors} Newton iteration {iteration_counter}")
+        logger.debug(f'{{"converged": {"false"}}}')
         raise ValueError("Newton iterations did not converge")
 
     def _export(self):
