@@ -3,7 +3,7 @@ import pytest
 import scipy.sparse as sps
 from porepy.numerics.ad.forward_mode import AdArray
 
-from src.tpf_lab.numerics.ad import functions as af
+from tpf_lab.numerics.ad import functions as af
 
 
 # Function: pow

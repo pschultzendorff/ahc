@@ -87,9 +87,9 @@ def run_time_dependent_model(model, params: dict) -> None:
         )
         time_bar.update(n=1)
         logger.debug(
-            f"\nTime step {model.time_manager.time_index} at time"
-            + f" {model.time_manager.time:.1e} of {model.time_manager.time_final:.1e}"
-            + f" with time step {model.time_manager.dt:.1e}"
+            f'{{"time index": {model.time_manager.time_index},'
+            + f' "time": {model.time_manager.time:.1e},'
+            + f' "time step": {model.time_manager.dt:.1e}}}'
         )
         solver.solve(model)
         model.time_manager.compute_time_step()

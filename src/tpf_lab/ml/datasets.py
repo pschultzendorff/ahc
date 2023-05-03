@@ -17,7 +17,7 @@ noise can even be structured (e.g., only apply to some part saturations etc.).
 """
 
 from collections.abc import Iterator
-from typing import Optional, Callable
+from typing import Callable, Literal, Optional
 
 import torch
 import torch.nn as nn
@@ -27,7 +27,13 @@ class DatasetWithNoise(torch.utils.data.Dataset):
     def __init__(
         self,
         len: int = 1000,
-        model: str = "Brooks-Corey-W",
+        model: Literal[
+            "Brooks-Corey-W",
+            "Brooks-Corey-N",
+            "Brooks-Corey-Cap-Press",
+            "power_w",
+            "power_n",
+        ] = "Brooks-Corey-W",
         model_params: Optional[dict] = None,
         mean: float = 1.5,
         std: float = 1.5,
@@ -64,13 +70,25 @@ class DatasetWithNoise(torch.utils.data.Dataset):
 class IterableDatasetWithNoise(torch.utils.data.IterableDataset):
     def __init__(
         self,
-        model: str = "Brooks-Corey-W",
+        model: Literal[
+            "Brooks-Corey-W",
+            "Brooks-Corey-N",
+            "Brooks-Corey-Cap-Press",
+            "power_w",
+            "power_n",
+        ] = "Brooks-Corey-W",
         model_params: Optional[dict] = None,
         mean: float = 1.5,
         std: float = 1.5,
     ) -> None:
         super().__init__()
-        self.model: str = model
+        self.model: Literal[
+            "Brooks-Corey-W",
+            "Brooks-Corey-N",
+            "Brooks-Corey-Cap-Press",
+            "power_w",
+            "power_n",
+        ] = model
         self.mean = torch.tensor([mean])
         self.std = torch.tensor([std])
         if model == "Brooks-Corey-W":

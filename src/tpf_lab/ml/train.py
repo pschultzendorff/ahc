@@ -26,7 +26,7 @@ def train_iterable(
 ) -> None:
     """Train for a number of epochs.
 
-    Since a :obj:`~torch.utils.data.IterableDataset` is used, each epoch is one batch.
+    Since an :obj:`~torch.utils.data.IterableDataset` is used, each epoch is one batch.
 
     """
     loss_func = nn.MSELoss()
