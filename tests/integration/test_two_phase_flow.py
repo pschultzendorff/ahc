@@ -157,8 +157,7 @@ def s_normalized_jac(saturation_w_init, model: TwoPhaseFlow_with_source) -> np.n
 
 
 def test_normalized_s(
-    model: TwoPhaseFlow_with_source,
-    s_normalized_jac: np.ndarray,
+    model: TwoPhaseFlow_with_source, s_normalized_jac: np.ndarray
 ) -> None:
     """The model uses the normalized saturation for the rel. perm. and cap. pressure
     functions. We check that its Jacobian is calculated correctly."""

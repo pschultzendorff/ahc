@@ -118,8 +118,8 @@ class BuckleyLeverett(TwoPhaseFlow):
         # Set the wetting mobility at the boundaries to the wetting mobility at residual
         # saturations.
         # For PorePy reasons the values needs to be negative.
-        array[-1] = -((1 - 0.5) ** 3) * self._rel_perm_linear_param
-        array[0] = 0.01
+        array[-1] = -0.99
+        array[0] = -0.01
         return array
 
     def _bc_values_mobility_n(self, g: pp.Grid) -> np.ndarray:
@@ -127,8 +127,8 @@ class BuckleyLeverett(TwoPhaseFlow):
         # Set the nonwetting mobility at the boundaries to the nonwetting mobility at
         # residual saturations.
         # For PorePy reasons the values needs to be negative.
-        array[-1] = 0.01
-        array[0] = -((1 - 0.5) ** 3) * self._rel_perm_linear_param
+        array[-1] = -0.01
+        array[0] = -0.99
         return array
 
     def _initial_condition(self) -> None:
