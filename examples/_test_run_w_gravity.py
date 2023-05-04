@@ -7,17 +7,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 
-from src.tpf_lab.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
-from src.tpf_lab.utils import logging_redirect_tqdm
+from tpf_lab.models.run_models import run_time_dependent_model
+from tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from tpf_lab.utils import logging_redirect_tqdm
 
 w_source_cell_index = 209
-
+density_w = 1.4
+density_n = 1.0
 
 cap_pressure_model = "Brooks-Corey"
 params = {
     "formulation": "n_pressure_w_saturation",
-    "file_name": f"pcap_{cap_pressure_model}_gravity_on_w_source_{w_source_cell_index}",
+    "file_name": f"pcap_{cap_pressure_model}_gravity_on_density_w{density_w}_density_n{density_n}_w_source_{w_source_cell_index}",
     "folder_name": os.path.join(
         "results",
         "setup_tests",
@@ -43,10 +44,10 @@ class ModifiedModel(TwoPhaseFlow):
 
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
-            vals[-1] = - pp.GRAVITY_ACCELERATION * self._w_density
+            vals[-1] = pp.GRAVITY_ACCELERATION * self._w_density
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
-        vals[:, -1] = -pp.GRAVITY_ACCELERATION * self._density_w._value
+        vals[:, -1] = pp.GRAVITY_ACCELERATION * self._density_w
         return vals.ravel()
 
     def _vector_source_n(self, g: pp.Grid) -> np.ndarray:
@@ -55,10 +56,10 @@ class ModifiedModel(TwoPhaseFlow):
 
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
-            vals[-1] = - pp.GRAVITY_ACCELERATION * self._n_density
+            vals[-1] = pp.GRAVITY_ACCELERATION * self._n_density
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
-        vals[:, -1] = -pp.GRAVITY_ACCELERATION * self._density_n._value
+        vals[:, -1] = pp.GRAVITY_ACCELERATION * self._density_n
         return vals.ravel()
 
     def _source_w(self, g: pp.Grid) -> np.ndarray:
@@ -73,8 +74,8 @@ model._grid_size = 20
 model._phys_size = 2
 model._time_step = 0.1
 model._schedule = np.array([0, 100.0])
-model._density_w = 1.0
-model._density_n = 1.4
+model._density_w = density_w
+model._density_n = density_n
 model._cap_pressure_model = cap_pressure_model
 model.prepare_simulation()
 with logging_redirect_tqdm([logger]):

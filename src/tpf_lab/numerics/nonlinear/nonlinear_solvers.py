@@ -11,7 +11,7 @@ import logging
 
 import numpy as np
 
-from src.tpf_lab.utils import is_notebook
+from tpf_lab.utils import is_notebook
 
 if is_notebook():
     import tqdm.notebook as tqdm

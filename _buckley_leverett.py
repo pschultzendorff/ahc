@@ -183,11 +183,13 @@ class FractionalFlowSympy_PerturbedMobilityW(functions.FractionalFlowSymPy):
         return self.S_normalized() ** 3 + self.error_function_deriv()
 
 
-yscales = np.arange(0, 0.6, 0.1)
-densities = np.arange(1.0, 1.5, 0.1)
+yscales = np.arange(20.0, 25.0, 1.0)
+densities = [1.0]
+xscale = 10000
+offset = 0.35
 
 folder_basename: str = os.path.join(
-    "results", "buckley_leverett", "perturbed_flow_normalized_saturations"
+    "results", "buckley_leverett", "perturbed_mobility_w_saturation_normalized"
 )
 try:
     os.makedirs(folder_basename)
@@ -200,7 +202,8 @@ for yscale in yscales:
     for density in densities:
         # Set up folder and files for logging/plots/saved time steps.
         foldername = os.path.join(
-            folder_basename, f"yscale_{yscale}_density_w_{density}"
+            folder_basename,
+            f"yscale_{yscale}_xscale_{xscale}_offset_{offset}_density_w_{1.0}_density_n_{density}",
         )
         try:
             os.makedirs(foldername)
@@ -228,8 +231,8 @@ for yscale in yscales:
         model._grid_size = 200
         model._phys_size = 20
 
-        model._density_w = density
-        model._density_n = 1.0
+        model._density_w = 1.0
+        model._density_n = density
         model.rel_perm_linear_param = 1.0
 
         model._rel_perm_model = "power"
@@ -237,7 +240,8 @@ for yscale in yscales:
         model._limit_rel_perm = True
 
         model._yscale = yscale
-        model._xscale = 1000
+        model._xscale = xscale
+        model._offset = offset
 
         model.prepare_simulation()
 
@@ -275,6 +279,7 @@ for yscale in yscales:
             "S_m": model._residual_saturation_w,
             "yscale": model._yscale,
             "xscale": model._xscale,
+            "offset": model._offset,
             "rel_perm_model": model._rel_perm_model,
             "grid": lax_friedrichs_grid,
             "initial_condition": initial_condition,
@@ -341,8 +346,8 @@ for yscale in yscales:
         )
         # Switch sides of the saturation, as PorePy models it the other way around.
         plt.plot(
-            np.linspace(-10, model._phys_size - 10, model._grid_size)[1:-1],
-            saturation[1:-1],
+            np.linspace(-10, model._phys_size - 10, model._grid_size)[5:-5:],
+            saturation[-5:5:-1],
             label="fractional flow solution",
         )
 

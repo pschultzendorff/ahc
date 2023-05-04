@@ -47,8 +47,9 @@ from typing import Optional, Literal
 import numpy as np
 import porepy as pp
 
-from src.tpf_lab.models.abstract_model import AbstractModel
-from src.tpf_lab.numerics.ad.functions import pow, minimum
+from tpf_lab.models.abstract_model import AbstractModel
+from tpf_lab.numerics.ad.functions import pow as ad_pow
+from tpf_lab.numerics.ad.functions import minimum
 
 # from pythonjsonlogger import jsonlogger
 
@@ -503,7 +504,7 @@ class TwoPhaseFlow(AbstractModel):
         if self._cap_pressure_model == "Brooks-Corey":
             entry_pressure = pp.ad.Scalar(self._entry_pressure)
             # Setup pp.ad.functions.pow
-            pow_func = pp.ad.Function(partial(pow, exponent=self._n_b), "pow")
+            pow_func = pp.ad.Function(partial(ad_pow, exponent=self._n_b), "pow")
             return entry_pressure * pow_func(s_normalized)
         elif self._cap_pressure_model == "linear":
             cap_pressure_linear_param = pp.ad.Scalar(self._cap_pressure_linear_param)
@@ -511,8 +512,8 @@ class TwoPhaseFlow(AbstractModel):
         elif self._cap_pressure_model == "van Genuchten":
             beta_g = pp.ad.Scalar(self._beta_g)
             # Setup pp.ad.functions.pow
-            pow_func_1 = pp.ad.Function(partial(pow, exponent=self._m_g), "pow")
-            pow_func_2 = pp.ad.Function(partial(pow, exponent=-self._n_g), "pow")
+            pow_func_1 = pp.ad.Function(partial(ad_pow, exponent=self._m_g), "pow")
+            pow_func_2 = pp.ad.Function(partial(ad_pow, exponent=-self._n_g), "pow")
             return pow_func_2(pow_func_1(s_normalized) - pp.ad.Scalar(1)) / beta_g
         else:
             # Return cap. pressure 0.
@@ -553,11 +554,11 @@ class TwoPhaseFlow(AbstractModel):
         s_normalized = self._s_normalized()
         if self._rel_perm_model in ["Corey", "power"]:
             rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param)
-            cube_func = pp.ad.Function(partial(pow, exponent=3), "cube")
+            cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
             rel_perm = cube_func(s_normalized) * rel_perm_linear_param
         elif self._rel_perm_model == "Brooks-Corey":
             power_func = pp.ad.Function(
-                partial(pow, exponent=self._n1 + self._n2 * self._n3), "power"
+                partial(ad_pow, exponent=self._n1 + self._n2 * self._n3), "power"
             )
             rel_perm = power_func(s_normalized)
         if self._limit_rel_perm:
@@ -609,13 +610,13 @@ class TwoPhaseFlow(AbstractModel):
         if self._rel_perm_model in ["Corey", "power"]:
             rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param)
             cube_func = pp.ad.Function(
-                partial(pow, exponent=self._rel_perm_power), "cube"
+                partial(ad_pow, exponent=self._rel_perm_power), "cube"
             )
             rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
         elif self._rel_perm_model == "Brooks-Corey":
-            power_func1 = pp.ad.Function(partial(pow, exponent=self._n1), "power")
-            power_func2 = pp.ad.Function(partial(pow, exponent=self._n2), "power")
-            power_func3 = pp.ad.Function(partial(pow, exponent=self._n3), "power")
+            power_func1 = pp.ad.Function(partial(ad_pow, exponent=self._n1), "power")
+            power_func2 = pp.ad.Function(partial(ad_pow, exponent=self._n2), "power")
+            power_func3 = pp.ad.Function(partial(ad_pow, exponent=self._n3), "power")
             rel_perm = power_func1(pp.ad.Scalar(1) - s_normalized) * power_func3(
                 pp.ad.Scalar(1) - power_func2(s_normalized)
             )
@@ -839,8 +840,8 @@ class TwoPhaseFlow(AbstractModel):
                     * mobility_n
                     * (
                         cap_flux_mpfa.flux @ p_cap
-                        - flux_mpfa_w.vector_source @ vector_source_w
-                        + flux_mpfa_n.vector_source @ vector_source_n
+                        + flux_mpfa_w.vector_source @ vector_source_w
+                        - flux_mpfa_n.vector_source @ vector_source_n
                     )
                 )
                 - source_ad_w
@@ -1186,5 +1187,5 @@ class TwoPhaseFlow(AbstractModel):
         xscale = pp.ad.Scalar(self._xscale)
         offset = pp.ad.Scalar(self._offset)
         exp_func = pp.ad.Function(pp.ad.functions.exp, "exp")
-        square_func = pp.ad.Function(partial(pow, exponent=2), "square")
+        square_func = pp.ad.Function(partial(ad_pow, exponent=2), "square")
         return yscale * exp_func(pp.ad.Scalar(-1) * xscale * square_func(s - offset))
