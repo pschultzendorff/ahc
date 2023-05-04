@@ -48,106 +48,6 @@ logger.setLevel(logging.DEBUG)
 
 
 class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
-    def before_newton_iteration_verbose(self) -> None:
-        """A lot of information for debugging. Change the name of this method to
-        ``before_newton_iteration``."""
-        # Get all mobilities at :math:`x=-10` (or whatever the left side of the domain
-        # is).
-        super().before_newton_iteration()
-        subdomains = self.mdg.subdomains()
-
-        mobility_t_lhs = (
-            self._mobility_t(subdomains).evaluate(self.equation_system_full).val[-1]
-        )
-        mobility_t_rhs = (
-            self._mobility_t(subdomains).evaluate(self.equation_system_full).val[0]
-        )
-        saturation_lhs = self._ad.saturation.evaluate(self.equation_system_full).val[-1]
-        mobility_t_middle = (
-            self._mobility_t(subdomains)
-            .evaluate(self.equation_system_full)
-            .val[int(self._grid_size / 2)]
-        )
-        mobility_w_rhs = (
-            self._mobility_w(subdomains).evaluate(self.equation_system_full).val[0]
-        )
-        mobility_n_rhs = (
-            self._mobility_n(subdomains).evaluate(self.equation_system_full).val[0]
-        )
-
-        p_n = self._ad.pressure_n
-        p_n_bc = pp.ad.DenseArray(self._dirichlet_bc_values_pressure_n(subdomains[0]))
-        flux_mpfa = pp.ad.MpfaAd(self.n_flux_key, subdomains)
-        upwind_n = pp.ad.UpwindAd(self.n_flux_key, subdomains)
-        # Compute flux.
-        flux_n: pp.ad.Operator = flux_mpfa.flux @ p_n + flux_mpfa.bound_flux @ p_n_bc
-        logger.info(
-            f"flux n lhs: {flux_n.evaluate(self.equation_system_full).jac[-1].todense()}"
-        )
-
-        # logger.info(f"mobility t middle: {mobility_t_middle}")
-        logger.info(f"mobility t lhs: {mobility_t_lhs}")
-        logger.info(f"mobility t rhs: {mobility_t_rhs}")
-        logger.info(f"mobility w rhs: {mobility_w_rhs}")
-        logger.info(f"mobility n rhs: {mobility_n_rhs}")
-        # logger.info(f"saturation lhs: {saturation_lhs}")
-        logger.info(f"Neumann bc lhs: {self._neumann_bc_lhs}")
-
-        mobility_bc = self._bc_values_mobility_n(subdomains[0])
-        upwind_n = pp.ad.UpwindAd(self.n_flux_key, self.mdg.subdomains())
-        mobility_n_wo_bc = upwind_n.upwind @ (
-            self._rel_perm_n() / pp.ad.Scalar(self._viscosity_n)
-        )
-        mobility_n_bc = upwind_n.bound_transport_dir @ mobility_bc
-
-        mobility_n_wo_bc = mobility_n_wo_bc.evaluate(self.equation_system_full).val
-        mobility_n_bc = mobility_n_bc.evaluate(self.equation_system_full)
-        # logger.info(f"mobility_n_wo_bc: {mobility_n_wo_bc}")
-        # logger.info(f"mobility_n_bc: {mobility_n_bc}")
-
-        mobility_bc = self._bc_values_mobility_w(subdomains[0])
-        upwind_w = pp.ad.UpwindAd(self.w_flux_key, self.mdg.subdomains())
-        mobility_w_wo_bc = upwind_w.upwind @ (
-            self._rel_perm_w() / pp.ad.Scalar(self._viscosity_w)
-        )
-        mobility_w_bc = upwind_w.bound_transport_dir @ mobility_bc
-
-        mobility_w_wo_bc = mobility_w_wo_bc.evaluate(self.equation_system_full).val
-        mobility_w_bc = mobility_w_bc.evaluate(self.equation_system_full)
-        logger.info(f"mobility_w_wo_bc: {mobility_w_wo_bc}")
-        logger.info(f"mobility_w_bc: {mobility_w_bc}")
-        logger.info(
-            f"upwind w bc dir: {upwind_w.bound_transport_dir.evaluate(self.equation_system_full).todense()}"
-        )
-        tpfa = pp.ad.TpfaAd(self.w_flux_key, self.mdg.subdomains())
-        logger.info(
-            f"tpfa w bc dir: {tpfa.flux.evaluate(self.equation_system_full).todense()}"
-        )
-        tpfa = pp.ad.TpfaAd(self.w_flux_key, self.mdg.subdomains())
-        logger.info(
-            f"tpfa vector source w: {tpfa.vector_source.evaluate(self.equation_system_full).todense()}"
-        )
-        gravity = tpfa.vector_source @ self._vector_source_w(subdomains[0])
-        logger.info(f"gravity w: {gravity.evaluate(self.equation_system_full)}")
-        tpfa_n = pp.ad.TpfaAd(self.n_flux_key, self.mdg.subdomains())
-        gravity_n = tpfa_n.vector_source @ self._vector_source_n(subdomains[0])
-        logger.info(f"gravity n: {gravity_n.evaluate(self.equation_system_full)}")
-        transport_eq = (
-            self.equation_system_full.equations["Transport equation"]
-            .evaluate(self.equation_system_full)
-            .val
-        )
-        logger.info(f"transport eq: {transport_eq}")
-        self._discretize()
-        pressure_n_rhs = model.equation_system.get_variable_values(
-            variables=[self._ad.pressure_n], time_step_index=0
-        )[0]
-        logger.info(f"pressure n rhs: {pressure_n_rhs}")
-        total_flux_lhs = (
-            self._flux_t(subdomains).evaluate(self.equation_system_full).val[-1]
-        )
-        logger.info(f"Total flux lhs: {total_flux_lhs}")
-
     def _mobility_w(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Add a perturbation to the wetting mobility."""
         mobility_w = super()._mobility_w(subdomains)
@@ -185,7 +85,7 @@ class FractionalFlowSympy_PerturbedMobilityW(functions.FractionalFlowSymPy):
 
 yscales = np.arange(20.0, 25.0, 1.0)
 densities = [1.0]
-xscale = 10000
+xscale = 50
 offset = 0.35
 
 folder_basename: str = os.path.join(
@@ -233,7 +133,6 @@ for yscale in yscales:
 
         model._density_w = 1.0
         model._density_n = density
-        model.rel_perm_linear_param = 1.0
 
         model._rel_perm_model = "power"
         model._rel_perm_linear_param = 1.0
@@ -270,7 +169,6 @@ for yscale in yscales:
         params = {
             # Negative influx of the model, since the sides are switched
             "influx": -model._influx,
-            "porosity": model._porosity(g)[0],
             "porosity": model._porosity(g)[0],
             "density_w": model._density_w,
             "density_n": model._density_n,
@@ -310,8 +208,6 @@ for yscale in yscales:
 
         model.before_newton_loop()
         model.before_newton_iteration()
-        print(model._density_n)
-        print(model._density_w)
 
         # Run and plot the fractional flow model.
         try:

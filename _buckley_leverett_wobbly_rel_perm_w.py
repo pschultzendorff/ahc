@@ -90,7 +90,8 @@ class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
 
 
 class DiagnosticsMixin_with_save_functionality(pp.DiagnosticsMixin):
-    def plot_diagnostics(
+    # MyPy doesn't like that the signature is different.
+    def plot_diagnostics(  # type: ignore
         self, diagnostics_data, key: str, filename: str, **kwargs
     ) -> None:
         if _IS_SEABORN_AVAILABLE:
@@ -134,135 +135,127 @@ class FractionalFlowSympy_PerturbedMobilityW(functions.FractionalFlowSymPy):
         )
 
 
-yscales_list = [[0.1] * 2, [0.1, 0.4], [0.3] * 2, [0.1] * 4, [0.1, 0.2, 0.3, 0.4]]
-offsets_list = [
-    [0.33, 0.66],
-    [0.33, 0.66],
-    [0.33, 0.66],
-    [0.2, 0.4, 0.6, 0.8],
-    [0.2, 0.4, 0.6, 0.8],
-]
-folder_basename: str = os.path.join(
+# Set up folder and files for logging/plots/saved time steps.
+foldername: str = os.path.join(
     "results",
     "buckley_leverett",
     "mobility_w_multiple_perturbations_saturation_normalized",
 )
 try:
-    os.makedirs(folder_basename)
+    os.makedirs(foldername)
 except Exception:
     pass
 
 fh: Optional[logging.FileHandler] = None
 
-for i in range(5):
-    # Set up folder and files for logging/plots/saved time steps.
-    foldername = os.path.join(folder_basename, f"setup_{i}")
-    try:
-        os.makedirs(foldername)
-    except Exception:
-        pass
-    filename: str = f"setup_{i}"
+try:
+    os.makedirs(foldername)
+except Exception:
+    pass
+
+
+# Set up model.
+params: dict[str, Any] = {
+    "formulation": "n_pressure_w_saturation",
+    "folder_name": foldername,
+}
+model = BuckleyLeverett_Analytics(params)
+
+model._grid_size = 200
+model._phys_size = 20
+
+model._density_w = 1.0
+model._density_n = 1.0
+
+model._rel_perm_model = "power"
+model._rel_perm_linear_param = 1.0
+model._limit_rel_perm = True
+
+
+yscales = np.maximum(np.random.rand(20), 0.5).tolist()
+yscales[:5] = np.arange(0.1, 0.5, 0.1)
+xscales = [20000.0] * 20
+offsets = np.linspace(0.4, 0.6, 20).tolist()
+
+model._yscales = yscales
+model._xscales = xscales
+model._offsets = offsets
+
+model._time_step = 0.2
+model._schedule = np.array([0, 10.0])
+
+model.prepare_simulation()
+
+g = model.mdg.subdomains()[0]
+
+lax_friedrichs_grid = grid.create_grid(
+    (model.domain.bounding_box["xmin"], model.domain.bounding_box["xmax"]),
+    (model.domain.bounding_box["xmax"] - model.domain.bounding_box["xmin"])
+    / model._grid_size,
+)
+initial_condition = np.full_like(lax_friedrichs_grid, model._residual_saturation_w)
+initial_condition[0 : int(model._grid_size / 2) - 10] = 1 - model._residual_saturation_n
+initial_condition[
+    int(model._grid_size / 2) - 10 : int(model._grid_size / 2) + 10
+] = np.linspace(1 - model._residual_saturation_n, model._residual_saturation_w, 20)
+
+params = {
+    # Negative influx of the model, since the sides are switched
+    "influx": -model._influx,
+    "porosity": model._porosity(g)[0],
+    "density_w": model._density_w,
+    "density_n": model._density_n,
+    "angle": model._angle,
+    "S_M": 1 - model._residual_saturation_n,
+    "S_m": model._residual_saturation_w,
+    "yscales": model._yscales,
+    "xscales": model._xscales,
+    "offsets": model._offsets,
+    "rel_perm_model": model._rel_perm_model,
+    "grid": lax_friedrichs_grid,
+    "initial_condition": initial_condition,
+}
+lax_friedrichs = numerical_solution.BuckleyLeverett(params)
+analytical = analytical_solution.BuckleyLeverett(params)
+
+# Exchange the fractional flow function to one with perturbed mobility.
+fractionalflow = FractionalFlowSympy_PerturbedMobilityW(params)
+lax_friedrichs.fractionalflow = fractionalflow
+lax_friedrichs.lambdify()
+analytical.fractionalflow = fractionalflow
+analytical.lambdify()
+
+
+# Get max time step size.
+max_time_step: float = lax_friedrichs.cfl_condition()
+
+# For some reason the end time needs to be multiplied by 10 to get the same
+# result as the Lax-Friedrichs solver.
+# The time step is also multiplied by 10.
+plt.figure()
+# Run different time steps to get convergence order in time.
+for time_step in np.linspace(max_time_step / 10, max_time_step * 10, 20):
+    filename = f"timestep_{time_step}"
     # Remove old file handler.
     try:
-        logger.removeHandler(fh)
+        logger.removeHandler(fh)  # type: ignore
     except Exception:
         pass
-    log_filename = os.path.join(foldername, "log.txt")
+    log_filename = os.path.join(foldername, filename + "_log.txt")
     fh = logging.FileHandler(filename=log_filename)
     logger.removeHandler(fh)
     logger.addHandler(fh)
 
-    # Set up model.
-    params: dict[str, Any] = {
-        "formulation": "n_pressure_w_saturation",
-        "file_name": filename,
-        "folder_name": foldername,
-    }
-    model = BuckleyLeverett_Analytics(params)
+    model.exporter._file_name = f"timestep_{time_step}"
 
-    model._grid_size = 200
-    model._phys_size = 20
-
-    model._density_w = 1.0
-    model._density_n = 1.0
-    model.rel_perm_linear_param = 1.0
-
-    model._rel_perm_model = "power"
-    model._rel_perm_linear_param = 1.0
-    model._limit_rel_perm = True
-
-    model._yscales = yscales_list[i]
-    model._xscales = [1000] * len(yscales_list[i])
-    model._offsets = offsets_list[i]
-
-    model.prepare_simulation()
-
-    # Set up a numerical buckley-leverret instance to calculate the time step size
-    # s.t. the CFL condition is satisfied.
-    # Set up an analytical buckley-leverett instance to compare the solutions.
-    g = model.mdg.subdomains()[0]
-
-    lax_friedrichs_grid = grid.create_grid(
-        (model.domain.bounding_box["xmin"], model.domain.bounding_box["xmax"]),
-        (model.domain.bounding_box["xmax"] - model.domain.bounding_box["xmin"])
-        / model._grid_size,
-    )
-    initial_condition = np.full_like(lax_friedrichs_grid, model._residual_saturation_w)
-    initial_condition[0 : int(model._grid_size / 2) - 10] = (
-        1 - model._residual_saturation_n
-    )
-    initial_condition[
-        int(model._grid_size / 2) - 10 : int(model._grid_size / 2) + 10
-    ] = np.linspace(1 - model._residual_saturation_n, model._residual_saturation_w, 20)
-
-    params = {
-        # Negative influx of the model, since the sides are switched
-        "influx": -model._influx,
-        "porosity": model._porosity(g)[0],
-        "porosity": model._porosity(g)[0],
-        "density_w": model._density_w,
-        "density_n": model._density_n,
-        "angle": model._angle,
-        "S_M": 1 - model._residual_saturation_n,
-        "S_m": model._residual_saturation_w,
-        "yscales": model._yscales,
-        "xscales": model._xscales,
-        "offsets": model._offsets,
-        "rel_perm_model": model._rel_perm_model,
-        "grid": lax_friedrichs_grid,
-        "initial_condition": initial_condition,
-    }
-    lax_friedrichs = numerical_solution.BuckleyLeverett(params)
-    analytical = analytical_solution.BuckleyLeverett(params)
-
-    # Exchange the fractional flow function to one with perturbed mobility.
-    fractionalflow = FractionalFlowSympy_PerturbedMobilityW(params)
-    lax_friedrichs.fractionalflow = fractionalflow
-    lax_friedrichs.lambdify()
-    analytical.fractionalflow = fractionalflow
-    analytical.lambdify()
-
-    # Get max time step size.
-    time_step: float = lax_friedrichs.cfl_condition()
-
-    # For some reason the end time needs to be multiplied by 10 to get the same
-    # result as the Lax-Friedrichs solver.
-    # The time step is also multiplied by 10.
     model._time_step = time_step * 10
     model._schedule = np.array([0, 10.0 + (model._time_step - 10.0 % model._time_step)])
 
-    model._create_managers()
     model.prepare_simulation()
-
-    model.before_newton_loop()
-    model.before_newton_iteration()
-    print(model._density_n)
-    print(model._density_w)
 
     # Run and plot the fractional flow model.
     try:
         with logging_redirect_tqdm([logger]):
-            logger.info(f"set time step size to {time_step} to satisfy CFL condition")
             run_time_dependent_model(
                 model, {"nl_convergence_tol": 1e-10, "max_iterations": 30}
             )
@@ -271,19 +264,22 @@ for i in range(5):
         pass
 
     # Plot condition numbers.
-    diagnostics_filename = os.path.join(foldername, "diagnostics.png")
+    diagnostics_filename = os.path.join(
+        foldername, f"timestep_{time_step}_diagnostics.png"
+    )
     diagnostics_data = model.run_diagnostics(
         default_handlers=("max",),
     )
     model.plot_diagnostics(diagnostics_data, key="max", filename=diagnostics_filename)
 
     # Plot error curves after the last time step.
-    error_plot_filename = os.path.join(foldername, "error_plot.png")
+    error_plot_filename = os.path.join(
+        foldername, f"timestep_{time_step}_error_plot.png"
+    )
     errors = error_curves.read_errors_from_log(log_filename)
     error_curves.plot_error_curves(error_plot_filename, errors)
 
     # Plot solution
-    plt.figure()
     saturation = model.equation_system.get_variable_values(
         variables=[model._ad.saturation], time_step_index=0
     )
@@ -291,42 +287,34 @@ for i in range(5):
     plt.plot(
         np.linspace(-10, model._phys_size - 10, model._grid_size)[5:-5:],
         saturation[-5:5:-1],
-        label="fractional flow solution",
+        label=f"timestep_{time_step}_fractional flow solution",
     )
 
-    # Compute and plot the lax friedrichs solution.
-    lax_friedrichs.time_step = lax_friedrichs.cfl_condition()
-    for _ in tqdm.tqdm(
-        list(
-            np.arange(
-                model._schedule[0],
-                model._schedule[1] / 10,
-                lax_friedrichs.time_step,
-            )
-        )
-    ):
-        lax_friedrichs.solve()
-    plt.plot(
-        lax_friedrichs_grid,
-        lax_friedrichs.previous_solution,
-        label="lax friedrich solution",
-    )
+# Compute and plot the lax friedrichs solution.
+lax_friedrichs.time_step = lax_friedrichs.cfl_condition()
+for _ in tqdm.tqdm(list(np.arange(0, 1, lax_friedrichs.time_step))):
+    lax_friedrichs.solve()
+plt.plot(
+    lax_friedrichs_grid,
+    lax_friedrichs.previous_solution,
+    label="lax friedrich solution",
+)
 
-    # Compute and plot the analytical solution
-    concave_hull, f_prime = analytical.concave_hull()
-    # Cut on both sides to avoid weird behavior.
-    yy = np.arange(
-        analytical.S_m, analytical.S_M, (analytical.S_M - analytical.S_m) / 500
-    )[10:-10]
-    xx = f_prime(yy)
-    plt.plot(xx, yy, label="analytical solution")
-    plt.xlabel(rf"\(x\)")
-    plt.ylabel(rf"\(S_w\)")
-    plt.legend()
-    plt.savefig(os.path.join(foldername, "compare_solutions") + ".png")
-    plt.close()
-    misc.map_fractional_flow(
-        analytical,
-        filename=os.path.join(foldername, filename),
-    ),
-    logging.info(f"finished run and saved to {os.path.join(foldername, filename)}")
+# Compute and plot the analytical solution
+concave_hull, f_prime = analytical.concave_hull()
+# Cut on both sides to avoid weird behavior.
+yy = np.arange(analytical.S_m, analytical.S_M, (analytical.S_M - analytical.S_m) / 500)[
+    10:-10
+]
+xx = f_prime(yy)
+plt.plot(xx, yy, label="analytical solution")
+plt.xlabel(rf"\(x\)")
+plt.ylabel(rf"\(S_w\)")
+plt.legend()
+plt.savefig(os.path.join(foldername, "compare_solutions") + ".png")
+plt.close()
+misc.map_fractional_flow(
+    analytical,
+    filename=os.path.join(foldername, filename),
+),
+logging.info(f"finished run and saved to {os.path.join(foldername, filename)}")
