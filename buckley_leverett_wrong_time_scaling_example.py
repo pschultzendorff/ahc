@@ -102,7 +102,8 @@ except Exception:
 filename: str = f"run"
 # Remove old file handler.
 try:
-    logger.removeHandler(fh)
+    # MyPy complains, although we are in a try statement, so we ignore it.
+    logger.removeHandler(fh)  # type:ignore
 except Exception:
     pass
 log_filename = os.path.join(foldername, "log.txt")
@@ -128,10 +129,12 @@ model._rel_perm_model = "power"
 model._rel_perm_linear_param = 1.0
 model._limit_rel_perm = True
 
-FINAL_TIME = 1.0
 
 model.prepare_simulation()
 
+FINAL_TIME = 1.0
+
+# Initiate Lax-Friedrichs and analytical solver.
 g = model.mdg.subdomains()[0]
 
 lax_friedrichs_grid = grid.create_grid(
@@ -164,13 +167,11 @@ params = {
 lax_friedrichs = numerical_solution.BuckleyLeverett(params)
 analytical = analytical_solution.BuckleyLeverett(params)
 
+
+# Set time step to satisfy the CFL condition for explicit solvers.
 model._time_step = lax_friedrichs.cfl_condition()
 model._schedule = np.array([0, FINAL_TIME])
 model.prepare_simulation()
-
-mobility_w = model._mobility_w(subdomains=model.mdg.subdomains())
-mobility_n = model._mobility_n(subdomains=model.mdg.subdomains())
-mobility_t = model._mobility_t(subdomains=model.mdg.subdomains())
 
 
 with logging_redirect_tqdm([logger]):
@@ -215,7 +216,7 @@ plt.plot(
     label="lax friedrich solution",
 )
 
-# Compute and plot the analytical solution
+# Compute and plot the analytical solution.
 concave_hull, f_prime = analytical.concave_hull()
 # Cut on both sides to avoid weird behavior.
 yy = np.arange(analytical.S_m, analytical.S_M, (analytical.S_M - analytical.S_m) / 500)[
@@ -223,6 +224,8 @@ yy = np.arange(analytical.S_m, analytical.S_M, (analytical.S_M - analytical.S_m)
 ]
 xx = f_prime(yy)
 plt.plot(xx, yy, label="analytical solution")
+
+# Finish plotting.
 plt.xlabel(rf"\(x\)")
 plt.ylabel(rf"\(S_w\)")
 plt.legend()
