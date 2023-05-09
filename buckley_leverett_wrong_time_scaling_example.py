@@ -22,25 +22,6 @@ from tpf_lab.models.buckley_leverett import BuckleyLeverett
 from tpf_lab.models.run_models import run_time_dependent_model
 from tpf_lab.utils import logging_redirect_tqdm
 
-try:
-    # MyPy is not happy with Seaborn since it's not typed. We silence this warning.
-    import seaborn as sns  # type: ignore[import]
-except ImportError:
-    _IS_SEABORN_AVAILABLE: bool = False
-else:
-    _IS_SEABORN_AVAILABLE = True
-
-
-plt.rcParams.update(
-    {
-        "text.latex.preamble": r"\usepackage{lmodern}",
-        "text.usetex": True,
-        "font.size": 16,
-        # "font.family": "serif",
-        # "text.latex.unicode": True,
-    }
-)
-
 
 # Setup logging.
 logger = logging.getLogger()
@@ -64,22 +45,6 @@ class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
             }
         )
         logger.debug("Grid created")
-
-
-class DiagnosticsMixin_with_save_functionality(pp.DiagnosticsMixin):
-    def plot_diagnostics(
-        self, diagnostics_data, key: str, filename: str, **kwargs
-    ) -> None:
-        if _IS_SEABORN_AVAILABLE:
-            plt.figure()
-            super().plot_diagnostics(diagnostics_data, key)
-            plt.savefig(filename)
-
-
-class BuckleyLeverett_Analytics(
-    DiagnosticsMixin_with_save_functionality, BuckleyLeverett_perturbed_mobility_w
-):
-    ...
 
 
 folder_basename: str = os.path.join("results", "bl-test")
@@ -117,7 +82,7 @@ params: dict[str, Any] = {
     "file_name": filename,
     "folder_name": foldername,
 }
-model = BuckleyLeverett_Analytics(params)
+model = BuckleyLeverett_perturbed_mobility_w(params)
 
 model._grid_size = 200
 model._phys_size = 10.0
@@ -178,18 +143,6 @@ with logging_redirect_tqdm([logger]):
     run_time_dependent_model(model, {"nl_convergence_tol": 1e-10, "max_iterations": 30})
 
 
-# Plot condition numbers.
-diagnostics_filename = os.path.join(foldername, "diagnostics.png")
-diagnostics_data = model.run_diagnostics(
-    default_handlers=("max",),
-)
-model.plot_diagnostics(diagnostics_data, key="max", filename=diagnostics_filename)
-
-# Plot error curves after the last time step.
-error_plot_filename = os.path.join(foldername, "error_plot.png")
-errors = error_curves.read_errors_from_log(log_filename)
-error_curves.plot_error_curves(error_plot_filename, errors)
-
 # Plot solution
 plt.figure()
 saturation = model.equation_system.get_variable_values(
@@ -206,7 +159,7 @@ plt.plot(
     label="fractional flow solution",
 )
 
-# Compute and plot the lax friedrichs solution. # Comment this
+# Compute and plot the lax friedrichs solution.
 lax_friedrichs.time_step = lax_friedrichs.cfl_condition()
 for _ in tqdm.tqdm(list(np.arange(0, FINAL_TIME, lax_friedrichs.time_step))):
     lax_friedrichs.solve()
@@ -226,8 +179,8 @@ xx = f_prime(yy)
 plt.plot(xx, yy, label="analytical solution")
 
 # Finish plotting.
-plt.xlabel(rf"\(x\)")
-plt.ylabel(rf"\(S_w\)")
+plt.xlabel(rf"x")
+plt.ylabel(rf"S_w")
 plt.legend()
 plt.savefig(os.path.join(foldername, "compare_solutions") + ".png")
 plt.close()
