@@ -5,9 +5,9 @@ from datetime import date
 import numpy as np
 import porepy as pp
 
-from src.tpf_lab.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
-from src.tpf_lab.utils import logging_redirect_tqdm, rm_out_padding
+from tpf_lab.models.run_models import run_time_dependent_model
+from tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
+from tpf_lab.utils import logging_redirect_tqdm, rm_out_padding
 
 # rm_out_padding()
 
@@ -25,27 +25,11 @@ params = {
 # Setup logging.
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
-# logger.handlers.clear()
-# try:
-#     os.makedirs(params["folder_name"])
-# except OSError:
-#     pass
-# fh = logging.FileHandler(
-#     os.path.join(params["folder_name"], ".".join([params["file_name"], "txt"]))
-# )
-# fh.setLevel(logging.DEBUG)
-# # formatter = jsonlogger.JsonFormatter()
-# # file_handler.setFormatter(formatter)
-# sh = logging.StreamHandler()
-# sh.setLevel(logging.DEBUG)
-# logger.addHandler(sh)
-# logger.addHandler(fh)
-# logger.setLevel(logging.DEBUG)
 
 w_source_cell_index = 209
 
 
-class ModifiedModel(TwoPhaseFlow):
+class ModifiedModel(TwoPhaseFlowEquations):
     def _source_w(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._source_w(g)
         array[w_source_cell_index] = 0.5

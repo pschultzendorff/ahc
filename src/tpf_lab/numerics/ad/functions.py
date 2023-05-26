@@ -24,10 +24,10 @@ import scipy.sparse as sps
 import porepy as pp
 from porepy.numerics.ad.forward_mode import AdArray
 
-__all__ = ["pow", "minimum"]
+__all__ = ["ad_pow", "minimum"]
 
 
-def pow(var, exponent: float):
+def ad_pow(var, exponent: float):
     if isinstance(var, AdArray):
         if exponent >= 0:
             val = np.power(var.val, exponent)

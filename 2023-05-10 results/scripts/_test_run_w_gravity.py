@@ -8,7 +8,7 @@ import numpy as np
 import porepy as pp
 
 from tpf_lab.models.run_models import run_time_dependent_model
-from tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
 from tpf_lab.utils import logging_redirect_tqdm
 
 w_source_cell_index = 209
@@ -31,7 +31,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
 
-class ModifiedModel(TwoPhaseFlow):
+class TwoPhaseFlow_wGravity(TwoPhaseFlowEquations):
     # def _source_w(self, g: pp.Grid) -> np.ndarray:
     #     array: np.ndarray = super()._source_w(g)
     #     array[w_source_cell_index] = 0.5
@@ -68,7 +68,7 @@ class ModifiedModel(TwoPhaseFlow):
         return array
 
 
-model = ModifiedModel(params)
+model = TwoPhaseFlow_wGravity(params)
 
 model._grid_size = 20
 model._phys_size = 2

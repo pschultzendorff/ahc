@@ -8,7 +8,7 @@ import numpy as np
 
 import porepy as pp
 from src.tpf_lab.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
 from tpf_lab.ml.nn import BaseNN
 from tpf_lab.ml.nn_ad import nn_wrapper
 
@@ -66,7 +66,7 @@ model._schedule = [0, 100.0]
 # )
 
 
-class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
+class TwoPhaseFlow_DataRelPerm(TwoPhaseFlowEquations):
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
         model = BaseNN({"depth": 1, "act": "linear"})
@@ -113,7 +113,7 @@ run_time_dependent_model(
 )
 
 
-class TwoPhaseFlow_WSource(TwoPhaseFlow):
+class TwoPhaseFlow_WSource(TwoPhaseFlowEquations):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._source_w(g)
         array[209] = 0.3

@@ -12,15 +12,15 @@ def test_pow_scalar():
     assert a.val == 3 and a.jac == 0
 
     # Positive exponent
-    b = af.pow(a, 3)
+    b = af.ad_pow(a, 3)
     assert b.val == np.power(3, 3) and b.jac == 0
 
     # Zero exponent
-    b = af.pow(a, 0)
+    b = af.ad_pow(a, 0)
     assert b.val == np.power(3, 0) and b.jac == 0
 
     # Negative exponent
-    b = af.pow(a, -3)
+    b = af.ad_pow(a, -3)
     assert b.val == 1 / np.power(3, 3) and b.jac == 0
 
 
@@ -29,15 +29,15 @@ def test_pow_advar():
     assert a.val == 2 and a.jac == 3
 
     # Positive exponent
-    b = af.pow(a, 3)
+    b = af.ad_pow(a, 3)
     assert b.val == np.power(2, 3) and b.jac == 3 * 3 * np.power(2, 2)
 
     # Zero exponent
-    b = af.pow(a, 0)
+    b = af.ad_pow(a, 0)
     assert b.val == np.power(2, 0) and b.jac == 0
 
     # Negative exponent
-    b = af.pow(a, -3)
+    b = af.ad_pow(a, -3)
     assert b.val == 1 / np.power(2, 3)
     assert b.val == 1 / np.power(2, 3) and b.jac == -3 * 3 * (
         np.divide(1, np.power(2, 4, dtype=np.float64))
@@ -51,17 +51,17 @@ def test_pow_vector():
     assert np.all(J == np.array([[3, 2, 1], [5, 6, 1], [2, 3, 5]]))
 
     # Positive exponent
-    b = af.pow(a, 3)
+    b = af.ad_pow(a, 3)
     jac = (3 * np.diag(np.power(val, 2))) @ J
     assert np.all(b.val == np.power(val, 3)) and np.all(b.jac == jac)
 
     # Zero exponent
-    b = af.pow(a, 0)
+    b = af.ad_pow(a, 0)
     jac = 0 * np.diag(np.power(val, 2))
     assert np.all(b.val == np.power(val, 0)) and np.all(b.jac == jac)
 
     # Negative exponent
-    b = af.pow(a, -3)
+    b = af.ad_pow(a, -3)
     # Convert to diag. matrix after division, to avoid ``inf`` values from division
     # by zero.
     jac = np.diag(-3 / np.power(val, 4)) @ J
@@ -74,17 +74,17 @@ def test_pow_sparse_jac():
     a = AdArray(val, J)
 
     # Positive exponent
-    b = af.pow(a, 3)
+    b = af.ad_pow(a, 3)
     jac = (3 * np.diag(np.power(val, 2))) @ J.A
     assert np.all(b.val == np.power(val, 3)) and np.all(b.jac == jac)
 
     # Zero exponent
-    b = af.pow(a, 0)
+    b = af.ad_pow(a, 0)
     jac = 0 * np.diag(np.power(val, 2))
     assert np.all(b.val == np.power(val, 0)) and np.all(b.jac == jac)
 
     # Negative exponent
-    b = af.pow(a, -3)
+    b = af.ad_pow(a, -3)
     jac = np.diag(-3 / np.power(val, 4)) @ J.A
     assert np.all(b.val == 1 / np.power(val, 3)) and np.all(b.jac == jac)
 
@@ -98,7 +98,7 @@ def test_pow_scalar_times_ad_var():
     assert np.all(a.val == [1, 2, 3]) and np.all(a.jac.A == J.A)
 
     # Positive exponent
-    b = af.pow(c * a, 3)
+    b = af.ad_pow(c * a, 3)
     # ? Without the ``c`` in the next line the test fails, although I am not
     # completely sure why it is needed. Probably something with the ad system, i.e.
     # the ``c`` is a constant and we need to use the chain rule. Weirdly enough, it
@@ -107,12 +107,12 @@ def test_pow_scalar_times_ad_var():
     assert np.allclose(b.val, np.power(c * val, 3)) and np.allclose(b.jac.A, jac.A)
 
     # Zero exponent
-    b = af.pow(c * a, 0)
+    b = af.ad_pow(c * a, 0)
     jac = 0 * sps.diags(np.power(c * val, 2))
     assert np.all(b.val == np.power(c * val, 0)) and np.allclose(b.jac.A, jac.A)
 
     # Negative exponent
-    b = af.pow(c * a, -3)
+    b = af.ad_pow(c * a, -3)
     jac = sps.diags((-3 * c) / np.power(c * val, 4)) @ J
     assert np.all(b.val == 1 / np.power(c * val, 3)) and np.allclose(b.jac.A, jac.A)
 

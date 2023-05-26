@@ -3,5 +3,4 @@ tqdm
 ipython
 jupyter
 deepdiff
-buckleyleverett
 seaborn

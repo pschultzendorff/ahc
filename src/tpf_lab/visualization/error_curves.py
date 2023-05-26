@@ -52,6 +52,22 @@ def plot_error_curves(filename: str, errors: np.ndarray) -> None:
     plt.savefig(filename)
 
 
+def analyse_convergence(errors: np.ndarray) -> tuple[float, float]:
+    """_summary_
+
+
+
+    Parameters:
+        errors: _description_
+
+    Returns:
+        order: Order of convergence.
+        rate: Rate of convergece.
+
+    """
+    pass
+
+
 def plot_error_position(filename: str, failure_time_indices: list[list[float]]) -> None:
     """Plot the failure time step in dependence of position of the source or something
     else.

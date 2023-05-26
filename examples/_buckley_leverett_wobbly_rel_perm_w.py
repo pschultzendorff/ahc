@@ -9,7 +9,8 @@ from typing import Any, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
-import sympy as sp
+import scipy as sp
+import sympy
 import tqdm
 from buckley_leverett import (
     analytical_solution,
@@ -20,29 +21,21 @@ from buckley_leverett import (
 )
 
 import tpf_lab.visualization.error_curves as error_curves
-from tpf_lab.models.buckley_leverett import BuckleyLeverett
+from tpf_lab.models.buckley_leverett import BuckleyLeverettEquations
 from tpf_lab.models.run_models import run_time_dependent_model
+from tpf_lab.numerics.ad.functions import ad_pow, minimum
 from tpf_lab.utils import logging_redirect_tqdm
-from tpf_lab.numerics.ad.functions import pow, minimum
+from tpf_lab.visualization.diagnostics import DiagnosticsMixinExtended
 
-try:
-    # MyPy is not happy with Seaborn since it's not typed. We silence this warning.
-    import seaborn as sns  # type: ignore[import]
-except ImportError:
-    _IS_SEABORN_AVAILABLE: bool = False
-else:
-    _IS_SEABORN_AVAILABLE = True
-
-
-plt.rcParams.update(
-    {
-        "text.latex.preamble": r"\usepackage{lmodern}",
-        "text.usetex": True,
-        "font.size": 16,
-        # "font.family": "serif",
-        # "text.latex.unicode": True,
-    }
-)
+# plt.rcParams.update(
+#     {
+#         "text.latex.preamble": r"\usepackage{lmodern}",
+#         "text.usetex": True,
+#         "font.size": 16,
+#         # "font.family": "serif",
+#         # "text.latex.unicode": True,
+#     }
+# )
 
 
 # Setup logging.
@@ -50,7 +43,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
 
-class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
+class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverettEquations):
     def __init__(self, params: dict | None = None) -> None:
         super().__init__(params)
         if params is None:
@@ -80,7 +73,7 @@ class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
         yscales = [pp.ad.Scalar(yscale) for yscale in self._yscales]
         offsets = [pp.ad.Scalar(offset) for offset in self._offsets]
         exp_func = pp.ad.Function(pp.ad.functions.exp, "exp")
-        square_func = pp.ad.Function(partial(pow, exponent=2), "square")
+        square_func = pp.ad.Function(partial(ad_pow, exponent=2), "square")
         error = pp.ad.Scalar(0) * s
         for xscale, yscale, offset in zip(xscales, yscales, offsets):
             error = error + yscale * exp_func(
@@ -89,19 +82,8 @@ class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
         return error
 
 
-class DiagnosticsMixin_with_save_functionality(pp.DiagnosticsMixin):
-    # MyPy doesn't like that the signature is different.
-    def plot_diagnostics(  # type: ignore
-        self, diagnostics_data, key: str, filename: str, **kwargs
-    ) -> None:
-        if _IS_SEABORN_AVAILABLE:
-            plt.figure()
-            super().plot_diagnostics(diagnostics_data, key)
-            plt.savefig(filename)
-
-
 class BuckleyLeverett_Analytics(
-    DiagnosticsMixin_with_save_functionality, BuckleyLeverett_perturbed_mobility_w
+    DiagnosticsMixinExtended, BuckleyLeverett_perturbed_mobility_w
 ):
     ...
 
@@ -125,9 +107,9 @@ class FractionalFlowSympy_PerturbedMobilityW(functions.FractionalFlowSymPy):
         return self.S_normalized() ** 3 + self.error_function_deriv()
 
     def error_function_deriv(self):
-        return sp.Add(
+        return sympy.Add(
             *[
-                yscale * sp.exp(-xscale * (self.S_w - offset) ** 2)
+                yscale * sympy.exp(-xscale * (self.S_w - offset) ** 2)
                 for xscale, yscale, offset in zip(
                     self.xscales, self.yscales, self.offsets
                 )
@@ -234,7 +216,9 @@ max_time_step: float = lax_friedrichs.cfl_condition()
 # The time step is also multiplied by 10.
 plt.figure()
 # Run different time steps to get convergence order in time.
-for time_step in np.linspace(max_time_step / 10, max_time_step * 10, 20):
+for time_step in [
+    max_time_step
+]:  # np.linspace(max_time_step / 10, max_time_step * 10, 20):
     filename = f"timestep_{time_step}"
     # Remove old file handler.
     try:
@@ -276,14 +260,15 @@ for time_step in np.linspace(max_time_step / 10, max_time_step * 10, 20):
     error_plot_filename = os.path.join(
         foldername, f"timestep_{time_step}_error_plot.png"
     )
-    errors = error_curves.read_errors_from_log(log_filename)
-    error_curves.plot_error_curves(error_plot_filename, errors)
+    # errors = error_curves.read_errors_from_log(log_filename)
+    # error_curves.plot_error_curves(error_plot_filename, errors)
 
     # Plot solution
     saturation = model.equation_system.get_variable_values(
         variables=[model._ad.saturation], time_step_index=0
     )
     # Switch sides of the saturation, as PorePy models it the other way around.
+    plt.figure()
     plt.plot(
         np.linspace(-10, model._phys_size - 10, model._grid_size)[5:-5:],
         saturation[-5:5:-1],

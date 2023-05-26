@@ -8,12 +8,12 @@ import numpy as np
 
 import porepy as pp
 from porepy.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
 
 
 # Simple test run
 # Neumann bc on three sides, Dirichlet bc on one side.
-model = TwoPhaseFlow(
+model = TwoPhaseFlowEquations(
     {
         "file_name": "simple",
         "folder_name": os.path.join("two_phase_flow_runs", "simple"),
@@ -24,7 +24,7 @@ model._schedule: np.ndarray = np.array([0, 0.2])
 # run_time_dependent_model(model, {})
 
 
-class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
+class TwoPhaseFlow_Dirichlet(TwoPhaseFlowEquations):
     def _bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """Homogeneous Dirichlet conditions on all external boundaries."""
         all_bf, *_ = self._domain_boundary_sides(g)
@@ -42,7 +42,7 @@ model = TwoPhaseFlow_Dirichlet(
 
 
 # Test run with wetting source
-class TwoPhaseFlow_WSource(TwoPhaseFlow):
+class TwoPhaseFlow_WSource(TwoPhaseFlowEquations):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._source_w(g)
         array[209] = 0.2
@@ -89,7 +89,7 @@ run_time_dependent_model(
 
 
 # Test run with non-wetting source
-class TwoPhaseFlow_NWSource(TwoPhaseFlow):
+class TwoPhaseFlow_NWSource(TwoPhaseFlowEquations):
     def _n_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._source_n(g)
         array[209] = 0.2
@@ -180,7 +180,7 @@ model._limit_saturation_change = True
 
 
 # Neumann conditions do not converge
-class TwoPhaseFlow_Ext(TwoPhaseFlow):
+class TwoPhaseFlow_Ext(TwoPhaseFlowEquations):
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
         # Let the model run for a longer time
@@ -225,7 +225,7 @@ model = TwoPhaseFlow_Ext_Dir(
 
 
 # Test run with injection and extraction at the same time
-class TwoPhaseFlow_InjExt(TwoPhaseFlow):
+class TwoPhaseFlow_InjExt(TwoPhaseFlowEquations):
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
         # Let the model run for a longer time

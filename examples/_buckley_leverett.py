@@ -18,36 +18,37 @@ from buckley_leverett import (
 )
 
 import tpf_lab.visualization.error_curves as error_curves
-from tpf_lab.models.buckley_leverett import BuckleyLeverett
-from tpf_lab.models.run_models import run_time_dependent_model
-from tpf_lab.utils import logging_redirect_tqdm
+from tpf_lab.models.buckley_leverett import (
+    BuckleyLeverettEquations,
+    TwoPhaseFlowVariables,
+    BuckleyLeverettBoundaryConditions,
+    BuckleyLeverettSolutionStrategy,
+    #
+    BuckleyLeverettDefaultGeometry,
+    #
+    BuckleyLeverettSemiAnalyticalSolution,
+    BuckleyLeverettDataSaving,
+    VerificationUtils,
+)
 
-try:
-    # MyPy is not happy with Seaborn since it's not typed. We silence this warning.
-    import seaborn as sns  # type: ignore[import]
-except ImportError:
-    _IS_SEABORN_AVAILABLE: bool = False
-else:
-    _IS_SEABORN_AVAILABLE = True
-
+from porepy.models.run_models import run_time_dependent_model
+from tpf_lab.visualization.diagnostics import DiagnosticsMixinExtended
 
 plt.rcParams.update(
     {
         "text.latex.preamble": r"\usepackage{lmodern}",
         "text.usetex": True,
         "font.size": 16,
-        # "font.family": "serif",
-        # "text.latex.unicode": True,
     }
 )
 
 
 # Setup logging.
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 
-class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
+class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverettEquations):
     def _mobility_w(self, subdomains: list[pp.Grid]) -> pp.ad.Operator:
         """Add a perturbation to the wetting mobility."""
         mobility_w = super()._mobility_w(subdomains)
@@ -55,18 +56,18 @@ class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverett):
         return mobility_w + upwind_w.upwind @ self._error_function_deriv()
 
 
-class DiagnosticsMixin_with_save_functionality(pp.DiagnosticsMixin):
-    def plot_diagnostics(
-        self, diagnostics_data, key: str, filename: str, **kwargs
-    ) -> None:
-        if _IS_SEABORN_AVAILABLE:
-            plt.figure()
-            super().plot_diagnostics(diagnostics_data, key)
-            plt.savefig(filename)
-
-
-class BuckleyLeverett_Analytics(
-    DiagnosticsMixin_with_save_functionality, BuckleyLeverett_perturbed_mobility_w
+class BuckleyLeverettModifiedSetup(  # type: ignore
+    BuckleyLeverett_perturbed_mobility_w,
+    TwoPhaseFlowVariables,
+    BuckleyLeverettBoundaryConditions,
+    BuckleyLeverettSolutionStrategy,
+    #
+    BuckleyLeverettDefaultGeometry,
+    #
+    BuckleyLeverettSemiAnalyticalSolution,
+    BuckleyLeverettDataSaving,
+    VerificationUtils,
+    DiagnosticsMixinExtended,
 ):
     ...
 
@@ -83,10 +84,10 @@ class FractionalFlowSympy_PerturbedMobilityW(functions.FractionalFlowSymPy):
         return self.S_normalized() ** 3 + self.error_function_deriv()
 
 
-yscales = np.arange(20.0, 25.0, 1.0)
-densities = [1.0]
+yscales = np.concatenate([np.arange(20.0, 25.0, 1.0), np.arange(0.0, 0.7, 0.1)])
+densities = np.arange(1.0, 9.0, 2.0)
 xscale = 50
-offset = 0.35
+offset = 0.5
 
 folder_basename: str = os.path.join(
     "results", "buckley_leverett", "perturbed_mobility_w_saturation_normalized"
@@ -103,7 +104,10 @@ for yscale in yscales:
         # Set up folder and files for logging/plots/saved time steps.
         foldername = os.path.join(
             folder_basename,
-            f"yscale_{yscale}_xscale_{xscale}_offset_{offset}_density_w_{1.0}_density_n_{density}",
+            (
+                f"yscale_{yscale}_xscale_{xscale}_offset_{offset}"
+                + f"_density_w_{1.0}_density_n_{density}"
+            ),
         )
         try:
             os.makedirs(foldername)
@@ -112,7 +116,7 @@ for yscale in yscales:
         filename: str = f"yscale_{yscale}_density_w_{density}"
         # Remove old file handler.
         try:
-            logger.removeHandler(fh)
+            logger.removeHandler(fh)  # type: ignore
         except Exception:
             pass
         log_filename = os.path.join(foldername, "log.txt")
@@ -126,7 +130,7 @@ for yscale in yscales:
             "file_name": filename,
             "folder_name": foldername,
         }
-        model = BuckleyLeverett_Analytics(params)
+        model = BuckleyLeverettModifiedSetup(params)
 
         model._grid_size = 200
         model._phys_size = 20
@@ -167,8 +171,7 @@ for yscale in yscales:
         )
 
         params = {
-            # Negative influx of the model, since the sides are switched
-            "influx": -model._influx,
+            "influx": model._influx,
             "porosity": model._porosity(g)[0],
             "density_w": model._density_w,
             "density_n": model._density_n,
@@ -195,40 +198,33 @@ for yscale in yscales:
         # Get max time step size.
         time_step: float = lax_friedrichs.cfl_condition()
 
-        # For some reason the end time needs to be multiplied by 10 to get the same
-        # result as the Lax-Friedrichs solver.
-        # The time step is also multiplied by 10.
-        model._time_step = time_step * 10
+        model._time_step = time_step
         model._schedule = np.array(
-            [0, 10.0 + (model._time_step - 10.0 % model._time_step)]
+            [0, 1.0 + (model._time_step - 1.0 % model._time_step)]
         )
 
-        model._create_managers()
         model.prepare_simulation()
 
-        model.before_newton_loop()
-        model.before_newton_iteration()
+        model.before_nonlinear_loop()
+        model.before_nonlinear_iteration()
 
         # Run and plot the fractional flow model.
         try:
-            with logging_redirect_tqdm([logger]):
-                logger.info(
-                    f"set time step size to {time_step} to satisfy CFL condition"
-                )
-                run_time_dependent_model(
-                    model, {"nl_convergence_tol": 1e-10, "max_iterations": 30}
-                )
+            logger.info(f"set time step size to {time_step} to satisfy CFL condition")
+            run_time_dependent_model(
+                model, {"nl_convergence_tol": 1e-10, "max_iterations": 30}
+            )
         except Exception:
             pass
 
         # Plot condition numbers.
-        diagnostics_filename = os.path.join(foldername, "diagnostics.png")
-        diagnostics_data = model.run_diagnostics(
-            default_handlers=("max",),
-        )
-        model.plot_diagnostics(
-            diagnostics_data, key="max", filename=diagnostics_filename
-        )
+        # diagnostics_filename = os.path.join(foldername, "diagnostics.png")
+        # diagnostics_data = model.run_diagnostics(
+        #     default_handlers=("max",),
+        # )
+        # model.plot_diagnostics(
+        #     diagnostics_data, key="max", filename=diagnostics_filename
+        # )
 
         # Plot error curves after the last time step.
         error_plot_filename = os.path.join(foldername, "error_plot.png")
@@ -238,26 +234,18 @@ for yscale in yscales:
         # Plot solution
         plt.figure()
         saturation = model.equation_system.get_variable_values(
-            variables=[model._ad.saturation], time_step_index=0
+            variables=[model.saturation_var], time_step_index=0
         )
         # Switch sides of the saturation, as PorePy models it the other way around.
         plt.plot(
             np.linspace(-10, model._phys_size - 10, model._grid_size)[5:-5:],
-            saturation[-5:5:-1],
+            saturation[5:-5:],
             label="fractional flow solution",
         )
 
         # Compute and plot the lax friedrichs solution.
         lax_friedrichs.time_step = lax_friedrichs.cfl_condition()
-        for _ in tqdm.tqdm(
-            list(
-                np.arange(
-                    model._schedule[0],
-                    model._schedule[1] / 10,
-                    lax_friedrichs.time_step,
-                )
-            )
-        ):
+        for _ in tqdm.tqdm(list(np.arange(0, 1, lax_friedrichs.time_step))):
             lax_friedrichs.solve()
         plt.plot(
             lax_friedrichs_grid,
