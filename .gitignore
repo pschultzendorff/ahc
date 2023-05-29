@@ -34,6 +34,7 @@ coverage.xml
 cover/
 
 # Logs and databases
+*results/
 .tmp
 *.sql
 *.sqlite

@@ -23,7 +23,7 @@ from tpf_lab.models.two_phase_flow import (
 from tpf_lab.numerics.ad.functions import ad_pow
 from tpf_lab.numerics.ad.functions import minimum as minimum_ad
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 class HomotopyContinuationRelPermEquations(TwoPhaseFlowEquations):
@@ -197,6 +197,8 @@ class HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy(
 class HomotopyContinuationRelPermEquations_LineartoWobbly(
     HomotopyContinuationRelPermEquations
 ):
+    """Wetting rel. perm. linear to wobbly. Nonwetting rel. perm linear to power."""
+
     _yscales: list[float]
     _xscales: list[float]
     _offsets: list[float]
@@ -255,12 +257,38 @@ class HomotopyContinuationRelPermEquations_LineartoWobbly(
             rel_perm = minimum_func(maximum_func(rel_perm))
         return rel_perm + self._error_function_deriv()
 
+    def _rel_perm_n_init(self) -> pp.ad.Operator:
+        r"""Linear wonwetting phase relative permeability."""
+        s_normalized = self._s_normalized()
+        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
+        rel_perm = (pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
+        if self._limit_rel_perm:
+            maximum_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
+            )
+            minimum_func = pp.ad.Function(
+                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
+            )
+            return minimum_func(maximum_func(rel_perm))
+        else:
+            return rel_perm
 
-class HomotopyContinuationRelPerm_LineartoWobbly_SolutionStrategy(
-    HomotopyContinuationRelPermSolutionStrategy,
-    BuckleyLeverettSolutionStrategy_WobblyRelPerm,
-):
-    ...
+    def _rel_perm_n_goal(self) -> pp.ad.Operator:
+        r"""Nonwetting phase relative permeability. Power model"""
+        s_normalized = self._s_normalized()
+        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
+        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
+        rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
+        if self._limit_rel_perm:
+            maximum_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
+            )
+            minimum_func = pp.ad.Function(
+                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
+            )
+            return minimum_func(maximum_func(rel_perm))
+        else:
+            return rel_perm
 
 
 class HomotopyContinuationRelPermEquations_LineartoPower(
@@ -331,10 +359,3 @@ class HomotopyContinuationRelPermEquations_LineartoPower(
             return minimum_func(maximum_func(rel_perm))
         else:
             return rel_perm
-
-
-class HomotopyContinuationRelPerm_LineartoPower_SolutionStrategy(
-    HomotopyContinuationRelPermSolutionStrategy,
-    BuckleyLeverettSolutionStrategy,
-):
-    ...

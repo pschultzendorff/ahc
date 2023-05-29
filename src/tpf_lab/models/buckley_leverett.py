@@ -26,7 +26,7 @@ from tpf_lab.visualization.diagnostics import (
 )
 
 # Setup logging.
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 class BuckleyLeverettEquations(TwoPhaseFlowEquations):
@@ -223,17 +223,17 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
             [self.saturation_var],
             time_step_index=self.time_manager.time_index,
         )
-        # Set pressure gradient roughly along the initial
-        # self.equation_system.set_variable_values(
-        #     np.linspace(150, 0, num_cells),
-        #     [self.pressure_w_var],
-        #     time_step_index=self.time_manager.time_index,
-        # )
-        # self.equation_system.set_variable_values(
-        #     np.linspace(150, 0, num_cells),
-        #     [self.pressure_n_var],
-        #     time_step_index=self.time_manager.time_index,
-        # )
+        # Set pressure gradient roughly s.t. the initial flux equals one everywhere.
+        self.equation_system.set_variable_values(
+            np.linspace(157, 0.4, num_cells),
+            [self.pressure_w_var],
+            time_step_index=self.time_manager.time_index,
+        )
+        self.equation_system.set_variable_values(
+            np.linspace(157, 0.4, num_cells),
+            [self.pressure_n_var],
+            time_step_index=self.time_manager.time_index,
+        )
 
     # def _export(self):
     #     """Export only each 10th time step."""
@@ -270,14 +270,19 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
     def after_nonlinear_failure(  # type: ignore
         self, solution: np.ndarray, errors: list[float], iteration_counter: int
     ) -> None:
-        super().after_nonlinear_failure(solution, errors, iteration_counter)
+        # Since the L2 error is not of interest when the model did not reach the last
+        # time step, data can be saved before the time step solution is distributed.
+        # ``super().after_nonlinear_failure()`` will then raise an ``ValueError``.
         self.save_data_time_step(errors, iteration_counter)
+        super().after_nonlinear_failure(solution, errors, iteration_counter)
 
     # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
     def after_nonlinear_convergence(  # type: ignore
         self, solution: np.ndarray, errors: list[float], iteration_counter: int
     ) -> None:
         super().after_nonlinear_convergence(solution, errors, iteration_counter)
+        # Save data (and calculate L2 error only after the time step solution was
+        # distributed).
         self.save_data_time_step(errors, iteration_counter)
 
 

@@ -76,8 +76,8 @@ class BuckleyLeverettDataSaving(VerificationDataSaving):
         approx_solution = self.equation_system.get_variable_values(
             [self.saturation_var], time_step_index=0
         )
+        # Calculate l2_error only if the last time step was reached.
         if np.isclose(self.time_manager.time, self.time_manager.time_final):
-            # Calculate l2_error only for the last time step.
             # Map solution
             adjusted_cell_centers = (
                 self.mdg.subdomains()[0].cell_centers[0, :]

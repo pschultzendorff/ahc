@@ -1,17 +1,17 @@
 import json
 import logging
+import os
 from copy import deepcopy
-from typing import ClassVar, Literal, Optional, Protocol, Type, Union
+from typing import ClassVar, Optional, Protocol, Type
 
 import numpy as np
 import porepy as pp
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
-from porepy.utils.txt_io import TxtData, export_data_to_txt
-from scipy import stats
 
+from tpf_lab.utils import save_setup_and_run_model
 from tpf_lab.visualization.diagnostics import BuckleyLeverettSaveData
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 class IsDataclass(Protocol):
@@ -41,11 +41,16 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
             spatial_refinement_rate,
             temporal_refinement_rate,
         )
+        # Run through list of model params for levels and create seperate folder names
+        # for each level.
+        self.base_folder_name = model_params["folder_name"]
         for params in self.model_params:
-            params["file_name"] = (
+            params["folder_name"] = os.path.join(
+                self.base_folder_name,
                 f"cell_diameter_{params['meshing_arguments']['cell_size']}"
-                + f"_dt_{params['time_manager'].dt}"
+                + f"_dt_{params['time_manager'].dt}",
             )
+            params["file_name"] = "data"
 
     def run_analysis(self) -> list:
         """Run convergence analysis. Changed from the super function s.t. results from
@@ -60,28 +65,17 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
         for level in range(self.levels):
             level_result: dict = {}
             setup = self.model_class(deepcopy(self.model_params[level]))
-            if not setup._is_time_dependent():
-                # Run stationary model
-                try:
-                    pp.run_stationary_model(setup, deepcopy(self.model_params[level]))
-                except Exception as e:
-                    # The model does not converge.
-                    logger.info(e)
-            else:
-                # Run time-dependent model
-                try:
-                    pp.run_time_dependent_model(
-                        setup, deepcopy(self.model_params[level])
-                    )
-                except Exception as e:
-                    # The model does not converge.
-                    logger.info(e)
-                # Complement information in results
-                level_result["dt"] = setup.time_manager.dt
-            # Export the model results.
+            try:
+                save_setup_and_run_model(setup, deepcopy(self.model_params[level]))
+            except Exception as e:
+                # The model does not converge.
+                logger.info(e)
+            # Export the final model data.
             setup._export()
+            # Add level information to results.
+            level_result["dt"] = setup.time_manager.dt
             level_result["cell_diameter"] = setup.mdg.diameter()
-            # Loop over lists of results. Convert into a json compatible list.
+            # Loop over lists of model results. Convert into a json compatible list.
             level_result["results"] = [
                 result_to_dict(result) for result in setup.results
             ]
@@ -130,7 +124,10 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
             ]
             results_to_export.append(result_to_export)
 
-        # Finally, call the function to write into the json.#
+        # Save into the base folder, not into one of the individual level folders.
+        file_name = os.path.join(self.base_folder_name, file_name)
+
+        # Finally, call the function to write into the json.
         with open(file_name, "w") as f:
             json.dump(results_to_export, f, indent=2)
 
@@ -183,11 +180,12 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
                 time_step_result["iteration_counter"]
                 for time_step_result in level_result["results"]
             ]
+
+            # Only append results if the last time step was reached.
             if (
                 level_result["results"][len(nonlinear_iterations) - 1]["time"]
                 >= end_time
             ):
-                # Only append results if the last time step was reached.
                 avg_nonlinear_iterations.append(
                     sum(nonlinear_iterations) / len(nonlinear_iterations)
                 )

@@ -11,17 +11,20 @@ from buckley_leverett import grid, misc, numerical_solution
 from save_convergence_results import save_convergence_results
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
 from tpf_lab.models.buckley_leverett import (
+    BuckleyLeverettEquations,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDataSaving,
     BuckleyLeverettDefaultGeometry,
+    BuckleyLeverettSolutionStrategy_WobblyRelPerm,
     BuckleyLeverettSemiAnalyticalSolution,
     DiagnosticsMixinExtended,
     TwoPhaseFlowVariables,
     VerificationUtils,
+    WobblyFractionalFlowSympy,
 )
 from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPerm_LineartoPower_SolutionStrategy,
-    HomotopyContinuationRelPermEquations_LineartoPower,
+    HomotopyContinuationRelPermEquations_LineartoWobbly,
+    HomotopyContinuationRelPermSolutionStrategy,
 )
 
 # Fix seed for reproducability.
@@ -33,11 +36,14 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: ignore
-    HomotopyContinuationRelPermEquations_LineartoPower,
+class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(  # type: ignore
+    BuckleyLeverettEquations,
+    HomotopyContinuationRelPermEquations_LineartoWobbly,
     TwoPhaseFlowVariables,
     BuckleyLeverettBoundaryConditions,
-    HomotopyContinuationRelPerm_LineartoPower_SolutionStrategy,
+    # Solution strategy
+    HomotopyContinuationRelPermSolutionStrategy,
+    BuckleyLeverettSolutionStrategy_WobblyRelPerm,
     #
     BuckleyLeverettDefaultGeometry,
     #
@@ -89,8 +95,8 @@ base_foldername: str = os.path.join(
     "results",
     "buckley_leverett",
     "homotopy_continuation",
-    "linear_to_power_both_rel_perms",
-    f"NEWTON_ITERATIONS_{MAX_NEWTON_ITERATIONS}",
+    f"linear_to_wobbly_rel_perm_limited_{LIMIT_REL_PERM}",
+    f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
 )
 
 try:
@@ -114,7 +120,6 @@ initial_condition[
 
 params = {
     "max_iterations": MAX_NEWTON_ITERATIONS,
-    "nl_convergence_tol": 1e-5,
     "progressbars": True,
     "formulation": "n_pressure_w_saturation",
     # grid
@@ -137,6 +142,10 @@ params = {
     "rel_perm_linear_param_w": REL_PERM_LINEAR_PARAM_W,
     "rel_perm_linear_param_n": REL_PERM_LINEAR_PARAM_N,
     "limit_rel_perm": LIMIT_REL_PERM,
+    # Wobbly
+    "yscales": YSCALES,
+    "xscales": XSCALES,
+    "offsets": OFFSETS,
     # Buckley-Leverett params
     "angle": ANGLE,
     "influx": INFLUX,
@@ -156,11 +165,12 @@ params = {
 }
 
 lax_friedrichs = numerical_solution.BuckleyLeverett(params)
-
+lax_friedrichs.fractionalflow = WobblyFractionalFlowSympy(params)
+lax_friedrichs.lambdify()
 # Get Courant number.
 COURANT_NUMBER = lax_friedrichs.cfl_condition()
 
-model = BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(params)
+model = BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(params)
 model.prepare_simulation()
 exact_solution = model._exact_solution
 fig = plt.figure()
@@ -184,8 +194,7 @@ misc.map_fractional_flow(
 #####################
 # Analyze decay rates
 #####################
-decays = np.linspace(0.1, 0.9, 9)
-decays = [0.5]
+decays = np.linspace(0.5, 0.7, 3)
 for decay in decays:
     # Set up folder and files for logging/plots/saved time steps.
     foldername = os.path.join(base_foldername, f"homotopy_continuation_decay_{decay}")
@@ -197,13 +206,16 @@ for decay in decays:
 
     params.update(
         {
+            # Base folder and file name. These will get changed by
+            # ``ConvergenceAnalysisExtended``.
             "folder_name": foldername,
+            "file_name": "setup",
             "homotopy_continuation_decay": decay,
         }
     )
 
     analysis = ConvergenceAnalysisExtended(
-        BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower,
+        BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly,
         params,
         levels=7,
         temporal_refinement_rate=2,
@@ -218,7 +230,7 @@ for decay in decays:
             "time",
             "time_index",
         ],
-        file_name=os.path.join(foldername, "temporal_error_analysis.json"),
+        file_name="temporal_error_analysis.json",
     )
     save_convergence_results(
         analysis,

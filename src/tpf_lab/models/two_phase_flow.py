@@ -50,7 +50,7 @@ import porepy as pp
 from tpf_lab.numerics.ad.functions import ad_pow as ad_pow
 from tpf_lab.numerics.ad.functions import minimum
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 class TwoPhaseFlowEquations:
@@ -990,6 +990,9 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
         in any grid cell. The timestep is then shortened and recalculated.
         """
         self._max_saturation_change: float = 0.2
+
+    def is_time_dependent(self) -> bool:
+        return True
 
     def prepare_simulation(self) -> None:
         """This setups the model, s.t. a simulation can be run.
