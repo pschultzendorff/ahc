@@ -2,15 +2,16 @@ import json
 import logging
 import os
 from copy import deepcopy
-from typing import ClassVar, Optional, Protocol, Type
+from typing import ClassVar, Literal, Optional, Protocol, Type
 
+import matplotlib.pyplot as plt
 import numpy as np
-import porepy as pp
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
 
-from tpf_lab.utils import save_setup_and_run_model
+from tpf_lab.utils import save_params_and_run_model
 from tpf_lab.visualization.diagnostics import BuckleyLeverettSaveData
 
+# Get module wide logger.
 logger = logging.getLogger(__name__)
 
 
@@ -66,7 +67,7 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
             level_result: dict = {}
             setup = self.model_class(deepcopy(self.model_params[level]))
             try:
-                save_setup_and_run_model(setup, deepcopy(self.model_params[level]))
+                save_params_and_run_model(setup, deepcopy(self.model_params[level]))
             except Exception as e:
                 # The model does not converge.
                 logger.info(e)
@@ -230,3 +231,91 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
 def result_to_dict(result: IsDataclass) -> dict:
     """Transform the ``result`` dataclass to a dict."""
     return {name: getattr(result, name) for name in result.__annotations__}
+
+
+def save_convergence_results(
+    analysis: ConvergenceAnalysisExtended,
+    results: list,
+    level_type: Literal["time", "space"] = "time",
+    courant_number: float = 0.0,
+    max_iterations: int = 30,
+    foldername: str = "results",
+) -> None:
+    """Small script save the results of a convergence analysis and plot some graphs.
+
+    In detail, this script takes in an analysis that has run and:
+        - Calculates the order of convergence and saves it to
+          ``f"order_of_convergence_in_{level_type}.txt"``.
+        - Calculates the L2 error for each resolution level and plots the results.
+        - Calculates the average number of Newton iterations for each resolution level
+          and plots the results.
+
+    Parameters:
+        analysis: _description_
+        results: _description_
+        level_type: _description_. Defaults to "time".
+        courant_number: _description_. Defaults to 0.0.
+        max_iterations: _description_. Defaults to 30.
+        foldername: _description_. Defaults to "results".
+
+    """
+    # Order of convergence
+    x_axis: Literal["cell_diameter", "time_step"] = (
+        "time_step" if level_type == "time" else "cell_diameter"
+    )
+    ooc = analysis.order_of_convergence(
+        analysis.transform_results_to_classical(results), x_axis=x_axis
+    )
+    logger.info(f"Order of convergence: {ooc}")
+    with open(
+        os.path.join(foldername, f"order_of_convergence_in_{level_type}.txt"), "w"
+    ) as f:
+        f.write(f"order of convergence: {ooc}")
+
+    # L2 errors
+    final_l2_errors, cell_diameter_levels, time_step_levels = analysis.final_l2_error(
+        results
+    )
+    xx = time_step_levels if level_type == "time" else cell_diameter_levels
+    # Plot final error for each parameter.
+    fig = plt.figure()
+    plt.plot(
+        xx,
+        final_l2_errors,
+        "xb-",
+        label=f"final error ({max_iterations} iter)",
+    )
+    plt.xlabel(r"$\log_{10}(\Delta t)$")
+    plt.ylabel(r"$\log_{10}(\|e\|)$")
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.axvline(x=courant_number, color="b", label=r"$\mathcal{C}$")
+    plt.title("Convergence Analysis")
+    plt.legend()
+    fig.subplots_adjust(left=0.4, bottom=0.2)
+    plt.savefig(os.path.join(foldername, f"accuracy_in_{level_type}.png"))
+
+    # Avg. number of Newton iterations
+    (
+        avg_nonlinear_iterations,
+        cell_diameter_levels,
+        time_step_levels,
+    ) = analysis.average_number_of_iterations(results)
+    xx = time_step_levels if level_type == "time" else cell_diameter_levels
+    fig = plt.figure()
+    plt.plot(
+        xx,
+        avg_nonlinear_iterations,
+        "xb-",
+        label=f"average Newton iterations",
+    )
+    plt.xlabel(r"$\log_{10}(\Delta t)$")
+    plt.ylabel(r"$n_{iterations}$")
+    plt.xscale("log")
+    plt.axvline(x=courant_number, color="b", label=r"$\mathcal{C}$")
+    plt.title("Convergence analysis")
+    plt.legend()
+    fig.subplots_adjust(left=0.2, bottom=0.2)
+    plt.savefig(
+        os.path.join(foldername, f"average_newton_iterations_varying_{x_axis}.png")
+    )

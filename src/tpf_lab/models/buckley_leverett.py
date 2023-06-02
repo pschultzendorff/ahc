@@ -8,6 +8,7 @@ from typing import Any, Callable
 import numpy as np
 import porepy as pp
 import sympy
+import scipy.sparse as sps
 from buckley_leverett import analytical_solution, functions
 from porepy.utils.examples_utils import VerificationUtils
 from scipy import interpolate
@@ -204,6 +205,10 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
     def prepare_simulation(self) -> None:
         super().prepare_simulation()
         self.calc_exact_solution()
+        # Set initial condition again after setting the equations. This is necessary
+        # s.t. the total flux is homogeneous across the entire domain.
+        self.before_nonlinear_loop()
+        self.initial_pressure()
 
     def initial_condition(self) -> None:
         """Residual nonwetting saturation in the left side of the domain. Residual
@@ -223,22 +228,27 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
             [self.saturation_var],
             time_step_index=self.time_manager.time_index,
         )
-        # Set pressure gradient roughly s.t. the initial flux equals one everywhere.
+
+    def initial_pressure(self) -> None:
+        """Compute and set the initial pressure distribution s.t. :math:`u_\Sigma`=1.0
+        across the entire domain."""
+        # Assemble flow equation/nonwetting pressure variable subsystem and solve for
+        # pressure.
+        A, b = self.equation_system.assemble_subsystem(
+            [self.equation_system.equations["Flow equation"]],
+            [self.pressure_n_var],
+        )
+        initial_pressure: np.ndarray = sps.linalg.spsolve(A, b)
         self.equation_system.set_variable_values(
-            np.linspace(157, 0.4, num_cells),
+            initial_pressure,
             [self.pressure_w_var],
             time_step_index=self.time_manager.time_index,
         )
         self.equation_system.set_variable_values(
-            np.linspace(157, 0.4, num_cells),
+            initial_pressure,
             [self.pressure_n_var],
             time_step_index=self.time_manager.time_index,
         )
-
-    # def _export(self):
-    #     """Export only each 10th time step."""
-    #     if self.time_manager.time_index % 10 == 0:
-    #         super()._export()
 
     def _export_iteration(self):
         if hasattr(self, "exporter"):
@@ -414,95 +424,3 @@ class BuckleyLeverettSetup(  # type: ignore
     DiagnosticsMixinExtended,
 ):
     ...
-
-
-class BuckleyLeverettEquations_WobblyRelPerm(BuckleyLeverettEquations):
-    _yscales: list[float]
-    _xscales: list[float]
-    _offsets: list[float]
-
-    def _rel_perm_w(self) -> pp.ad.Operator:
-        """Add a perturbation to the wetting phase rel. perm."""
-        rel_perm_w = super()._rel_perm_w()
-        return rel_perm_w + self._error_function_deriv()
-
-    def _error_function_deriv(self) -> pp.ad.Operator:
-        """Returns the derivative of the error function w.r.t. the saturation.
-
-        This can be used to simulate perturbations in the cap. pressure and rel. perm.
-        models.
-
-        Returns:
-            Derivative of the error function in terms of :math:`S_w`.
-        """
-        s = self.equation_system.md_variable(self.saturation_var)
-        xscales = [pp.ad.Scalar(xscale) for xscale in self._xscales]
-        yscales = [pp.ad.Scalar(yscale) for yscale in self._yscales]
-        offsets = [pp.ad.Scalar(offset) for offset in self._offsets]
-        exp_func = pp.ad.Function(pp.ad.functions.exp, "exp")
-        square_func = pp.ad.Function(partial(ad_pow, exponent=2), "square")
-        error = pp.ad.Scalar(0) * s
-        for xscale, yscale, offset in zip(xscales, yscales, offsets):
-            error = error + yscale * exp_func(
-                pp.ad.Scalar(-1) * xscale * square_func(s - offset)
-            )
-        return error
-
-
-class BuckleyLeverettSolutionStrategy_WobblyRelPerm(BuckleyLeverettSolutionStrategy):
-    def __init__(self, params: dict | None = None) -> None:
-        super().__init__(params)
-        if params is None:
-            params = {}
-        # Parameters for the error function derivative:
-        self._yscales: list[float] = params.get("yscales", [1.0])
-        self._xscales: list[float] = params.get("xscales", [200])
-        self._offsets: list[float] = params.get("offsets", [0.5])
-        # Change flow function for the analytical solution.
-        self.analytical.fractionalflow = WobblyFractionalFlowSympy(params)
-        self.analytical.lambdify()
-
-
-class BuckleyLeverettSetup_WobblyRelPerm(  # type: ignore
-    BuckleyLeverettEquations_WobblyRelPerm,
-    TwoPhaseFlowVariables,
-    BuckleyLeverettBoundaryConditions,
-    BuckleyLeverettSolutionStrategy_WobblyRelPerm,
-    #
-    BuckleyLeverettDefaultGeometry,
-    #
-    BuckleyLeverettSemiAnalyticalSolution,
-    BuckleyLeverettDataSaving,
-    VerificationUtils,
-    DiagnosticsMixinExtended,
-):
-    ...
-
-
-class WobblyFractionalFlowSympy(functions.FractionalFlowSymPy):
-    def __init__(self, params: dict[str, Any]) -> None:
-        super().__init__(params)
-        # Parameters for the error function derivative:
-        self.yscales: list[float] = params.get("yscales", [1.0])
-        self.xscales: list[float] = params.get("xscales", [200])
-        self.offsets: list[float] = params.get("offsets", [0.5])
-
-    def lambda_w(self):
-        r"""Wetting phase mobility.
-
-        Power model
-        .. math::
-            k_{r,w}(S_w)=S_w^3 + \epsilon(S_w)
-
-        """
-        return self.S_normalized() ** 3 + self.error_function_deriv()
-
-    def error_function_deriv(self):
-        return sympy.Add(
-            *[
-                yscale * sympy.exp(-xscale * (self.S_w - offset) ** 2)
-                for xscale, yscale, offset in zip(
-                    self.xscales, self.yscales, self.offsets
-                )
-            ]
-        )

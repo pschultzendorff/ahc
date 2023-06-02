@@ -3,7 +3,7 @@
 import logging
 import time
 from functools import partial
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import porepy as pp
@@ -11,11 +11,6 @@ import torch
 
 from tpf_lab.ml.nn import BaseNN
 from tpf_lab.ml.nn_ad import nn_wrapper
-from tpf_lab.models.buckley_leverett import (
-    BuckleyLeverettSolutionStrategy,
-    BuckleyLeverettSolutionStrategy_WobblyRelPerm,
-    WobblyFractionalFlowSympy,
-)
 from tpf_lab.models.two_phase_flow import (
     TwoPhaseFlowEquations,
     TwoPhaseFlowSolutionStrategy,
@@ -124,19 +119,47 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         )
         return super().after_nonlinear_iteration(solution)
 
-    # def after_nonlinear_convergence(  # type: ignore
-    #     self, solution: np.ndarray, errors: list[float], iteration_counter: int
-    # ) -> None:
-    #     rel_perm_w = self._rel_perm_w().evaluate(self.equation_system).val
-    #     logger.info(f"rel_perm_w {rel_perm_w}")
-    #     rel_perm_w_init = self._rel_perm_w_init().evaluate(self.equation_system).val
-    #     logger.info(f"rel_perm_w_init {rel_perm_w_init}")
-    #     rel_perm_w_goal = self._rel_perm_w_goal().evaluate(self.equation_system).val
-    #     logger.info(f"rel_perm_w_goal {rel_perm_w_goal}")
-    #     saturation = self._s_normalized().evaluate(self.equation_system).val
-    #     logger.info(f"saturation normalized {saturation}")
+    def check_convergence(
+        self,
+        solution: np.ndarray,
+        prev_solution: np.ndarray,
+        init_solution: np.ndarray,
+        nl_params: dict[str, Any],
+    ) -> tuple[float, bool, bool]:
+        """Extend the convergence check of the super class s.t. it fails when only one
+        nonlinear iteration has passed.
 
-    #     return super().after_nonlinear_convergence(solution, errors, iteration_counter)
+        This is to ensure, that the homotopy continuation problem gets solved instead of
+        the problem at :math:`\lambda=1`, i.e. the initial problem of the homotopy
+        continuation.
+
+        Parameters:
+            solution: Newly obtained solution vector prev_solution: Solution obtained in
+            the previous non-linear iteration. init_solution: Solution obtained from the
+            previous time-step. nl_params: Dictionary of parameters used for the
+            convergence check.
+                Which items are required will depend on the convergence test to be
+                implemented.
+
+        Returns:
+            The method returns the following tuple:
+
+            float:
+                Error, computed to the norm in question.
+            boolean:
+                True if the solution is converged according to the test implemented by
+                this method.
+            boolean:
+                True if the solution is diverged according to the test implemented by
+                this method.
+
+        """
+        error, converged, diverged = super().check_convergence(
+            solution, prev_solution, init_solution, nl_params
+        )
+        if self._nonlinear_iteration == 1:
+            converged = False
+        return error, converged, diverged
 
 
 class HomotopyContinuationRelPermEquations_LineartoNN(
@@ -180,7 +203,7 @@ class HomotopyContinuationRelPermEquations_LineartoNN(
 
 
 class HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy(
-    HomotopyContinuationRelPermSolutionStrategy, BuckleyLeverettSolutionStrategy
+    HomotopyContinuationRelPermSolutionStrategy
 ):
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
@@ -194,7 +217,7 @@ class HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy(
         )
 
 
-class HomotopyContinuationRelPermEquations_LineartoWobbly(
+class HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey(
     HomotopyContinuationRelPermEquations
 ):
     """Wetting rel. perm. linear to wobbly. Nonwetting rel. perm linear to power."""

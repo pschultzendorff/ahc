@@ -1,5 +1,7 @@
-"""Some test runs with the ``two_phase_flow_model.TwoPhaseFlow`` class. If not noted
-otherwise, the runs were performed on a 2D grid with 20x20 cells.
+"""Some test runs with the ``two_phase_flow_model.TwoPhaseFlow`` class and an integrated
+neural network. If not noted otherwise, the runs were performed on a 2D grid with 20x20
+cells.
+
 """
 import os
 from typing import Optional, Union
@@ -7,7 +9,7 @@ import torch
 import numpy as np
 
 import porepy as pp
-from src.tpf_lab.models.run_models import run_time_dependent_model
+from porepy.models.run_models import run_time_dependent_model
 from src.tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
 from tpf_lab.ml.nn import BaseNN
 from tpf_lab.ml.nn_ad import nn_wrapper

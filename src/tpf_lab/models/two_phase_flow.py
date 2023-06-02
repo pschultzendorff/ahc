@@ -27,14 +27,18 @@ TODO:
     
 Units:
     Collection of the SI units for all parameters.
-    NOTE: It was not thoroughly checked, whether all units are correct.
     saturation: dimensionless
-    pressure: pascal=kg/(m*s^2)S
+    pressure: pascal=kg/(m*s^2)
     density: kg/m^3
-    viscosity: kg/(m*s)
+    viscosity: kg/(m*s) (cP)
     permeability: m^2
-    volumetric source terms: m^3/s
-    mass flux: kg/s -> Not needed at the moment
+    porosity: dimensionless
+    volumetric flux: m^d/(m^(d-1)*s) (:=m/s)
+    mass flux: kg/(m^2*s) -> As we assume incompressibility, the fluxes and the source
+    terms are measured in volumetric flux.
+
+It follows, that the domain unit is meters and the time unit is seconds.
+
 """
 
 from __future__ import annotations
@@ -112,9 +116,37 @@ class TwoPhaseFlowEquations:
 
     # Phase parameters:
     _viscosity_w: float
+    """Wetting fluid viscosity.
+
+    SI Units: kg/(m*s)
+
+    The base viscosity is 1 kg/(m*s)=1 cP.
+
+    """
     _viscosity_n: float
+    """Nonwetting fluid viscosity.
+
+    SI Units: kg/(m*s)
+
+    The base viscosity is 1 kg/(m*s)=1 cP.
+
+    """
     _density_w: float
+    """Wetting fluid density.
+
+    SI Units: kg/m^3
+
+    The base density is 1000 kg/m^3.
+
+    """
     _density_n: float
+    """Nonwetting fluid density.
+
+    SI Units: kg/m^3
+
+    The base density is 1000 kg/m^3.
+
+    """
 
     # Residual saturations:
     _residual_saturation_w: float
@@ -180,22 +212,22 @@ class TwoPhaseFlowEquations:
     """Provided by ``TwoPhaseFlowBoundaryConditions``"""
 
     def _source_w(self, g: pp.Grid) -> np.ndarray:
-        """Volumetric wetting source.
+        """Volumetric wetting source term. Given as volumetric flux.
 
         In the default model there is no source term.
 
         NOTE: This is the average value per grid cell, i.e., it gets scaled with the
         cell volume in the equation.
 
-        SI Units: m^d/s
+        SI Units: m^d/(m^(d-1)*s)
 
         """
         return np.zeros(g.num_cells)
 
     def _source_n(self, g: pp.Grid) -> np.ndarray:
-        """Volumetric wetting source.
+        """Volumetric nonwetting source term. Given as volumetric flux.
 
-        SI Units: m^d/s
+        SI Units: m^d/(m^(d-1)*s)
 
         NOTE: This is the average value per grid cell, i.e., it gets scaled with the
         cell volume in the equation.
@@ -220,6 +252,7 @@ class TwoPhaseFlowEquations:
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
             vals[-1] = pp.GRAVITY_ACCELERATION * self._w_density
+
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
         # vals[-1] = pp.GRAVITY_ACCELERATION * self._density_w
@@ -233,6 +266,7 @@ class TwoPhaseFlowEquations:
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
             vals[-1] = pp.GRAVITY_ACCELERATION * self._n_density
+
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
         # vals[-1] = pp.GRAVITY_ACCELERATION * self._density_n
@@ -243,12 +277,24 @@ class TwoPhaseFlowEquations:
     def _permeability(self, g: pp.Grid) -> np.ndarray:
         """Solid permeability.
 
-        SI Units: m^2
+        SI Units: m^2 (Darcy)
+
+        The base permeability of the domain is 1.0 (i.e., 1000 mili-Darcy). This is a
+        in line for typical rock (cf. [Nordbotten: Geological Storage of CO2: Modeling
+        Approaches for Large Scale Simulation, 2011])
+
         """
         return np.full(g.num_cells, 1.0)
 
     def _porosity(self, g: pp.Grid) -> np.ndarray:
-        return np.full(g.num_cells, 1.0)
+        """Porosity of the rock matrix
+
+        SI Units: Dimensionless.
+
+        The base porosity of the domain is 0.1
+
+        """
+        return np.full(g.num_cells, 0.1)
 
     # Cap pressure and relative permeability functions.
     def _s_normalized(self) -> pp.ad.Operator:
@@ -507,7 +553,7 @@ class TwoPhaseFlowEquations:
             vector_source_w = pp.ad.DenseArray(self._vector_source_w(subdomains[0]))
             vector_source_n = pp.ad.DenseArray(self._vector_source_n(subdomains[0]))
             transport_equation = (
-                mass_matrix.mass @ (porosity_ad * dt_s)
+                porosity_ad * (mass_matrix.mass @ dt_s)
                 + div
                 @ (
                     fractional_flow_w * flux_t
@@ -904,21 +950,33 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
         """Wetting fluid viscosity.
 
         SI Units: kg/(m*s)
+
+        The base viscosity is 1 kg/(m*s)=1 cP.
+
         """
         self._viscosity_n: float = params.get("viscosity_n", 1.0)
         """Nonetting fluid viscosity.
 
         SI Units: kg/(m*s)
+
+        The base viscosity is 1 kg/(m*s)=1 cP.
+
         """
-        self._density_w: float = params.get("density_w", 0.0)
+        self._density_w: float = params.get("density_w", 1000.0)
         """Wetting fluid density.
 
         SI Units: kg/m^3
+
+        The base density is 1000 kg/m^3.
+
         """
-        self._density_n: float = params.get("density_n", 0.0)
+        self._density_n: float = params.get("density_n", 1000.0)
         """Nonetting fluid density.
 
         SI Units: kg/m^3
+
+        The base density is 1 kg/m^3.
+
         """
 
         # Residual saturations:
@@ -929,7 +987,7 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
         # Model selection and parameters for the capillary pressure function:
         self._cap_pressure_model: Literal[
             "Brooks-Corey", "van Genuchten", "linear", None
-        ] = "Brooks-Corey"
+        ] = params.get("cap_pressure_model", "linear")
         # van Genuchten model
         self._n_g: float = 2.0
         self._m_g: float = 2 / 3

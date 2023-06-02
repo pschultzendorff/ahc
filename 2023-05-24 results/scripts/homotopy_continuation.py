@@ -21,7 +21,7 @@ from tpf_lab.models.buckley_leverett import (
 )
 from tpf_lab.models.homotopy_continuation import (
     HomotopyContinuationRelPerm_LineartoWobbly_SolutionStrategy,
-    HomotopyContinuationRelPermEquations_LineartoWobbly,
+    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
 )
 
 # Fix seed for reproducability.
@@ -34,7 +34,7 @@ logger.setLevel(logging.INFO)
 
 
 class BuckleyLeverettSetup_WobblyRelPerm_HomotopyExtension(  # type: ignore
-    HomotopyContinuationRelPermEquations_LineartoWobbly,
+    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
     TwoPhaseFlowVariables,
     BuckleyLeverettBoundaryConditions,
     HomotopyContinuationRelPerm_LineartoWobbly_SolutionStrategy,

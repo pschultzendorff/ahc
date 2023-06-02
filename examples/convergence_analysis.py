@@ -12,10 +12,12 @@ from buckley_leverett import grid, misc, numerical_solution
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
 from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettSetup,
-    BuckleyLeverettSetup_WobblyRelPerm,
-    WobblyFractionalFlowSympy,
 )
-from save_convergence_results import save_convergence_results
+from tpf_lab.models.perturbated_rel_perm import (
+    PerturbatedRelPermFractionalFlowSympy,
+    BuckleyLeverettPerturbatedRelPermSetup,
+)
+from tpf_lab.utils import save_convergence_results
 
 # Fix seed for reproducability.
 random.seed(0)
@@ -58,7 +60,7 @@ RESIDUAL_SATURATION_N = 0.3
 REL_PERM_MODEL = "linear"
 REL_PERM_LINEAR_PARAM_W = 1.0
 REL_PERM_LINEAR_PARAM_N = 1.0
-LIMIT_REL_PERM = True
+LIMIT_REL_PERM = False
 
 INFLUX = 1.0
 ANGLE = math.pi / 4
@@ -126,69 +128,69 @@ params = {
     # Linear flow function. Necessary parameter for the analytical solver.
     "linear_flow": True,
 }
-lax_friedrichs = numerical_solution.BuckleyLeverett(params)
-# Time step fulfilling the CFL condition for the default grid cells number.
-COURANT_NUMBER = lax_friedrichs.cfl_condition()
+# lax_friedrichs = numerical_solution.BuckleyLeverett(params)
+# # Time step fulfilling the CFL condition for the default grid cells number.
+# COURANT_NUMBER = lax_friedrichs.cfl_condition()
 
-model = BuckleyLeverettSetup(params)
-model.prepare_simulation()
-exact_solution = model._exact_solution
-fig = plt.figure()
-plt.plot(
-    model.mdg.subdomains()[0].cell_centers[0] + model.domain.bounding_box["xmin"],
-    exact_solution,
-    label="analytical solution",
-)
-plt.xlabel(rf"$x$")
-plt.ylabel(rf"$S_w$")
-plt.legend()
-fig.subplots_adjust(left=0.2, bottom=0.2)
-plt.savefig(os.path.join(foldername, "analytical_solution.png"))
-plt.close()
-misc.map_fractional_flow(
-    model.analytical,
-    filename=os.path.join(foldername, "analytical_solution"),
-)
+# model = BuckleyLeverettSetup(params)
+# model.prepare_simulation()
+# exact_solution = model._exact_solution
+# fig = plt.figure()
+# plt.plot(
+#     model.mdg.subdomains()[0].cell_centers[0] + model.domain.bounding_box["xmin"],
+#     exact_solution,
+#     label="analytical solution",
+# )
+# plt.xlabel(rf"$x$")
+# plt.ylabel(rf"$S_w$")
+# plt.legend()
+# fig.subplots_adjust(left=0.2, bottom=0.2)
+# plt.savefig(os.path.join(foldername, "analytical_solution.png"))
+# plt.close()
+# misc.map_fractional_flow(
+#     model.analytical,
+#     filename=os.path.join(foldername, "analytical_solution"),
+# )
 
 ##############################
 # Convergence analysis in time
 ##############################
-params.update(
-    {
-        "meshing_arguments": {
-            "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
-        },
-        "time_manager": pp.TimeManager(
-            schedule=np.array([0, 1]),
-            dt_init=0.1,
-            constant_dt=True,
-        ),
-    }
-)
+# params.update(
+#     {
+#         "meshing_arguments": {
+#             "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
+#         },
+#         "time_manager": pp.TimeManager(
+#             schedule=np.array([0, 1]),
+#             dt_init=0.1,
+#             constant_dt=True,
+#         ),
+#     }
+# )
 
-analysis = ConvergenceAnalysisExtended(
-    BuckleyLeverettSetup, params, levels=7, temporal_refinement_rate=2
-)
-results = analysis.run_analysis()
-analysis.export_results_to_json(
-    results,
-    variables_to_export=[
-        "l2_error",
-        "residuals",
-        "iteration_counter",
-        "time",
-        "time_index",
-    ],
-    file_name="temporal_error_analysis.json",
-)
-save_convergence_results(
-    analysis,
-    results,
-    "time",
-    courant_number=COURANT_NUMBER,
-    max_iterations=MAX_NEWTON_ITERATIONS,
-    foldername=foldername,
-)
+# analysis = ConvergenceAnalysisExtended(
+#     BuckleyLeverettSetup, params, levels=7, temporal_refinement_rate=2
+# )
+# results = analysis.run_analysis()
+# analysis.export_results_to_json(
+#     results,
+#     variables_to_export=[
+#         "l2_error",
+#         "residuals",
+#         "iteration_counter",
+#         "time",
+#         "time_index",
+#     ],
+#     file_name="temporal_error_analysis.json",
+# )
+# save_convergence_results(
+#     analysis,
+#     results,
+#     "time",
+#     courant_number=COURANT_NUMBER,
+#     max_iterations=MAX_NEWTON_ITERATIONS,
+#     foldername=foldername,
+# )
 
 ###############################
 # Convergence analysis in space
@@ -269,14 +271,14 @@ params.update(
         },
         "time_manager": pp.TimeManager(
             schedule=np.array([0, 1]),
-            dt_init=0.1,
+            dt_init=1.0,
             constant_dt=True,
         ),
     }
 )
 
 analysis = ConvergenceAnalysisExtended(
-    BuckleyLeverettSetup, params, levels=7, temporal_refinement_rate=2
+    BuckleyLeverettSetup, params, levels=3, temporal_refinement_rate=2
 )
 results = analysis.run_analysis()
 analysis.export_results_to_json(
@@ -326,105 +328,105 @@ save_convergence_results(
 # Wobbyl rel. perms.
 ####################
 # Parameters for wobbly rel. perm.
-YSCALES = np.maximum(np.random.rand(20), 0.5).tolist()
-YSCALES[:5] = np.arange(0.1, 0.5, 0.1)
-XSCALES = [20000.0] * 20
-OFFSETS = np.linspace(0.4, 0.6, 20).tolist()
-REL_PERM_MODEL = "power"
+# YSCALES = np.maximum(np.random.rand(20), 0.5).tolist()
+# YSCALES[:5] = np.arange(0.1, 0.5, 0.1)
+# XSCALES = [20000.0] * 20
+# OFFSETS = np.linspace(0.4, 0.6, 20).tolist()
+# REL_PERM_MODEL = "power"
 
-# Set up folder and files for logging/plots/saved time steps.
-foldername = os.path.join(
-    "results",
-    "buckley_leverett",
-    "order_of_accuracy",
-    f"wobbly_rel_perm_limited_{LIMIT_REL_PERM}",
-    f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
-)
-try:
-    os.makedirs(foldername)
-except Exception:
-    pass
+# # Set up folder and files for logging/plots/saved time steps.
+# foldername = os.path.join(
+#     "results",
+#     "buckley_leverett",
+#     "order_of_accuracy",
+#     f"wobbly_rel_perm_limited_{LIMIT_REL_PERM}",
+#     f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
+# )
+# try:
+#     os.makedirs(foldername)
+# except Exception:
+#     pass
 
-# Change model params.
-params.update(
-    {
-        "yscales": YSCALES,
-        "xscales": XSCALES,
-        "offsets": OFFSETS,
-        "linear_flow": False,
-        "rel_perm_model": REL_PERM_MODEL,
-        "folder_name": foldername,
-    }
-)
+# # Change model params.
+# params.update(
+#     {
+#         "yscales": YSCALES,
+#         "xscales": XSCALES,
+#         "offsets": OFFSETS,
+#         "linear_flow": False,
+#         "rel_perm_model": REL_PERM_MODEL,
+#         "folder_name": foldername,
+#     }
+# )
 
 
-lax_friedrichs = numerical_solution.BuckleyLeverett(params)
-lax_friedrichs.fractionalflow = WobblyFractionalFlowSympy(params)
-lax_friedrichs.lambdify()
-# Time step fulfilling the CFL condition for the default grid cells number.
-COURANT_NUMBER = lax_friedrichs.cfl_condition()
+# lax_friedrichs = numerical_solution.BuckleyLeverett(params)
+# lax_friedrichs.fractionalflow = WobblyFractionalFlowSympy(params)
+# lax_friedrichs.lambdify()
+# # Time step fulfilling the CFL condition for the default grid cells number.
+# COURANT_NUMBER = lax_friedrichs.cfl_condition()
 
-model = BuckleyLeverettSetup_WobblyRelPerm(params)
+# model = BuckleyLeverettPerturbatedRelPermSetup(params)
 
-model.prepare_simulation()
-exact_solution = model._exact_solution
-fig = plt.figure()
-plt.plot(
-    model.mdg.subdomains()[0].cell_centers[0] + model.domain.bounding_box["xmin"],
-    exact_solution,
-    label="analytical solution",
-)
-plt.xlabel(rf"$x$")
-plt.ylabel(rf"$S_w$")
-plt.legend()
-fig.subplots_adjust(left=0.2, bottom=0.2)
-plt.savefig(os.path.join(foldername, "analytical_solution.png"))
-plt.close()
-misc.map_fractional_flow(
-    model.analytical,
-    filename=os.path.join(foldername, "analytical_solution"),
-)
+# model.prepare_simulation()
+# exact_solution = model._exact_solution
+# fig = plt.figure()
+# plt.plot(
+#     model.mdg.subdomains()[0].cell_centers[0] + model.domain.bounding_box["xmin"],
+#     exact_solution,
+#     label="analytical solution",
+# )
+# plt.xlabel(rf"$x$")
+# plt.ylabel(rf"$S_w$")
+# plt.legend()
+# fig.subplots_adjust(left=0.2, bottom=0.2)
+# plt.savefig(os.path.join(foldername, "analytical_solution.png"))
+# plt.close()
+# misc.map_fractional_flow(
+#     model.analytical,
+#     filename=os.path.join(foldername, "analytical_solution"),
+# )
 
 ##############################
 # Convergence analysis in time
 ##############################
-params.update(
-    {
-        "folder_name": foldername,
-        "meshing_arguments": {
-            "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
-        },
-        "time_manager": pp.TimeManager(
-            schedule=np.array([0, 1]),
-            dt_init=0.1,
-            constant_dt=True,
-        ),
-    }
-)
+# params.update(
+#     {
+#         "folder_name": foldername,
+#         "meshing_arguments": {
+#             "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
+#         },
+#         "time_manager": pp.TimeManager(
+#             schedule=np.array([0, 1]),
+#             dt_init=0.1,
+#             constant_dt=True,
+#         ),
+#     }
+# )
 
-analysis = ConvergenceAnalysisExtended(
-    BuckleyLeverettSetup_WobblyRelPerm, params, levels=7, temporal_refinement_rate=2
-)
-results = analysis.run_analysis()
-analysis.export_results_to_json(
-    results,
-    variables_to_export=[
-        "l2_error",
-        "residuals",
-        "iteration_counter",
-        "time",
-        "time_index",
-    ],
-    file_name="temporal_error_analysis.json",
-)
-save_convergence_results(
-    analysis,
-    results,
-    "time",
-    courant_number=COURANT_NUMBER,
-    max_iterations=MAX_NEWTON_ITERATIONS,
-    foldername=foldername,
-)
+# analysis = ConvergenceAnalysisExtended(
+#     BuckleyLeverettPerturbatedRelPermSetup, params, levels=7, temporal_refinement_rate=2
+# )
+# results = analysis.run_analysis()
+# analysis.export_results_to_json(
+#     results,
+#     variables_to_export=[
+#         "l2_error",
+#         "residuals",
+#         "iteration_counter",
+#         "time",
+#         "time_index",
+#     ],
+#     file_name="temporal_error_analysis.json",
+# )
+# save_convergence_results(
+#     analysis,
+#     results,
+#     "time",
+#     courant_number=COURANT_NUMBER,
+#     max_iterations=MAX_NEWTON_ITERATIONS,
+#     foldername=foldername,
+# )
 
 ###############################
 # Convergence analysis in space
@@ -437,7 +439,7 @@ save_convergence_results(
 # )
 
 # analysis = ConvergenceAnalysisExtended(
-#     BuckleyLeverettSetup_WobblyRelPerm, params, levels=6, spatial_refinement_rate=2
+#     BuckleyLeverettPerturbatedRelPermSetup, params, levels=6, spatial_refinement_rate=2
 # )
 # results = analysis.run_analysis()
 # analysis.export_results_to_json(

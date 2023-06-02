@@ -8,15 +8,15 @@ import numpy as np
 
 import porepy as pp
 from porepy.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlowSetup
 
 
 # Simple test run
 # Neumann bc on three sides, Dirichlet bc on one side.
-model = TwoPhaseFlowEquations(
+model = TwoPhaseFlowSetup(
     {
         "file_name": "simple",
-        "folder_name": os.path.join("two_phase_flow_runs", "simple"),
+        "folder_name": os.path.join("two_phase_flow_setup_run", "simple"),
     }
 )
 

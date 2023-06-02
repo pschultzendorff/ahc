@@ -1,11 +1,17 @@
 import json
 import os
+import logging
 from typing import Any
 
 from porepy.models import run_models
 
 
-def save_setup_and_run_model(model, params: dict[str, Any]) -> None:
+# Get module wide logger.
+logger = logging.getLogger(__name__)
+
+
+def save_params_and_run_model(model, params: dict[str, Any]) -> None:
+    """Save the model parameters in a ``*.json`` file and run the model."""
     # Create save folder and save params.
     folder_name = params["folder_name"]
     try:

@@ -1,3 +1,7 @@
+"""Analyze convergence etc. of homotopy continuation from a linear relative permeability
+model to a perturbated Corey relative permeability model."""
+
+
 import logging
 import math
 import os
@@ -8,20 +12,23 @@ import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
 
-from save_convergence_results import save_convergence_results
+from tpf_lab.utils import save_convergence_results
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
 from tpf_lab.models.buckley_leverett import (
+    BuckleyLeverettEquations,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDataSaving,
     BuckleyLeverettDefaultGeometry,
+    BuckleyLeverettWobblyRelPermSolutionStrategy,
     BuckleyLeverettSemiAnalyticalSolution,
     DiagnosticsMixinExtended,
     TwoPhaseFlowVariables,
     VerificationUtils,
+    WobblyFractionalFlowSympy,
 )
 from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPerm_LineartoPower_SolutionStrategy,
-    HomotopyContinuationRelPermEquations_LineartoPower,
+    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
+    HomotopyContinuationRelPermSolutionStrategy,
 )
 
 # Fix seed for reproducability.
@@ -33,11 +40,14 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: ignore
-    HomotopyContinuationRelPermEquations_LineartoPower,
+class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(  # type: ignore
+    BuckleyLeverettEquations,
+    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
     TwoPhaseFlowVariables,
     BuckleyLeverettBoundaryConditions,
-    HomotopyContinuationRelPerm_LineartoPower_SolutionStrategy,
+    # Solution strategy
+    HomotopyContinuationRelPermSolutionStrategy,
+    BuckleyLeverettWobblyRelPermSolutionStrategy,
     #
     BuckleyLeverettDefaultGeometry,
     #
@@ -52,7 +62,7 @@ class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: 
 ####################
 # Default parameters
 ####################
-MAX_NEWTON_ITERATIONS = 30
+MAX_NEWTON_ITERATIONS = 60
 
 DEFAULT_NUM_GRID_CELLS = 200
 DEFAULT_PHYS_SIZE = 20
@@ -72,13 +82,10 @@ RESIDUAL_SATURATION_N = 0.3
 REL_PERM_MODEL = "power"
 REL_PERM_LINEAR_PARAM_W = 1.0
 REL_PERM_LINEAR_PARAM_N = 1.0
-LIMIT_REL_PERM = True
+LIMIT_REL_PERM = False
 
 INFLUX = 1.0
 ANGLE = math.pi / 4
-
-# This will be changed based on the CFL condition
-DEFAULT_MAX_TIME_STEP: float = 0.1
 
 # Parameters for wobbly rel. perm.
 YSCALES = np.maximum(np.random.rand(20), 0.5).tolist()
@@ -88,23 +95,24 @@ OFFSETS = np.linspace(0.4, 0.6, 20).tolist()
 
 
 # Set up folder and files for logging/plots/saved time steps.
-foldername: str = os.path.join(
+base_foldername: str = os.path.join(
     "results",
     "buckley_leverett",
     "homotopy_continuation",
-    "linear_to_power_rel_perm",
-    f"NEWTON_ITERATIONS_{MAX_NEWTON_ITERATIONS}",
+    f"linear_to_wobbly_rel_perm_limited_{LIMIT_REL_PERM}",
+    f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
 )
 
 try:
-    os.makedirs(foldername)
+    os.makedirs(base_foldername)
 except Exception:
     pass
 
 
-###############
-# Set up model.
-###############
+########################################################################################
+# Set up model. Map analytical solution and find Courant number with the Lax-Friedrichs
+# solver.
+########################################################################################
 lax_friedrichs_grid = grid.create_grid(
     (XMIN, XMAX), (XMAX - XMIN) / DEFAULT_NUM_GRID_CELLS
 )
@@ -118,11 +126,16 @@ params = {
     "max_iterations": MAX_NEWTON_ITERATIONS,
     "progressbars": True,
     "formulation": "n_pressure_w_saturation",
-    # grid
+    # grid and time
     "meshing_arguments": {
         "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
     },
     "phys size": DEFAULT_PHYS_SIZE,
+    "time_manager": pp.TimeManager(
+        schedule=np.array([0, 1]),
+        dt_init=0.1,
+        constant_dt=True,
+    ),
     # fluid and solid params
     "porosity": POROSITY,
     "viscosity_w": VISCOSITY_W,
@@ -137,7 +150,11 @@ params = {
     "rel_perm_model": REL_PERM_MODEL,
     "rel_perm_linear_param_w": REL_PERM_LINEAR_PARAM_W,
     "rel_perm_linear_param_n": REL_PERM_LINEAR_PARAM_N,
-    "limit_rel_perm": True,
+    "limit_rel_perm": LIMIT_REL_PERM,
+    # Wobbly
+    "yscales": YSCALES,
+    "xscales": XSCALES,
+    "offsets": OFFSETS,
     # Buckley-Leverett params
     "angle": ANGLE,
     "influx": INFLUX,
@@ -149,10 +166,12 @@ params = {
 }
 
 lax_friedrichs = numerical_solution.BuckleyLeverett(params)
-# Time step fulfilling the CFL condition for the default grid cells number.
-DEFAULT_MAX_TIME_STEP = lax_friedrichs.cfl_condition()
+lax_friedrichs.fractionalflow = WobblyFractionalFlowSympy(params)
+lax_friedrichs.lambdify()
+# Get Courant number.
+COURANT_NUMBER = lax_friedrichs.cfl_condition()
 
-model = BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(params)
+model = BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(params)
 model.prepare_simulation()
 exact_solution = model._exact_solution
 fig = plt.figure()
@@ -165,23 +184,21 @@ plt.xlabel(rf"x")
 plt.ylabel(rf"S_w")
 plt.legend()
 fig.subplots_adjust(left=0.2, bottom=0.2)
-plt.savefig(os.path.join(foldername, "analytical_solution.png"))
+plt.savefig(os.path.join(base_foldername, "analytical_solution.png"))
 plt.close()
 misc.map_fractional_flow(
     model.analytical,
-    filename=os.path.join(foldername, "analytical_solution"),
+    filename=os.path.join(base_foldername, "analytical_solution"),
 )
 
-decays = np.linspace(0.5, 0.9, 4)
+
+#####################
+# Analyze decay rates
+#####################
+decays = np.linspace(0.4, 0.7, 4)
 for decay in decays:
     # Set up folder and files for logging/plots/saved time steps.
-    foldername = os.path.join(
-        "results",
-        "buckley_leverett",
-        "homotopy_continuation",
-        "linear_to_power_rel_perm",
-        f"homotopy_continuation_decay_{decay}",
-    )
+    foldername = os.path.join(base_foldername, f"homotopy_continuation_decay_{decay}")
 
     try:
         os.makedirs(foldername)
@@ -190,22 +207,16 @@ for decay in decays:
 
     params.update(
         {
+            # Base folder and file name. These will get changed by
+            # ``ConvergenceAnalysisExtended``.
             "folder_name": foldername,
-            "meshing_arguments": {
-                "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
-            },
-            "time_manager": pp.TimeManager(
-                schedule=np.array([0, 1]),
-                dt_init=0.1,
-                constant_dt=True,
-            ),
-            "limit_rel_perm": True,
+            "file_name": "setup",
             "homotopy_continuation_decay": decay,
         }
     )
 
     analysis = ConvergenceAnalysisExtended(
-        BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower,
+        BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly,
         params,
         levels=7,
         temporal_refinement_rate=2,
@@ -220,13 +231,13 @@ for decay in decays:
             "time",
             "time_index",
         ],
-        file_name=os.path.join(foldername, "temporal_error_analysis.json"),
+        file_name="temporal_error_analysis.json",
     )
     save_convergence_results(
         analysis,
         results,
         "time",
-        courant_number=DEFAULT_MAX_TIME_STEP,
+        courant_number=COURANT_NUMBER,
         max_iterations=MAX_NEWTON_ITERATIONS,
         foldername=foldername,
     )

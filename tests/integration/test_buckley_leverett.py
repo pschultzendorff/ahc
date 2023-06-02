@@ -16,42 +16,34 @@ import pytest
 from tpf_lab.models.buckley_leverett import BuckleyLeverettSetup
 
 
-class BL_HomogeneousInitialSaturationBuckleyLeverett(BuckleyLeverettSetup):
-    def initial_condition(self) -> None:
-        """Residual nonwetting saturation in the left side of the domain. Residual
-        wetting saturation in the right side of the domain. A transition zone in the
-        middle."""
-        sd = self.mdg.subdomains()[0]
-        self.equation_system.set_variable_values(
-            np.full(sd.num_cells, 0.0),
-            [self._ad.pressure_w],
-            time_step_index=self.time_manager.time_index,
-        )
-        # Initialize nonwetting pressure s.t. the gradient is 1 across the domain.
-        self.equation_system.set_variable_values(
-            np.linspace(self._phys_size, 0.0, self._grid_size),
-            [self._ad.pressure_n],
-            time_step_index=self.time_manager.time_index,
-        )
-        initial_saturation = np.full(self._grid_size, 1 - self._residual_saturation_n)
-        self.equation_system.set_variable_values(
-            initial_saturation,
-            [self._ad.saturation],
-            time_step_index=self.time_manager.time_index,
-        )
+@pytest.fixture(scope="module")
+def model_4_grid_cells() -> BuckleyLeverettSetup:
+    phys_size: float = 4.0
+    grid_cells: int = 4
+    model = BuckleyLeverettSetup(
+        {
+            "formulation": "n_pressure_w_saturation",
+            "meshing_arguments": {"cell_size": phys_size / grid_cells},
+        }
+    )
+    model._time_step = 1
+    model.prepare_simulation()
+    model.before_nonlinear_loop()
+    model.before_nonlinear_iteration()
+    return model
 
 
 @pytest.fixture(scope="module")
-def model() -> BL_HomogeneousInitialSaturationBuckleyLeverett:
-    model = BL_HomogeneousInitialSaturationBuckleyLeverett(
-        {"formulation": "n_pressure_w_saturation"}
+def model_200_grid_cells() -> BuckleyLeverettSetup:
+    phys_size: float = 20.0
+    grid_cells: int = 200
+    model = BuckleyLeverettSetup(
+        {
+            "formulation": "n_pressure_w_saturation",
+            "meshing_arguments": {"cell_size": phys_size / grid_cells},
+        }
     )
-    model._grid_size = 4
-    model._phys_size = 4
-    model._time_step = 1
     model.prepare_simulation()
-    model.before_newton_loop()
-    model.before_newton_iteration()
     return model
 
 
@@ -62,21 +54,27 @@ def saturation_w_init() -> np.ndarray:
 
 @pytest.fixture
 def normalized_saturation_w_init(
-    saturation_w_init: np.ndarray, model: BL_HomogeneousInitialSaturationBuckleyLeverett
+    saturation_w_init: np.ndarray, model_4_grid_cells: BuckleyLeverettSetup
 ) -> np.ndarray:
-    return (saturation_w_init - model._residual_saturation_w) / (
-        1 - model._residual_saturation_w - model._residual_saturation_n
+    return (saturation_w_init - model_4_grid_cells._residual_saturation_w) / (
+        1
+        - model_4_grid_cells._residual_saturation_w
+        - model_4_grid_cells._residual_saturation_n
     )
 
 
 @pytest.fixture
 def normalized_saturation_w_init_upwind(
-    saturation_w_init: np.ndarray, model: BL_HomogeneousInitialSaturationBuckleyLeverett
+    saturation_w_init: np.ndarray, model_4_grid_cells: BuckleyLeverettSetup
 ) -> np.ndarray:
     return (
-        np.full(model._grid_size + 1, saturation_w_init[0])
-        - model._residual_saturation_w
-    ) / (1 - model._residual_saturation_w - model._residual_saturation_n)
+        np.full(model_4_grid_cells._grid_size + 1, saturation_w_init[0])
+        - model_4_grid_cells._residual_saturation_w
+    ) / (
+        1
+        - model_4_grid_cells._residual_saturation_w
+        - model_4_grid_cells._residual_saturation_n
+    )
 
 
 @pytest.fixture
@@ -86,21 +84,25 @@ def pressure_w_init() -> np.ndarray:
 
 @pytest.fixture
 def s_normalized_jac(
-    saturation_w_init, model: BL_HomogeneousInitialSaturationBuckleyLeverett
+    saturation_w_init, model_4_grid_cells: BuckleyLeverettSetup
 ) -> np.ndarray:
     """Normalized saturation Jacobian w.r.t. saturation."""
     A = np.eye(saturation_w_init.shape[0]) / (
-        1 - model._residual_saturation_w - model._residual_saturation_n
+        1
+        - model_4_grid_cells._residual_saturation_w
+        - model_4_grid_cells._residual_saturation_n
     )
     return A
 
 
 def test_normalized_s(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett, s_normalized_jac: np.ndarray
+    model_4_grid_cells: BuckleyLeverettSetup, s_normalized_jac: np.ndarray
 ) -> None:
     """The model uses the normalized saturation for the rel. perm. and cap. pressure
     functions. We check that its Jacobian is calculated correctly."""
-    s_normalized_system = model._s_normalized().evaluate(model.equation_system)
+    s_normalized_system = model_4_grid_cells._s_normalized().evaluate(
+        model_4_grid_cells.equation_system
+    )
     assert np.allclose(s_normalized_system.jac.todense()[:, -4:], s_normalized_jac)
 
 
@@ -130,15 +132,17 @@ def mobility_t(mobility_w: np.ndarray, mobility_n: np.ndarray) -> np.ndarray:
 
 
 def test_mobility_t(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett, mobility_t: np.ndarray
+    model_4_grid_cells: BuckleyLeverettSetup, mobility_t: np.ndarray
 ) -> None:
     """Test that the model's total mobility coincides with the one calculated by
     hand."""
-    subdomains = model.mdg.subdomains()
+    subdomains = model_4_grid_cells.mdg.subdomains()
     # Set ``atol`` high s.t. the epsilon in the total mobility does not influence the
     # comparison.
     assert np.allclose(
-        model._mobility_t(subdomains).evaluate(model.equation_system).val,
+        model_4_grid_cells._mobility_t(subdomains)
+        .evaluate(model_4_grid_cells.equation_system)
+        .val,
         mobility_t,
     )
 
@@ -154,20 +158,22 @@ def mobility_w(rel_perm_w: np.ndarray) -> np.ndarray:
 
 
 def test_mobility_w(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett, mobility_w: np.ndarray
+    model_4_grid_cells: BuckleyLeverettSetup, mobility_w: np.ndarray
 ) -> None:
     """Test that the model's wetting mobility coincides with the one calculated by
     hand."""
-    subdomains = model.mdg.subdomains()
+    subdomains = model_4_grid_cells.mdg.subdomains()
     assert np.allclose(
-        model._mobility_w(subdomains).evaluate(model.equation_system).val,
+        model_4_grid_cells._mobility_w(subdomains)
+        .evaluate(model_4_grid_cells.equation_system)
+        .val,
         mobility_w,
     )
 
 
 @pytest.fixture
 def mobility_n(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett, rel_perm_n: np.ndarray
+    model_4_grid_cells: BuckleyLeverettSetup, rel_perm_n: np.ndarray
 ) -> np.ndarray:
     """Nonwetting mobility for all domain interfaces at t=0. Calculated by hand.
 
@@ -178,19 +184,23 @@ def mobility_n(
 
 
 def test_mobility_n(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett, mobility_n: np.ndarray
+    model_4_grid_cells: BuckleyLeverettSetup, mobility_n: np.ndarray
 ) -> None:
     """Test that the model's wetting mobility coincides with the one calculated by
     hand."""
-    subdomains = model.mdg.subdomains()
+    subdomains = model_4_grid_cells.mdg.subdomains()
     assert np.allclose(
-        model._mobility_n(subdomains).evaluate(model.equation_system).val,
+        model_4_grid_cells._mobility_n(subdomains)
+        .evaluate(model_4_grid_cells.equation_system)
+        .val,
         mobility_n,
     )
 
 
-def test_porosity_n(model: BL_HomogeneousInitialSaturationBuckleyLeverett):
-    assert np.all(model._porosity(model.mdg.subdomains()[0]) == 1.0)
+def test_porosity_n(model_4_grid_cells: BuckleyLeverettSetup):
+    assert np.all(
+        model_4_grid_cells._porosity(model_4_grid_cells.mdg.subdomains()[0]) == 1.0
+    )
 
 
 @pytest.fixture
@@ -201,13 +211,13 @@ def tpfa_array() -> np.ndarray:
 
 def test_tpfa(
     tpfa_array: np.ndarray,
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett,
+    model_4_grid_cells: BuckleyLeverettSetup,
 ) -> None:
     """Test that TPFA works correctly."""
-    subdomains = model.mdg.subdomains()
-    tpfa = pp.ad.TpfaAd(model.w_flux_key, subdomains)
+    subdomains = model_4_grid_cells.mdg.subdomains()
+    tpfa = pp.ad.TpfaAd(model_4_grid_cells.w_flux_key, subdomains)
     div = pp.ad.Divergence(subdomains)
-    tpfa_system = (div * tpfa.flux).evaluate(model.equation_system)
+    tpfa_system = (div * tpfa.flux).evaluate(model_4_grid_cells.equation_system)
     assert np.allclose(tpfa_system.todense(), tpfa_array)
 
 
@@ -219,33 +229,33 @@ def mpfa_array() -> np.ndarray:
 
 def test_mpfa(
     mpfa_array: np.ndarray,
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett,
+    model_4_grid_cells: BuckleyLeverettSetup,
 ) -> None:
     """Test that MPFA works correctly."""
-    subdomains = model.mdg.subdomains()
-    tpfa = pp.ad.MpfaAd(model.w_flux_key, subdomains)
+    subdomains = model_4_grid_cells.mdg.subdomains()
+    tpfa = pp.ad.MpfaAd(model_4_grid_cells.w_flux_key, subdomains)
     div = pp.ad.Divergence(subdomains)
-    tpfa_system = (div * tpfa.flux).evaluate(model.equation_system)
+    tpfa_system = (div * tpfa.flux).evaluate(model_4_grid_cells.equation_system)
     assert np.allclose(tpfa_system.todense(), mpfa_array)
 
 
 @pytest.fixture
-def pressure_gradient_val(model: BL_HomogeneousInitialSaturationBuckleyLeverett):
+def pressure_gradient_val(model_4_grid_cells: BuckleyLeverettSetup):
     """Pressure was initiated s.t. the pressure gradient across the domain is 1."""
-    return np.eye(model._grid_size + 1)
+    return np.eye(model_4_grid_cells._grid_size + 1)
 
 
 @pytest.fixture
 def flow_equation_val(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett,
+    model_4_grid_cells: BuckleyLeverettSetup,
 ) -> np.ndarray:
     """Residual of the flow equation at t=0. Calculated by hand.
 
     The residual equals the influx (Neumann bc).
 
     """
-    b = np.zeros(model._grid_size)
-    b[-1] = model._influx
+    b = np.zeros(model_4_grid_cells._grid_size)
+    b[-1] = model_4_grid_cells._influx
     return b
 
 
@@ -275,18 +285,18 @@ def flow_equation_jac_wrt_saturation(
 
 
 def test_flow_equation(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett,
+    model_4_grid_cells: BuckleyLeverettSetup,
     flow_equation_jac_wrt_pressure: np.ndarray,
     flow_equation_jac_wrt_saturation: np.ndarray,
     flow_equation_val: np.ndarray,
 ) -> None:
     """Test the flow equation; both w.r.t. to :math:`p` and w.r.t. :math:`S`."""
-    A, _ = model.equation_system.assemble_subsystem(
-        equations=["Flow equation"], variables=[model.primary_pressure_var]
+    A, _ = model_4_grid_cells.equation_system.assemble_subsystem(
+        equations=["Flow equation"], variables=[model_4_grid_cells.primary_pressure_var]
     )
     assert np.allclose(A.todense(), flow_equation_jac_wrt_pressure)
-    A, b = model.equation_system.assemble_subsystem(
-        equations=["Flow equation"], variables=[model.saturation_var]
+    A, b = model_4_grid_cells.equation_system.assemble_subsystem(
+        equations=["Flow equation"], variables=[model_4_grid_cells.saturation_var]
     )
     assert np.allclose(A.todense(), flow_equation_jac_wrt_saturation)
     assert np.allclose(b, -flow_equation_val)
@@ -294,15 +304,15 @@ def test_flow_equation(
 
 @pytest.fixture
 def transport_equation_val(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett,
+    model_4_grid_cells: BuckleyLeverettSetup,
 ) -> np.ndarray:
     """Residual of the flow equation at t=0. Calculated by hand.
 
     The residual equals the influx (Neumann bc).
 
     """
-    b = np.zeros(model._grid_size)
-    b[-1] = model._influx
+    b = np.zeros(model_4_grid_cells._grid_size)
+    b[-1] = model_4_grid_cells._influx
     return b
 
 
@@ -329,35 +339,36 @@ def transport_equation_jac_wrt_pressure(
 def transport_equation_jac_wrt_saturation(
     tpfa_array: np.ndarray,
     mobility_w: np.ndarray,
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett,
+    model_4_grid_cells: BuckleyLeverettSetup,
 ) -> np.ndarray:
     """Jacobian of the transport equation w.r.t. to :math:`S_w` at t=0. Calculated by
     hand."""
     # Pressure gradient is zero, hence no influence of .
-    A_1 = np.zeros(model._grid_size)
+    A_1 = np.zeros(model_4_grid_cells._grid_size)
     # Timestep
     A_2 = (
-        model._porosity(model.mdg.subdomains()[0])[0]
-        / model._time_step
-        * np.eye(model._grid_size)
+        model_4_grid_cells._porosity(model_4_grid_cells.mdg.subdomains()[0])[0]
+        / model_4_grid_cells._time_step
+        * np.eye(model_4_grid_cells._grid_size)
     )
     # The domain's porosity is homogeneous and equals 1.
     return A_1 + A_2
 
 
 def test_transport_equation(
-    model: BL_HomogeneousInitialSaturationBuckleyLeverett,
+    model_4_grid_cells: BuckleyLeverettSetup,
     flow_equation_val: np.ndarray,
     transport_equation_jac_wrt_pressure: np.ndarray,
     transport_equation_jac_wrt_saturation: np.ndarray,
 ) -> None:
     """Test the transport equation; both w.r.t. to :math:`p` and w.r.t. :math:`S`."""
-    A, b = model.equation_system.assemble_subsystem(
-        equations=["Transport equation"], variables=[model.primary_pressure_var]
+    A, b = model_4_grid_cells.equation_system.assemble_subsystem(
+        equations=["Transport equation"],
+        variables=[model_4_grid_cells.primary_pressure_var],
     )
     assert np.allclose(A.todense(), transport_equation_jac_wrt_pressure)
-    A, b = model.equation_system.assemble_subsystem(
-        equations=["Transport equation"], variables=[model.saturation_var]
+    A, b = model_4_grid_cells.equation_system.assemble_subsystem(
+        equations=["Transport equation"], variables=[model_4_grid_cells.saturation_var]
     )
     # Add some tolerance, as the model divides by :math:`\lambda_t + 1e-7`, but
     # multiplies by :math:`\lambda_t`. We skip this step in the exact calculation.
@@ -365,39 +376,9 @@ def test_transport_equation(
     assert np.allclose(b, -flow_equation_val)
 
 
-class BL_LinearInitialSaturationBuckleyLeverett(BuckleyLeverettSetup):
-    def initial_condition(self) -> None:
-        """Residual nonwetting saturation in the left side of the domain. Residual
-        wetting saturation in the right side of the domain. A transition zone in the
-        middle."""
-        sd = self.mdg.subdomains()[0]
-        self.equation_system.set_variable_values(
-            np.full(sd.num_cells, 0.0),
-            [self._ad.pressure_w],
-            time_step_index=self.time_manager.time_index,
-        )
-        self.equation_system.set_variable_values(
-            np.full(sd.num_cells, 0.0),
-            [self._ad.pressure_n],
-            time_step_index=self.time_manager.time_index,
-        )
-        initial_saturation = np.linspace(
-            self._residual_saturation_w,
-            1 - self._residual_saturation_n,
-            self._grid_size,
-        )
-        self.equation_system.set_variable_values(
-            initial_saturation,
-            [self._ad.saturation],
-            time_step_index=self.time_manager.time_index,
-        )
-
-
 @pytest.fixture(scope="module")
-def model_for_frac_flow_testing() -> BL_LinearInitialSaturationBuckleyLeverett:
-    model = BL_LinearInitialSaturationBuckleyLeverett(
-        {"formulation": "n_pressure_w_saturation"}
-    )
+def model_nonmatching_phys_and_grid() -> BuckleyLeverettSetup:
+    model = BuckleyLeverettSetup({"formulation": "n_pressure_w_saturation"})
     model._grid_size = 20
     model._phys_size = 1
     model.prepare_simulation()
@@ -407,13 +388,24 @@ def model_for_frac_flow_testing() -> BL_LinearInitialSaturationBuckleyLeverett:
 
 
 def test_fractional_flow(
-    model_for_frac_flow_testing: BL_LinearInitialSaturationBuckleyLeverett,
-):
-    subdomains = model_for_frac_flow_testing.mdg.subdomains()
-    mobility_w = model_for_frac_flow_testing._mobility_w(subdomains=subdomains)
-    mobility_t = model_for_frac_flow_testing._mobility_t(subdomains=subdomains)
+    model_nonmatching_phys_and_grid: BuckleyLeverettSetup,
+) -> None:
+    subdomains = model_nonmatching_phys_and_grid.mdg.subdomains()
+    mobility_w = model_nonmatching_phys_and_grid._mobility_w(subdomains=subdomains)
+    mobility_t = model_nonmatching_phys_and_grid._mobility_t(subdomains=subdomains)
     fractional_flow = mobility_w / mobility_t
     fractional_flow_system = fractional_flow.evaluate(
-        model_for_frac_flow_testing.equation_system
+        model_nonmatching_phys_and_grid.equation_system
     )
     assert np.all(fractional_flow_system.val == 1)
+
+
+def test_initial_flux(model_200_grid_cells: BuckleyLeverettSetup) -> None:
+    """Test that the initial values are set s.t. the total flux equals 1 on the entire
+    domain."""
+    flux_t: np.ndarray = (
+        model_200_grid_cells._flux_t(model_200_grid_cells.subdomains()[0])
+        .evaluate(model_200_grid_cells.equation_system)
+        .val
+    )
+    assert np.allclose(flux_t, np.full_like(flux_t, 1.0))

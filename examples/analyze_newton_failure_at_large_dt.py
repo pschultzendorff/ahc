@@ -29,33 +29,6 @@ logger.setLevel(logging.INFO)
 
 
 class BuckleyLeverettModifiedSolutionStrategy(BuckleyLeverettSolutionStrategy):
-    def initial_condition(self) -> None:
-        """Residual nonwetting saturation in the left side of the domain. Residual
-        wetting saturation in the right side of the domain. A transition zone in the
-        middle."""
-        super().initial_condition()
-        num_cells: int = self.mdg.subdomains()[0].num_cells
-        self.initial_saturation = np.full(num_cells, 1 - self._residual_saturation_n)
-        self.initial_saturation[int(num_cells / 2) :] = self._residual_saturation_w
-        self.initial_saturation[
-            int(num_cells / 2) - 2 : int(num_cells / 2) + 2
-        ] = np.linspace(1 - self._residual_saturation_n, self._residual_saturation_w, 4)
-        self.equation_system.set_variable_values(
-            self.initial_saturation,
-            [self.saturation_var],
-            time_step_index=self.time_manager.time_index,
-        )
-        self.equation_system.set_variable_values(
-            np.linspace(157, 0.4, num_cells),
-            [self.pressure_w_var],
-            time_step_index=self.time_manager.time_index,
-        )
-        self.equation_system.set_variable_values(
-            np.linspace(159, 0.4, num_cells),
-            [self.pressure_n_var],
-            time_step_index=self.time_manager.time_index,
-        )
-
     def assemble_linear_system(self) -> None:
         super().assemble_linear_system()
         # logger.info(f"A {self.linear_system[0][:]}")
@@ -68,8 +41,17 @@ class BuckleyLeverettModifiedSolutionStrategy(BuckleyLeverettSolutionStrategy):
 
     def after_nonlinear_iteration(self, solution: np.ndarray) -> None:
         # Show total flux
-        flux_t = self._flux_t(self.mdg.subdomains())
+        # flux_t = self._flux_t(self.mdg.subdomains())
         # logger.info(f"flux_t: {flux_t.evaluate(self.equation_system).val}")
+        # rel_perm_w = self._rel_perm_w()
+        # logger.info(f"rel_perm_w: {rel_perm_w.evaluate(self.equation_system).val}")
+        # rel_perm_n = self._rel_perm_n()
+        # logger.info(f"rel_perm_n: {rel_perm_n.evaluate(self.equation_system).val}")
+        # s_normalized = self._s_normalized()
+        # logger.info(
+        #     f"normalized_saturation: {s_normalized.evaluate(self.equation_system).val}"
+        # )
+
         return super().after_nonlinear_iteration(solution)
 
 
@@ -114,11 +96,10 @@ REL_PERM_LINEAR_PARAM_W = 1.0
 REL_PERM_LINEAR_PARAM_N = 1.0
 # Do not limit the rel. perm. to avoid the solver crashing!
 LIMIT_REL_PERM = False
-
 INFLUX = 1.0
 ANGLE = math.pi / 4
 
-DT = 0.01
+DT = 1.0
 
 # Set up folder and files for logging/plots/saved time steps.
 foldername: str = os.path.join(
@@ -126,7 +107,7 @@ foldername: str = os.path.join(
     "buckley_leverett",
     "analyze_Newton_failure",
     f"linear_rel_perm_dt_{DT}_rel_perm_limited_{str(LIMIT_REL_PERM)}",
-    f"NEWTON_ITERATIONS_{MAX_NEWTON_ITERATIONS}",
+    f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
 )
 try:
     os.makedirs(foldername)
@@ -145,6 +126,11 @@ params = {
         "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
     },
     "phys size": DEFAULT_PHYS_SIZE,
+    "time_manager": pp.TimeManager(
+        schedule=np.array([0, 1.0]),
+        dt_init=DT,
+        constant_dt=True,
+    ),
     # fluid and solid params
     "porosity": POROSITY,
     "viscosity_w": VISCOSITY_W,
@@ -170,26 +156,47 @@ params = {
 params.update(
     {
         "folder_name": foldername,
-        "meshing_arguments": {
-            "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
-        },
-        "time_manager": pp.TimeManager(
-            schedule=np.array([0, 1.0]),
-            dt_init=DT,
-            constant_dt=True,
-        ),
-        # "export_each_iteration": True,
+        "export_each_iteration": True,
     }
 )
 model = BuckleyLeverettSetup(params)
-print(model._limit_rel_perm)
-# try:
-pp.models.run_models.run_time_dependent_model(
-    model, {"max_iterations": MAX_NEWTON_ITERATIONS}
-)
 
-yy = model.equation_system.get_variable_values(
-    [model.saturation_var], time_step_index=0
-)
+try:
+    pp.models.run_models.run_time_dependent_model(
+        model, {"max_iterations": MAX_NEWTON_ITERATIONS}
+    )
+except Exception as e:
+    print(e)
+
+
+####################
+# Power rel. perms.
+#####################
+# foldername = os.path.join(
+#     "results",
+#     "buckley_leverett",
+#     "analyze_Newton_failure",
+#     f"power_rel_perm_dt_{DT}_rel_perm_limited_{str(LIMIT_REL_PERM)}",
+#     f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
+# )
+# try:
+#     os.makedirs(foldername)
+# except Exception:
+#     pass
+
+# REL_PERM_MODEL = "power"
+# params.update(
+#     {
+#         "rel_perm_model": REL_PERM_MODEL,
+#         "folder_name": foldername,
+#         "linear_flow": False,
+#     }
+# )
+# model = BuckleyLeverettSetup(params)
+
+# try:
+#     pp.models.run_models.run_time_dependent_model(
+#         model, {"max_iterations": MAX_NEWTON_ITERATIONS}
+#     )
 # except Exception as e:
 #     print(e)
