@@ -1,0 +1,200 @@
+"""Implementation of the Buckley-Leverett model in the two-phase flow model."""
+
+import logging
+import math
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import porepy as pp
+from buckley_leverett import (
+    grid,
+    misc,
+    numerical_solution,
+)
+
+from tpf_lab.models.rel_perm import (
+    BuckleyLeverettPerturbedRelPermSetup,
+    PerturbedRelPermFractionalFlowSympy,
+)
+from tpf_lab.applications.convergence_analysis import (
+    ConvergenceAnalysisExtended,
+    save_convergence_results,
+)
+
+plt.rcParams.update(
+    {
+        "text.latex.preamble": r"\usepackage{lmodern}",
+        "text.usetex": True,
+        "font.size": 16,
+    }
+)
+
+
+# Setup logging.
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
+
+####################
+# Default parameters
+####################
+MAX_NEWTON_ITERATIONS = 60
+
+DEFAULT_NUM_GRID_CELLS = 200
+DEFAULT_PHYS_SIZE = 20
+# Default grid boundaries for the BuckleyLeverett class
+XMIN = -10
+XMAX = 10
+
+POROSITY = 1.0
+VISCOSITY_W = 1.0
+VISCOSITY_N = 1.0
+DENSITY_W = 1.0
+DENSITY_N = 1.0
+
+RESIDUAL_SATURATION_W = 0.3
+RESIDUAL_SATURATION_N = 0.3
+
+# Parameters for wobbly rel. perm.
+REL_PERM_MODEL = "power"
+REL_PERM_LINEAR_PARAM_W = 1.0
+REL_PERM_LINEAR_PARAM_N = 1.0
+LIMIT_REL_PERM = False
+
+YSCALES = np.linspace(0.1, 0.3, 3).tolist()
+XSCALES = [20000.0] * 3
+OFFSETS = np.linspace(0.4, 0.6, 3).tolist()
+
+INFLUX = 1.0
+ANGLE = math.pi / 4
+
+# Set up folder and files for logging/plots/saved time steps.
+foldername: str = os.path.join(
+    "results",
+    "buckley_leverett",
+    "order_of_accuracy",
+    f"perturbed_power_rel_perm_w_2_limited_{LIMIT_REL_PERM}",
+    f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
+)
+try:
+    os.makedirs(foldername)
+except Exception:
+    pass
+
+####################
+# Analytical and Lax-Friedrichs solution.
+####################
+lax_friedrichs_grid = grid.create_grid(
+    (XMIN, XMAX), (XMAX - XMIN) / DEFAULT_NUM_GRID_CELLS
+)
+initial_condition = np.full_like(lax_friedrichs_grid, RESIDUAL_SATURATION_W)
+initial_condition[0 : int(DEFAULT_NUM_GRID_CELLS / 2) - 10] = 1 - RESIDUAL_SATURATION_N
+initial_condition[
+    int(DEFAULT_NUM_GRID_CELLS / 2) - 10 : int(DEFAULT_NUM_GRID_CELLS / 2) + 10
+] = np.linspace(1 - RESIDUAL_SATURATION_N, RESIDUAL_SATURATION_W, 20)
+
+params = {
+    # Base folder and file name. These will get changed by
+    # ``ConvergenceAnalysisExtended``.
+    "folder_name": foldername,
+    "file_name": "setup",
+    "max_iterations": MAX_NEWTON_ITERATIONS,
+    "progressbars": True,
+    "formulation": "n_pressure_w_saturation",
+    # grid
+    "meshing_arguments": {
+        "cell_size": DEFAULT_PHYS_SIZE / float(DEFAULT_NUM_GRID_CELLS)
+    },
+    "phys size": DEFAULT_PHYS_SIZE,
+    "time_manager": pp.TimeManager(
+        schedule=np.array([0, 1]),
+        dt_init=0.1,
+        constant_dt=True,
+    ),
+    # fluid and solid params
+    "porosity": POROSITY,
+    "viscosity_w": VISCOSITY_W,
+    "viscosity_n": VISCOSITY_N,
+    "density_w": DENSITY_W,
+    "density_n": DENSITY_N,
+    "S_M": 1 - RESIDUAL_SATURATION_W,
+    "S_m": RESIDUAL_SATURATION_N,
+    "residual_saturation_w": RESIDUAL_SATURATION_W,
+    "residual_saturation_n": RESIDUAL_SATURATION_N,
+    # rel. perm model
+    "rel_perm_model": REL_PERM_MODEL,
+    "rel_perm_linear_param_w": REL_PERM_LINEAR_PARAM_W,
+    "rel_perm_linear_param_n": REL_PERM_LINEAR_PARAM_N,
+    "limit_rel_perm": LIMIT_REL_PERM,
+    "yscales": YSCALES,
+    "xscales": XSCALES,
+    "offsets": OFFSETS,
+    # Buckley-Leverett params
+    "angle": ANGLE,
+    "influx": INFLUX,
+    # Lax-Friedrichs params
+    "grid": lax_friedrichs_grid,
+    "initial_condition": initial_condition,
+}
+lax_friedrichs = numerical_solution.BuckleyLeverett(params)
+lax_friedrichs.fractionalflow = PerturbedRelPermFractionalFlowSympy(params)
+lax_friedrichs.lambdify()
+# Time step fulfilling the CFL condition for the default grid cells number.
+courant_number = lax_friedrichs.cfl_condition()
+
+model = BuckleyLeverettPerturbedRelPermSetup(params)
+# Exchange flow function
+model.analytical.fractionalflow = PerturbedRelPermFractionalFlowSympy(params)
+model.analytical.lambdify()
+
+model.prepare_simulation()
+exact_solution = model._exact_solution
+fig = plt.figure()
+plt.plot(
+    model.mdg.subdomains()[0].cell_centers[0] + model.domain.bounding_box["xmin"],
+    exact_solution,
+    label="analytical solution",
+)
+plt.xlabel(rf"$x$")
+plt.ylabel(rf"$S_w$")
+plt.legend()
+fig.subplots_adjust(left=0.2, bottom=0.2)
+plt.savefig(os.path.join(foldername, "analytical_solution.png"))
+plt.close()
+misc.map_fractional_flow(
+    model.analytical,
+    filename=os.path.join(foldername, "analytical_solution"),
+)
+
+##############################
+# Convergence analysis in time
+##############################
+params.update({})
+
+analysis = ConvergenceAnalysisExtended(
+    BuckleyLeverettPerturbedRelPermSetup,
+    params,
+    levels=7,
+    temporal_refinement_rate=2,
+)
+results = analysis.run_analysis()
+analysis.export_results_to_json(
+    results,
+    variables_to_export=[
+        "l2_error",
+        "residuals",
+        "iteration_counter",
+        "time",
+        "time_index",
+    ],
+    file_name="temporal_error_analysis.json",
+)
+save_convergence_results(
+    analysis,
+    results,
+    "time",
+    courant_number=courant_number,
+    max_iterations=MAX_NEWTON_ITERATIONS,
+    foldername=foldername,
+)

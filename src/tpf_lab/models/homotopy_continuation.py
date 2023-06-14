@@ -1,5 +1,6 @@
 """Homotopy continuations for the ``TwoPhaseFlow`` model."""
 
+import copy
 import logging
 import time
 from functools import partial
@@ -87,10 +88,18 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         self._homotopy_continuation_decay: float = params.get(
             "homotopy_continuation_decay", 0.5
         )
+        self.residuals_wrt_homotopy: list[float] = []
+        """Store the residuals of the equation w.r.t. the homotopy."""
+        self.residuals_wrt_goal_function: list[float] = []
+        """Store the residuals of the equation w.r.t. the goal function, i.e., w.r.t.
+        :math:`\lambda=0`."""
 
     def before_nonlinear_loop(self) -> None:
         # Reset continuation parameter.
         self._homotopy_continuation_param = 1
+        # Reset residuals arrays.
+        self.residuals_wrt_homotopy = []
+        self.residuals_wrt_goal_function = []
         # Update ad homotopy continuation parameter.
         setattr(
             self._homotopy_continuation_param_ad,
@@ -103,6 +112,20 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         return super().before_nonlinear_iteration()
 
     def after_nonlinear_iteration(self, solution: np.ndarray) -> None:
+        # Compute residual (PorePys residual is actually the norm of the solution).
+        b = self.linear_system[1]
+        self.residuals_wrt_homotopy.append(float(np.linalg.norm(b)) / np.sqrt(b.size))
+        # Set homotopy continuation param to zero, compute the residual and reset.
+        setattr(
+            self._homotopy_continuation_param_ad,
+            "_value",
+            0,
+        )
+        self.assemble_linear_system()
+        b = self.linear_system[1]
+        self.residuals_wrt_goal_function.append(
+            float(np.linalg.norm(b)) / np.sqrt(b.size)
+        )
         # Decay continuation parameter.
         self._homotopy_continuation_param *= self._homotopy_continuation_decay
         if self._homotopy_continuation_param <= self._homotopy_continuation_param_min:
@@ -117,6 +140,7 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
             f"Decayed homotopy_continuation_param to"
             + f" {self._homotopy_continuation_param:.2f}"
         )
+
         return super().after_nonlinear_iteration(solution)
 
     def check_convergence(
@@ -168,7 +192,15 @@ class HomotopyContinuationRelPermEquations_LineartoNN(
     _rel_perm_w_nn_function: Callable
     """Wetting rel. perm. function by a neural network.
 
-    Provided by a mixin of type ``TwoPhaseFlowSolutionStrategy``."""
+    Provided by a mixin of type ``TwoPhaseFlowSolutionStrategy``.
+
+    """
+    _rel_perm_n_nn_function: Callable
+    """Nonwetting rel. perm. function by a neural network.
+
+    Provided by a mixin of type ``TwoPhaseFlowSolutionStrategy``.
+
+    """
 
     def _rel_perm_w_init(self) -> pp.ad.Operator:
         r"""Linear wetting phase relative permeability."""
@@ -201,26 +233,42 @@ class HomotopyContinuationRelPermEquations_LineartoNN(
         else:
             return rel_perm
 
+    def _rel_perm_n_init(self) -> pp.ad.Operator:
+        r"""Linear nonwetting phase relative permeability."""
+        s_normalized = self._s_normalized()
+        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
+        rel_perm = (pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
+        if self._limit_rel_perm:
+            maximum_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
+            )
+            minimum_func = pp.ad.Function(
+                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
+            )
+            return minimum_func(maximum_func(rel_perm))
+        else:
+            return rel_perm
 
-class HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy(
-    HomotopyContinuationRelPermSolutionStrategy
-):
-    def __init__(self, params: Optional[dict] = None) -> None:
-        super().__init__(params)
-        if params is None:
-            params = {}
-        # NN rel perm.
-        relpermw_nn = BaseNN({"depth": 5, "hidden_size": 10, "final_act": "linear"})
-        relpermw_nn.load_state_dict(torch.load("test.pt"))
-        self._rel_perm_w_nn_function = pp.ad.Function(
-            nn_wrapper(relpermw_nn), "rel perm w nn"
-        )
+    def _rel_perm_n_goal(self) -> pp.ad.Operator:
+        r"""Machine learned wetting phase relative permeability."""
+        s_normalized = self._s_normalized()
+        rel_perm = self._rel_perm_n_nn_function(s_normalized)
+        if self._limit_rel_perm:
+            maximum_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
+            )
+            minimum_func = pp.ad.Function(
+                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
+            )
+            return minimum_func(maximum_func(rel_perm))
+        else:
+            return rel_perm
 
 
-class HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey(
+class HomotopyContinuationRelPermEquations_LineartoPerturbedCorey(
     HomotopyContinuationRelPermEquations
 ):
-    """Wetting rel. perm. linear to wobbly. Nonwetting rel. perm linear to power."""
+    """Wetting rel. perm. linear to perturbed. Nonwetting rel. perm linear to power."""
 
     _yscales: list[float]
     _xscales: list[float]
@@ -281,7 +329,7 @@ class HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey(
         return rel_perm + self._error_function_deriv()
 
     def _rel_perm_n_init(self) -> pp.ad.Operator:
-        r"""Linear wonwetting phase relative permeability."""
+        r"""Linear nonwetting phase relative permeability."""
         s_normalized = self._s_normalized()
         rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
         rel_perm = (pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
@@ -298,6 +346,75 @@ class HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey(
 
     def _rel_perm_n_goal(self) -> pp.ad.Operator:
         r"""Nonwetting phase relative permeability. Power model"""
+        s_normalized = self._s_normalized()
+        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
+        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
+        rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
+        if self._limit_rel_perm:
+            maximum_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
+            )
+            minimum_func = pp.ad.Function(
+                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
+            )
+            return minimum_func(maximum_func(rel_perm))
+        else:
+            return rel_perm
+
+
+class HomotopyContinuationRelPermEquations_PowertoPerturbedCorey(
+    HomotopyContinuationRelPermEquations_LineartoPerturbedCorey
+):
+    """Wetting rel. perm. power to perturbed power. Nonwetting rel. perm power to
+    power."""
+
+    def _rel_perm_w_init(self) -> pp.ad.Operator:
+        r"""Power wetting phase relative permeability."""
+        s_normalized = self._s_normalized()
+        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
+        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
+        rel_perm = cube_func(s_normalized) * rel_perm_linear_param
+        if self._limit_rel_perm:
+            maximum_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
+            )
+            minimum_func = pp.ad.Function(
+                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
+            )
+            return minimum_func(maximum_func(rel_perm))
+        else:
+            return rel_perm
+
+    def _rel_perm_n_init(self) -> pp.ad.Operator:
+        r"""Power nonwetting phase relative permeability."""
+        s_normalized = self._s_normalized()
+        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
+        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
+        rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
+        if self._limit_rel_perm:
+            maximum_func = pp.ad.Function(
+                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
+            )
+            minimum_func = pp.ad.Function(
+                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
+            )
+            return minimum_func(maximum_func(rel_perm))
+        else:
+            return rel_perm
+
+
+class HomotopyContinuationRelPermEquations_ConcavetoPerturbedCorey(
+    HomotopyContinuationRelPermEquations_LineartoPerturbedCorey
+):
+    """Concave fractional flow function to perturbed power rel. perms.
+
+    Nonwetting rel. perm. is power to power. Wetting rel. perm. is linear to perturbed
+    power.
+
+    """
+
+    def _rel_perm_n_init(self) -> pp.ad.Operator:
+        r"""Power nonwetting phase relative permeability."""
         s_normalized = self._s_normalized()
         rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
         cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")

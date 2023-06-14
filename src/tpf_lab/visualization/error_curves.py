@@ -65,7 +65,7 @@ def analyse_convergence(errors: np.ndarray) -> tuple[float, float]:
         rate: Rate of convergece.
 
     """
-    pass
+    raise NotImplementedError
 
 
 def plot_error_position(filename: str, failure_time_indices: list[list[float]]) -> None:

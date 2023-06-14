@@ -1,6 +1,8 @@
 """Analyze convergence etc. of homotopy continuation from a linear relative permeability
-model to a perturbated Corey relative permeability model."""
+model to a data-driven relative permeability model (a simple ff nn that was trained on a
+small noisy data set).
 
+"""
 
 import logging
 import math
@@ -12,42 +14,47 @@ import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
 
-from tpf_lab.utils import save_convergence_results
-from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
+from tpf_lab.applications.convergence_analysis import (
+    ConvergenceAnalysisExtended,
+    save_convergence_results,
+)
 from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettEquations,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDataSaving,
+    BuckleyLeverettSolutionStrategy,
     BuckleyLeverettDefaultGeometry,
-    BuckleyLeverettWobblyRelPermSolutionStrategy,
     BuckleyLeverettSemiAnalyticalSolution,
     DiagnosticsMixinExtended,
     TwoPhaseFlowVariables,
     VerificationUtils,
-    WobblyFractionalFlowSympy,
+)
+from tpf_lab.models.rel_perm import (
+    BuckleyLeverettPerturbedRelPermSolutionStrategy,
+    PerturbedRelPermFractionalFlowSympy,
 )
 from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
-    HomotopyContinuationRelPermSolutionStrategy,
+    HomotopyContinuationRelPermEquations_LineartoNN,
+    HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy,
 )
+from tpf_lab.utils import fix_seeds
 
 # Fix seed for reproducability.
-random.seed(0)
-np.random.seed(0)
+fix_seeds(0)
 
 # Setup logging.
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(  # type: ignore
+class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPerturbedCorey(  # type: ignore
     BuckleyLeverettEquations,
-    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
+    HomotopyContinuationRelPermEquations_LineartoNN,
     TwoPhaseFlowVariables,
     BuckleyLeverettBoundaryConditions,
     # Solution strategy
-    HomotopyContinuationRelPermSolutionStrategy,
-    BuckleyLeverettWobblyRelPermSolutionStrategy,
+    BuckleyLeverettPerturbedRelPermSolutionStrategy,
+    HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy,
     #
     BuckleyLeverettDefaultGeometry,
     #
@@ -66,6 +73,7 @@ MAX_NEWTON_ITERATIONS = 60
 
 DEFAULT_NUM_GRID_CELLS = 200
 DEFAULT_PHYS_SIZE = 20
+
 # Default grid boundaries for the BuckleyLeverett class
 XMIN = -10
 XMAX = 10
@@ -79,19 +87,20 @@ DENSITY_N = 1.0
 RESIDUAL_SATURATION_W = 0.3
 RESIDUAL_SATURATION_N = 0.3
 
-REL_PERM_MODEL = "power"
 REL_PERM_LINEAR_PARAM_W = 1.0
 REL_PERM_LINEAR_PARAM_N = 1.0
 LIMIT_REL_PERM = False
+
+rel_perm_w_nn_path = os.path.join()
+rel_perm_n_nn_path = os.path.join()
 
 INFLUX = 1.0
 ANGLE = math.pi / 4
 
 # Parameters for wobbly rel. perm.
-YSCALES = np.maximum(np.random.rand(20), 0.5).tolist()
-YSCALES[:5] = np.arange(0.1, 0.5, 0.1)
-XSCALES = [20000.0] * 20
-OFFSETS = np.linspace(0.4, 0.6, 20).tolist()
+YSCALES = np.linspace(0.1, 0.3, 3).tolist()
+XSCALES = [20000.0] * 3
+OFFSETS = np.linspace(0.4, 0.6, 3).tolist()
 
 
 # Set up folder and files for logging/plots/saved time steps.
@@ -99,7 +108,7 @@ base_foldername: str = os.path.join(
     "results",
     "buckley_leverett",
     "homotopy_continuation",
-    f"linear_to_wobbly_rel_perm_limited_{LIMIT_REL_PERM}",
+    f"linear_rel_perm_to_nn_rel_perm_rel_perm_limited_{LIMIT_REL_PERM}",
     f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
 )
 
@@ -123,6 +132,8 @@ initial_condition[
 ] = np.linspace(1 - RESIDUAL_SATURATION_N, RESIDUAL_SATURATION_W, 20)
 
 params = {
+    "folder_name": base_foldername,
+    "file_name": "setup",
     "max_iterations": MAX_NEWTON_ITERATIONS,
     "progressbars": True,
     "formulation": "n_pressure_w_saturation",
@@ -165,13 +176,18 @@ params = {
     "linear_flow": False,
 }
 
-lax_friedrichs = numerical_solution.BuckleyLeverett(params)
-lax_friedrichs.fractionalflow = WobblyFractionalFlowSympy(params)
-lax_friedrichs.lambdify()
-# Get Courant number.
-COURANT_NUMBER = lax_friedrichs.cfl_condition()
 
-model = BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(params)
+lax_friedrichs = numerical_solution.BuckleyLeverett(params)
+# Exchange flow function
+lax_friedrichs.fractionalflow = PerturbedRelPermFractionalFlowSympy(params)
+lax_friedrichs.lambdify()
+courant_number = lax_friedrichs.cfl_condition()
+
+model = BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPerturbedCorey(params)
+# Exchange flow function
+model.analytical.fractionalflow = PerturbedRelPermFractionalFlowSympy(params)
+model.analytical.lambdify()
+
 model.prepare_simulation()
 exact_solution = model._exact_solution
 fig = plt.figure()
@@ -195,7 +211,7 @@ misc.map_fractional_flow(
 #####################
 # Analyze decay rates
 #####################
-decays = np.linspace(0.4, 0.7, 4)
+decays = np.linspace(0.3, 0.7, 5)
 for decay in decays:
     # Set up folder and files for logging/plots/saved time steps.
     foldername = os.path.join(base_foldername, f"homotopy_continuation_decay_{decay}")
@@ -216,7 +232,7 @@ for decay in decays:
     )
 
     analysis = ConvergenceAnalysisExtended(
-        BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly,
+        BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPerturbedCorey,
         params,
         levels=7,
         temporal_refinement_rate=2,
@@ -237,7 +253,7 @@ for decay in decays:
         analysis,
         results,
         "time",
-        courant_number=COURANT_NUMBER,
+        courant_number=courant_number,
         max_iterations=MAX_NEWTON_ITERATIONS,
         foldername=foldername,
     )

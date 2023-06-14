@@ -50,9 +50,14 @@ from typing import Callable, Literal, Optional
 
 import numpy as np
 import porepy as pp
+from porepy.utils.examples_utils import VerificationUtils
 
 from tpf_lab.numerics.ad.functions import ad_pow as ad_pow
 from tpf_lab.numerics.ad.functions import minimum
+from tpf_lab.visualization.diagnostics import (
+    TwoPhaseFlowDataSaving,
+    TwoPhaseFlowSaveData,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +118,8 @@ class TwoPhaseFlowEquations:
     saturation_var: str
     primary_pressure_var: str
     secondary_pressure_var: str
+
+    porosity_value: float
 
     # Phase parameters:
     _viscosity_w: float
@@ -251,7 +258,7 @@ class TwoPhaseFlowEquations:
 
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
-            vals[-1] = pp.GRAVITY_ACCELERATION * self._w_density
+            vals[..., -1] = pp.GRAVITY_ACCELERATION * self._w_density
 
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
@@ -265,7 +272,7 @@ class TwoPhaseFlowEquations:
 
         To assign a gravity-like vector source, add a non-zero contribution in
         the last dimension:
-            vals[-1] = pp.GRAVITY_ACCELERATION * self._n_density
+            vals[..., -1] = pp.GRAVITY_ACCELERATION * self._w_density
 
         """
         vals = np.zeros((g.num_cells, self.mdg.dim_max()))
@@ -294,7 +301,7 @@ class TwoPhaseFlowEquations:
         The base porosity of the domain is 0.1
 
         """
-        return np.full(g.num_cells, 0.1)
+        return np.full(g.num_cells, self.porosity_value)
 
     # Cap pressure and relative permeability functions.
     def _s_normalized(self) -> pp.ad.Operator:
@@ -679,7 +686,8 @@ class TwoPhaseFlowEquations:
         vector_source_w = pp.ad.DenseArray(self._vector_source_w(subdomains[0]))
         vector_source_n = pp.ad.DenseArray(self._vector_source_n(subdomains[0]))
         # Spatial discretization operators.
-        flux_mpfa = pp.ad.MpfaAd(self.n_flux_key, subdomains)
+        flux_mpfa_w = pp.ad.MpfaAd(self.w_flux_key, subdomains)
+        flux_mpfa_n = pp.ad.MpfaAd(self.n_flux_key, subdomains)
         upwind_n = pp.ad.UpwindAd(self.n_flux_key, subdomains)
         # NOTE: We use TPFA for discretization of the capillary flux.
         cap_flux_tpfa = pp.ad.TpfaAd(self.cap_flux_key, subdomains)
@@ -690,13 +698,13 @@ class TwoPhaseFlowEquations:
         mobility_t = self._mobility_t(subdomains)
         # Compute flux.
         flux_n: pp.ad.Operator = (
-            flux_mpfa.flux @ p_n + flux_mpfa.bound_flux @ p_n_bc_dir
+            flux_mpfa_n.flux @ p_n + flux_mpfa_n.bound_flux @ p_n_bc_dir
         )
         flux_p_cap: pp.ad.Operator = (
             cap_flux_tpfa.flux @ p_cap + cap_flux_tpfa.bound_flux @ p_cap_bc
         )
-        flux_buoyancy_w: pp.ad.Operator = flux_mpfa.vector_source @ vector_source_w
-        flux_buoyancy_n: pp.ad.Operator = flux_mpfa.vector_source @ vector_source_n
+        flux_buoyancy_w: pp.ad.Operator = flux_mpfa_w.vector_source @ vector_source_w
+        flux_buoyancy_n: pp.ad.Operator = flux_mpfa_n.vector_source @ vector_source_n
         total_flux = (
             mobility_t * flux_n
             # Add the flux at faces with Neumann bc. For PorePy reasons this needs to be
@@ -734,24 +742,24 @@ class TwoPhaseFlowBoundaryConditions:
     def _bc_type_pressure_w(self, g: pp.Grid) -> pp.BoundaryCondition:
         """Wetting pressure boundary conditions.
 
-        Neumann conditions on three sides; Dirichlet on the south side to ensure
+        Neumann conditions on three sides; Dirichlet on the north side to ensure
         existence of a unique solution.
 
         """
-        # Ignore since MyPy complain that the named tuple has no ``south`` attribute.
-        south = self.domain_boundary_sides(g).south  # type: ignore
-        return pp.BoundaryCondition(g, south, "dir")
+        # Ignore since MyPy complain that the named tuple has no ``north`` attribute.
+        north = self.domain_boundary_sides(g).north  # type: ignore
+        return pp.BoundaryCondition(g, north, "dir")
 
     def _bc_type_pressure_n(self, g: pp.Grid) -> pp.BoundaryCondition:
         """Nonwetting pressure boundary conditions.
 
-        Neumann conditions on three sides; Dirichlet on the south side to ensure
+        Neumann conditions on three sides; Dirichlet on the north side to ensure
         existence of a unique solution.
 
         """
-        # Ignore since MyPy complain that the named tuple has no ``south`` attribute.
-        south = self.domain_boundary_sides(g).south  # type: ignore
-        return pp.BoundaryCondition(g, south, "dir")
+        # Ignore since MyPy complain that the named tuple has no ``north`` attribute.
+        north = self.domain_boundary_sides(g).north  # type: ignore
+        return pp.BoundaryCondition(g, north, "dir")
 
     def _bc_type_pressure_c(self, g: pp.Grid) -> pp.BoundaryCondition:
         """Capillary pressure boundary conditions.
@@ -899,6 +907,9 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
     _bc_values_cap_pressure: Callable
     """Provided by ``TwoPhaseFlowBoundaryConditions``"""
 
+    save_data_time_step: Callable
+    """Provided by ``TwoPhaseFlowDataSaving``."""
+
     def __init__(self, params: Optional[dict]) -> None:
         super().__init__(params)
         if params is None:
@@ -945,6 +956,16 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
             self.primary_pressure_var = self.pressure_n_var
             self.secondary_pressure_var = self.pressure_w_var
 
+        # Rock parameters
+        self.porosity_value: float = params.get("porosity", 0.1)
+        """"Rock porosity.
+
+        SI Units: dimensionless
+
+        The base porosity is 0.1.
+
+        """
+
         # Phase parameters:
         self._viscosity_w: float = params.get("viscosity_w", 1.0)
         """Wetting fluid viscosity.
@@ -975,7 +996,7 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
 
         SI Units: kg/m^3
 
-        The base density is 1 kg/m^3.
+        The base density is 1000 kg/m^3.
 
         """
 
@@ -1048,6 +1069,10 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
         in any grid cell. The timestep is then shortened and recalculated.
         """
         self._max_saturation_change: float = 0.2
+
+        # Data saving.
+        self.results: list[TwoPhaseFlowSaveData] = []
+        """List of stored results from the convergence analysis."""
 
     def is_time_dependent(self) -> bool:
         return True
@@ -1295,6 +1320,7 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
         self._nonlinear_iteration += 1
 
     # Ignore mypy complaining about uncompatible signature.
+    # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
     def after_nonlinear_convergence(  # type: ignore
         self, solution: np.ndarray, errors: list[float], iteration_counter: int
     ) -> None:
@@ -1336,11 +1362,19 @@ class TwoPhaseFlowSolutionStrategy(pp.SolutionStrategy):
         self.convergence_status = True
         self._export()
         logger.debug(f'{{"converged": {"true"}}}')
+        # Save data (and calculate L2 error only after the time step solution was
+        # distributed).
+        self.save_data_time_step(errors, iteration_counter)
 
     # Ignore mypy complaining about uncompatible signature.
+    # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
     def after_nonlinear_failure(  # type: ignore
         self, solution: np.ndarray, errors: list[float], iteration_counter: int
     ) -> None:
+        # For subclasses that calculate an L2 error, the L2 error is not of interest
+        # when the model did not reach the last time step. Thus, data can be saved
+        # before the time step solution is distributed.
+        self.save_data_time_step(errors, iteration_counter)
         logger.debug(f"Failed on timestep {self.time_manager.time_index}")
         logger.debug(f"Error {errors} nonlinear iteration {iteration_counter}")
         logger.debug(f'{{"converged": {"false"}}}')
@@ -1360,6 +1394,7 @@ class TwoPhaseFlowSetup(  # type: ignore
     #
     pp.ModelGeometry,
     #
-    pp.DataSavingMixin,
+    TwoPhaseFlowDataSaving,
+    VerificationUtils,
 ):
     ...

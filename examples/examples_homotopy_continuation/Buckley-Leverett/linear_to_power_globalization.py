@@ -12,8 +12,11 @@ import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
 
-from tpf_lab.utils import save_convergence_results
-from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
+from tpf_lab.applications.convergence_analysis import (
+    ConvergenceAnalysisExtended,
+    save_convergence_results,
+    BuckleyLeverettSaveData,
+)
 from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDataSaving,
@@ -86,16 +89,16 @@ INFLUX = 1.0
 ANGLE = math.pi / 4
 
 # Set up folder and files for logging/plots/saved time steps.
-foldername: str = os.path.join(
+base_foldername: str = os.path.join(
     "results",
     "buckley_leverett",
-    "homotopy_continuation",
+    "homotopy_continuation_as_globalization",
     f"linear_to_power_rel_perm_limited_{LIMIT_REL_PERM}",
     f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
 )
 
 try:
-    os.makedirs(foldername)
+    os.makedirs(base_foldername)
 except Exception:
     pass
 
@@ -115,6 +118,8 @@ initial_condition[
 
 # Set model params.
 params = {
+    "folder_name": base_foldername,
+    "file_name": "setup",
     "max_iterations": MAX_NEWTON_ITERATIONS,
     "progressbars": True,
     "formulation": "n_pressure_w_saturation",
@@ -172,26 +177,25 @@ plt.xlabel(rf"x")
 plt.ylabel(rf"S_w")
 plt.legend()
 fig.subplots_adjust(left=0.2, bottom=0.2)
-plt.savefig(os.path.join(foldername, "analytical_solution.png"))
+plt.savefig(os.path.join(base_foldername, "analytical_solution.png"))
 plt.close()
 misc.map_fractional_flow(
     model.analytical,
-    filename=os.path.join(foldername, "analytical_solution"),
+    filename=os.path.join(base_foldername, "analytical_solution"),
 )
 
 ####################################################################
 # Run convergence analysis for various homotopy continuation decays
 ####################################################################
+homotopy_continuation_param_min = 0.005
 decays = np.linspace(0.5, 0.7, 4)
+decays = [0.5]  # type: ignore
 for decay in decays:
     # Set up folder and files for logging/plots/saved time steps.
     foldername = os.path.join(
-        "results",
-        "buckley_leverett",
-        "homotopy_continuation",
-        f"linear_to_power_rel_perm_limited_{LIMIT_REL_PERM}",
-        f"max_newton_iterations_{MAX_NEWTON_ITERATIONS}",
-        f"homotopy_continuation_decay_{decay}",
+        base_foldername,
+        f"homotopy_continuation_decay_{decay}"
+        + f"_homotopy_continuation_param_min_{homotopy_continuation_param_min}",
     )
     try:
         os.makedirs(foldername)
@@ -204,6 +208,7 @@ for decay in decays:
             "folder_name": foldername,
             "filename": "setup",
             "homotopy_continuation_decay": decay,
+            "homotopy_continuation_param_min": homotopy_continuation_param_min,
         }
     )
 
@@ -211,7 +216,7 @@ for decay in decays:
     analysis = ConvergenceAnalysisExtended(
         BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower,
         params,
-        levels=3,
+        levels=7,
         temporal_refinement_rate=2,
     )
     results = analysis.run_analysis()
@@ -233,4 +238,5 @@ for decay in decays:
         courant_number=courant_number,
         max_iterations=MAX_NEWTON_ITERATIONS,
         foldername=foldername,
+        save_data_class=BuckleyLeverettSaveData,
     )

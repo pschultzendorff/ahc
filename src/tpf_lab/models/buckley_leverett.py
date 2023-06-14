@@ -199,7 +199,8 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         """Export at each iteration. Used for debugging."""
 
         # Data saving.
-        self.results: list[BuckleyLeverettSaveData] = []
+        # Ignore mypy complaining about incompatible type with superclass.
+        self.results: list[BuckleyLeverettSaveData] = []  # type: ignore
         """List of stored results from the convergence analysis."""
 
     def prepare_simulation(self) -> None:
@@ -275,25 +276,6 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         super().after_nonlinear_iteration(solution)
         if self.export_each_iteration:
             self._export_iteration()
-
-    # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
-    def after_nonlinear_failure(  # type: ignore
-        self, solution: np.ndarray, errors: list[float], iteration_counter: int
-    ) -> None:
-        # Since the L2 error is not of interest when the model did not reach the last
-        # time step, data can be saved before the time step solution is distributed.
-        # ``super().after_nonlinear_failure()`` will then raise an ``ValueError``.
-        self.save_data_time_step(errors, iteration_counter)
-        super().after_nonlinear_failure(solution, errors, iteration_counter)
-
-    # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
-    def after_nonlinear_convergence(  # type: ignore
-        self, solution: np.ndarray, errors: list[float], iteration_counter: int
-    ) -> None:
-        super().after_nonlinear_convergence(solution, errors, iteration_counter)
-        # Save data (and calculate L2 error only after the time step solution was
-        # distributed).
-        self.save_data_time_step(errors, iteration_counter)
 
 
 class BuckleyLeverettSemiAnalyticalSolution:

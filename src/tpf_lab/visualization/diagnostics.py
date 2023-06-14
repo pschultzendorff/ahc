@@ -19,12 +19,21 @@ else:
 
 
 @dataclass
-class BuckleyLeverettSaveData:
-    l2_error: float
-    residuals: list[float]
+class TwoPhaseFlowSaveData:
+    solution_norms: list[float]
+    residuals_wrt_homotopy: list[float]
+    residuals_wrt_goal_function: list[float]
+    """Only used for models with homotopy continuation."""
+
     iteration_counter: int
-    time_index: int
+
     time: float
+    time_index: int
+
+
+@dataclass
+class BuckleyLeverettSaveData(TwoPhaseFlowSaveData):
+    l2_error: float
 
 
 class DiagnosticsMixinExtended(pp.DiagnosticsMixin):
@@ -38,7 +47,45 @@ class DiagnosticsMixinExtended(pp.DiagnosticsMixin):
             plt.savefig(filename)
 
 
-class BuckleyLeverettDataSaving(VerificationDataSaving):
+class TwoPhaseFlowDataSaving(VerificationDataSaving):
+    """Model class mixin to save residual and number of Newton iterations for each time
+    step."""
+
+    results: list
+    """List of objects containing the results of the verification."""
+    residuals_wrt_homotopy: list[float]
+    residuals_wrt_goal_function: list[float]
+
+    # Ignore signature incompatible with supertype.
+    def save_data_time_step(  # type: ignore
+        self, solution_norms: list[float], iteration_counter: int
+    ) -> None:
+        """Save data to the `results` list."""
+        collected_data = self.collect_data(solution_norms, iteration_counter)
+        self.results.append(collected_data)
+
+    # Ignore signature incompatible with supertype.
+    def collect_data(self, solution_norms: list[float], iteration_counter: int):  # type: ignore
+        """Collect residual and number of Newton iterations."""
+        # Collect residuals w.r.t. to the goal function for models with homotopy
+        # continuation.
+        if hasattr(self, "residuals_wrt_goal_function"):
+            residuals_wrt_homotopy: list[float] = self.residuals_wrt_homotopy
+            residuals_wrt_goal_function: list[float] = self.residuals_wrt_goal_function
+        else:
+            residuals_wrt_homotopy = [0] * iteration_counter
+            residuals_wrt_goal_function = [0] * iteration_counter
+        return TwoPhaseFlowSaveData(
+            solution_norms=solution_norms,
+            residuals_wrt_goal_function=residuals_wrt_goal_function,
+            residuals_wrt_homotopy=residuals_wrt_homotopy,
+            iteration_counter=iteration_counter,
+            time=self.time_manager.time,
+            time_index=self.time_manager.time_index,
+        )
+
+
+class BuckleyLeverettDataSaving(TwoPhaseFlowDataSaving):
     """Model class mixin to save L2-error, residual and number of Newton iterations each
     time step.
 
@@ -48,8 +95,6 @@ class BuckleyLeverettDataSaving(VerificationDataSaving):
 
     saturation_var: str
     """Saturation variable. Provided by ``BuckleyLeverett``."""
-    results: list
-    """List of objects containing the results of the verification."""
     _exact_solution: np.ndarray
     """Exact solution array. Provided by a mixin of type
     ``BuckleyLeverettSemiAnalyticalSolution``."""
@@ -59,18 +104,7 @@ class BuckleyLeverettDataSaving(VerificationDataSaving):
     domain: pp.Domain
 
     # Ignore signature incompatible with supertype.
-    def save_data_time_step(  # type: ignore
-        self, residuals: list[float], iteration_counter: int
-    ) -> None:
-        """Save data to the `results` list."""
-        # t = self.time_manager.time  # current time
-        # scheduled = self.time_manager.schedule[1:]  # scheduled times except t_init
-        # if any(np.isclose(t, scheduled)):
-        collected_data = self.collect_data(residuals, iteration_counter)
-        self.results.append(collected_data)
-
-    # Ignore signature incompatible with supertype.
-    def collect_data(self, residuals: list[float], iteration_counter: int):  # type: ignore
+    def collect_data(self, solution_norms: list[float], iteration_counter: int):  # type: ignore
         """Collect L2-error, residual and number of Newton iterations."""
         true_solution = self._exact_solution
         approx_solution = self.equation_system.get_variable_values(
@@ -111,10 +145,20 @@ class BuckleyLeverettDataSaving(VerificationDataSaving):
             )
         else:
             l2_error = 0.0
+        # Collect residuals w.r.t. to the goal function for models with homotopy
+        # continuation.
+        if hasattr(self, "residuals_wrt_goal_function"):
+            residuals_wrt_homotopy: list[float] = self.residuals_wrt_homotopy
+            residuals_wrt_goal_function: list[float] = self.residuals_wrt_goal_function
+        else:
+            residuals_wrt_homotopy = [0] * iteration_counter
+            residuals_wrt_goal_function = [0] * iteration_counter
         return BuckleyLeverettSaveData(
+            solution_norms=solution_norms,
+            residuals_wrt_goal_function=residuals_wrt_goal_function,
+            residuals_wrt_homotopy=residuals_wrt_homotopy,
             l2_error=l2_error,
-            residuals=residuals,
             iteration_counter=iteration_counter,
-            time_index=self.time_manager.time_index,
             time=self.time_manager.time,
+            time_index=self.time_manager.time_index,
         )

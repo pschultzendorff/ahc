@@ -1,15 +1,19 @@
 import json
 import logging
 import os
+from collections import ChainMap
 from copy import deepcopy
-from typing import ClassVar, Literal, Optional, Protocol, Type
+from typing import Any, ClassVar, Literal, Optional, Protocol, Type
 
 import matplotlib.pyplot as plt
 import numpy as np
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
 
 from tpf_lab.utils import save_params_and_run_model
-from tpf_lab.visualization.diagnostics import BuckleyLeverettSaveData
+from tpf_lab.visualization.diagnostics import (
+    BuckleyLeverettSaveData,
+    TwoPhaseFlowSaveData,
+)
 
 # Get module wide logger.
 logger = logging.getLogger(__name__)
@@ -24,6 +28,19 @@ class IsDataclass(Protocol):
     """
 
     __dataclass_fields__: ClassVar[dict]
+
+
+def all_annotations(cls) -> ChainMap:
+    """Returns a dictionary-like ChainMap that includes annotations for all attributes
+    defined in cls or inherited from superclasses.
+
+    Copied from
+    https://stackoverflow.com/questions/63903901/how-can-i-access-to-annotations-of-parent-class
+
+    """
+    return ChainMap(
+        *(c.__annotations__ for c in cls.__mro__ if "__annotations__" in c.__dict__)
+    )
 
 
 class ConvergenceAnalysisExtended(ConvergenceAnalysis):
@@ -132,10 +149,24 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
         with open(file_name, "w") as f:
             json.dump(results_to_export, f, indent=2)
 
+    def import_results_from_json(
+        self,
+        file_name="convergence_analysis.json",
+    ) -> list:
+        """Read results from a ``json`` file.
+
+        Parameters:
+            file_name: Name of the input file. Default is "error_analysis.txt".
+
+        """
+        with open(file_name, "r") as f:
+            results = json.load(f)
+        return results
+
     def transform_results_to_classical(
         self,
         list_of_results: list,
-        save_data_class: Type[IsDataclass] = BuckleyLeverettSaveData,
+        save_data_class: Type[IsDataclass] = TwoPhaseFlowSaveData,
     ) -> list[IsDataclass]:
         """Transform the results from ``run_analysis`` to the format the super class
         uses."""
@@ -183,7 +214,7 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
             ]
 
             # Only append results if the last time step was reached.
-            if (
+            if len(nonlinear_iterations) > 0 and (
                 level_result["results"][len(nonlinear_iterations) - 1]["time"]
                 >= end_time
             ):
@@ -230,7 +261,7 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
 
 def result_to_dict(result: IsDataclass) -> dict:
     """Transform the ``result`` dataclass to a dict."""
-    return {name: getattr(result, name) for name in result.__annotations__}
+    return {name: getattr(result, name) for name in all_annotations(result.__class__)}
 
 
 def save_convergence_results(
@@ -240,6 +271,7 @@ def save_convergence_results(
     courant_number: float = 0.0,
     max_iterations: int = 30,
     foldername: str = "results",
+    save_data_class: Type[IsDataclass] = TwoPhaseFlowSaveData,
 ) -> None:
     """Small script save the results of a convergence analysis and plot some graphs.
 
@@ -260,62 +292,132 @@ def save_convergence_results(
 
     """
     # Order of convergence
-    x_axis: Literal["cell_diameter", "time_step"] = (
-        "time_step" if level_type == "time" else "cell_diameter"
-    )
-    ooc = analysis.order_of_convergence(
-        analysis.transform_results_to_classical(results), x_axis=x_axis
-    )
-    logger.info(f"Order of convergence: {ooc}")
-    with open(
-        os.path.join(foldername, f"order_of_convergence_in_{level_type}.txt"), "w"
-    ) as f:
-        f.write(f"order of convergence: {ooc}")
+    try:
+        x_axis: Literal["cell_diameter", "time_step"] = (
+            "time_step" if level_type == "time" else "cell_diameter"
+        )
+        ooc = analysis.order_of_convergence(
+            analysis.transform_results_to_classical(
+                results, save_data_class=save_data_class
+            ),
+            x_axis=x_axis,
+        )
+        logger.info(f"Order of convergence: {ooc}")
+        with open(
+            os.path.join(foldername, f"order_of_convergence_in_{level_type}.txt"), "w"
+        ) as f:
+            f.write(f"order of convergence: {ooc}")
+    # If no refinement level reaches the last time step, ooc will fail.
+    except IndexError:
+        logger.info("Skipping order of convergence")
 
     # L2 errors
-    final_l2_errors, cell_diameter_levels, time_step_levels = analysis.final_l2_error(
-        results
-    )
-    xx = time_step_levels if level_type == "time" else cell_diameter_levels
-    # Plot final error for each parameter.
-    fig = plt.figure()
-    plt.plot(
-        xx,
-        final_l2_errors,
-        "xb-",
-        label=f"final error ({max_iterations} iter)",
-    )
-    plt.xlabel(r"$\log_{10}(\Delta t)$")
-    plt.ylabel(r"$\log_{10}(\|e\|)$")
-    plt.xscale("log")
-    plt.yscale("log")
-    plt.axvline(x=courant_number, color="b", label=r"$\mathcal{C}$")
-    plt.title("Convergence Analysis")
-    plt.legend()
-    fig.subplots_adjust(left=0.4, bottom=0.2)
-    plt.savefig(os.path.join(foldername, f"accuracy_in_{level_type}.png"))
+    try:
+        (
+            final_l2_errors,
+            cell_diameter_levels,
+            time_step_levels,
+        ) = analysis.final_l2_error(results)
+        xx = time_step_levels if level_type == "time" else cell_diameter_levels
+        # Plot final error for each parameter.
+        fig = plt.figure()
+        plt.plot(
+            xx,
+            final_l2_errors,
+            "xb-",
+            label=f"final error ({max_iterations} iter)",
+        )
+        plt.xlabel(r"$\log_{10}(\Delta t)$")
+        plt.ylabel(r"$\log_{10}(\|e\|)$")
+        plt.xscale("log")
+        plt.yscale("log")
+        plt.axvline(x=courant_number, color="b", label=r"$\mathcal{C}$")
+        plt.title("Convergence Analysis")
+        plt.legend()
+        fig.subplots_adjust(left=0.2, bottom=0.2)
+        plt.savefig(os.path.join(foldername, f"accuracy_in_{level_type}.png"))
+    # Catch exceptions for results without L2 errors.
+    except (KeyError, ValueError):
+        pass
 
     # Avg. number of Newton iterations
-    (
-        avg_nonlinear_iterations,
-        cell_diameter_levels,
-        time_step_levels,
-    ) = analysis.average_number_of_iterations(results)
-    xx = time_step_levels if level_type == "time" else cell_diameter_levels
-    fig = plt.figure()
-    plt.plot(
-        xx,
-        avg_nonlinear_iterations,
-        "xb-",
-        label=f"average Newton iterations",
-    )
-    plt.xlabel(r"$\log_{10}(\Delta t)$")
-    plt.ylabel(r"$n_{iterations}$")
-    plt.xscale("log")
-    plt.axvline(x=courant_number, color="b", label=r"$\mathcal{C}$")
-    plt.title("Convergence analysis")
+    try:
+        (
+            avg_nonlinear_iterations,
+            cell_diameter_levels,
+            time_step_levels,
+        ) = analysis.average_number_of_iterations(results)
+        xx = time_step_levels if level_type == "time" else cell_diameter_levels
+        fig = plt.figure()
+        plt.plot(
+            xx,
+            avg_nonlinear_iterations,
+            "xb-",
+            label=f"average Newton iterations",
+        )
+        plt.xlabel(r"$\log_{10}(\Delta t)$")
+        plt.ylabel(r"$n_{iterations}$")
+        plt.xscale("log")
+        plt.axvline(x=courant_number, color="b", label=r"$\mathcal{C}$")
+        plt.title("Convergence analysis")
+        plt.legend()
+        fig.subplots_adjust(left=0.2, bottom=0.2)
+        plt.savefig(
+            os.path.join(foldername, f"average_newton_iterations_varying_{x_axis}.png")
+        )
+    except IndexError:
+        pass
+
+
+def plot_convergence_for_timestep(
+    results: list[dict[str, Any]],
+    foldername: str,
+    filename: str = "convergence",
+    refinement_level: int = 0,
+    time_step: int = 1,
+    additional_keys: Optional[list] = None,
+    additional_data: Optional[dict[str, Any]] = None,
+):
+    """Plot convergence for a given refinement level and time step.
+
+    Parameters:
+        results:
+        foldername: _description_
+        filename: _description_. Defaults to "convergence".
+        refinement_level: _description_. Defaults to 0.
+        time_step: _description_. Defaults to 1.
+        additional_data: Additional keys to obtain data from the results. By default,
+        only the norms of the solution updates are plotted. Defaults to None.
+
+    """
+    if additional_keys is None:
+        additional_keys = []
+    if additional_data is None:
+        additional_data = {}
+    try:
+        solution_norms = results[refinement_level]["results"][time_step - 1][
+            "solution_norms"
+        ]
+    except Exception:
+        # Older saves.
+        solution_norms = results[refinement_level]["results"][time_step - 1][
+            "residuals"
+        ]
+
+    xx = np.linspace(0, len(solution_norms) - 1, len(solution_norms))
+    plt.plot(xx + 1, solution_norms, label=r"$\|\Delta x\|$")
+    for key in additional_keys:
+        dataset = results[refinement_level]["results"][time_step - 1][key]
+        plt.plot(xx + 1, dataset, label=key)
+    for data_name, dataset in additional_data.items():
+        plt.plot(xx + 1, dataset, label=data_name)
+    plt.xlabel("iteration")
+    plt.yscale("log")
     plt.legend()
-    fig.subplots_adjust(left=0.2, bottom=0.2)
     plt.savefig(
-        os.path.join(foldername, f"average_newton_iterations_varying_{x_axis}.png")
+        os.path.join(
+            foldername,
+            filename
+            + f"_refinement_level_{refinement_level}_time_step_{time_step}.png",
+        )
     )

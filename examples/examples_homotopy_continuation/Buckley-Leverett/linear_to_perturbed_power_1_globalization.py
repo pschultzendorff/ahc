@@ -32,7 +32,7 @@ from tpf_lab.models.buckley_leverett import (
     WobblyFractionalFlowSympy,
 )
 from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
+    HomotopyContinuationRelPermEquations_LineartoPerturbedCorey,
     HomotopyContinuationRelPermSolutionStrategy,
 )
 
@@ -47,7 +47,7 @@ logger.setLevel(logging.INFO)
 
 class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(  # type: ignore
     BuckleyLeverettEquations,
-    HomotopyContinuationRelPermEquations_LineartoPerturbatedCorey,
+    HomotopyContinuationRelPermEquations_LineartoPerturbedCorey,
     TwoPhaseFlowVariables,
     BuckleyLeverettBoundaryConditions,
     # Solution strategy

@@ -9,15 +9,17 @@ import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
 
-from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
+from tpf_lab.applications.convergence_analysis import (
+    ConvergenceAnalysisExtended,
+    save_convergence_results,
+)
 from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettSetup,
 )
-from tpf_lab.models.perturbated_rel_perm import (
-    PerturbatedRelPermFractionalFlowSympy,
-    BuckleyLeverettPerturbatedRelPermSetup,
+from tpf_lab.models.rel_perm import (
+    PerturbedRelPermFractionalFlowSympy,
+    BuckleyLeverettPerturbedRelPermSetup,
 )
-from tpf_lab.utils import save_convergence_results
 
 # Fix seed for reproducability.
 random.seed(0)
@@ -40,7 +42,7 @@ plt.rcParams.update(
 ####################
 # Default parameters
 ####################
-MAX_NEWTON_ITERATIONS = 30
+MAX_NEWTON_ITERATIONS = 60
 
 DEFAULT_NUM_GRID_CELLS = 200
 DEFAULT_PHYS_SIZE = 20
@@ -278,7 +280,7 @@ params.update(
 )
 
 analysis = ConvergenceAnalysisExtended(
-    BuckleyLeverettSetup, params, levels=3, temporal_refinement_rate=2
+    BuckleyLeverettSetup, params, levels=4, temporal_refinement_rate=2
 )
 results = analysis.run_analysis()
 analysis.export_results_to_json(

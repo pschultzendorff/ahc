@@ -28,37 +28,71 @@ class DatasetWithNoise(torch.utils.data.Dataset):
         self,
         len: int = 1000,
         model: Literal[
-            "Brooks-Corey-W",
-            "Brooks-Corey-N",
-            "Brooks-Corey-Cap-Press",
+            "Brooks-Corey_w",
+            "Brooks-Corey_n",
+            "Brooks-Corey_pcap",
+            "Corey_w",
+            "Corey_n",
             "power_w",
             "power_n",
-        ] = "Brooks-Corey-W",
+        ] = "Brooks-Corey_w",
         model_params: Optional[dict] = None,
         mean: float = 1.5,
         std: float = 1.5,
     ) -> None:
         super().__init__()
+        if model_params is None:
+            model_params = {"residual_saturation_w": 0.3, "residual_saturation_n": 0.3}
+
         self.len = len
         self.S_w = torch.rand([self.len, 1])
         mean_tensor = torch.tensor([mean] * self.len).unsqueeze(-1)
         std_tensor = torch.tensor([std] * self.len).unsqueeze(-1)
-        noise = torch.normal(mean_tensor, std_tensor) * self.S_w
-        biased_noise = noise
-        # biased_noise = torch.where(self.S_w >= 0.5, torch.zeros_like(noise), noise)
+        noise = torch.normal(mean_tensor, std_tensor)
+        # biased_noise = noise
+        # Noise only for :math:`0.4\leq S_w\leq0.6`.
+        biased_noise = torch.where(
+            torch.logical_and(self.S_w >= 0.4, self.S_w <= 0.6),
+            noise,
+            torch.zeros_like(noise),
+        )
 
-        if model == "Brooks-Corey-W":
+        if model == "Brooks-Corey_w":
             gen_func: nn.Module | Callable = RelPermW_BrooksCorey(model_params)
-        elif model == "Brooks-Corey-N":
+        elif model == "Brooks-Corey_n":
             gen_func = RelPermN_BrooksCorey(model_params)
         elif model == "Brooks-Corey-Cap-Press":
             gen_func = CapPress_BrooksCorey(model_params)
-        elif model == "power_w":
-            gen_func = power_w
-        elif model == "power_n":
-            gen_func = power_n
+        elif model in ["Corey_w", "power_w"]:
+            gen_func = RelPermW_Corey(model_params)
+        elif model in ["Corey_n", "power_n"]:
+            gen_func = RelPermN_Corey(model_params)
 
-        self.target: torch.Tensor = gen_func(self.S_w) + biased_noise
+        target: torch.Tensor = gen_func(self.S_w) + biased_noise
+
+        # Sanitize rel. perm. data.
+        if not model == "Brooks-Corey_pcap":
+            # Cut values < 0 and > 1.
+            target = torch.where(target > 1.0, 1.0, target)
+            target = torch.where(target < 0.0, 0.0, target)
+
+        # Cut values above/below the residual saturations.
+        if model in ["Brooks-Corey_w", "Corey_w", "power_w"]:
+            target = torch.where(
+                self.S_w > 1 - model_params["residual_saturation_n"], 1.0, target
+            )
+            target = torch.where(
+                self.S_w < model_params["residual_saturation_w"], 0.0, target
+            )
+        elif model in ["Brooks-Corey_n", "Corey_n", "power_n"]:
+            target = torch.where(
+                self.S_w > 1 - model_params["residual_saturation_n"], 0.0, target
+            )
+            target = torch.where(
+                self.S_w < model_params["residual_saturation_w"], 1.0, target
+            )
+
+        self.target: torch.Tensor = target
 
     def __len__(self) -> int:
         return self.len
@@ -98,9 +132,9 @@ class IterableDatasetWithNoise(torch.utils.data.IterableDataset):
         elif model == "Brooks-Corey-Cap-Press":
             self.gen_func = CapPress_BrooksCorey(model_params)
         elif model == "power_w":
-            self.gen_func = power_w
+            self.gen_func = RelPermW_Corey(model_params)
         elif model == "power_n":
-            self.gen_func = power_n
+            self.gen_func = RelPermN_Corey(model_params)
 
     def __iter__(self):
         def iterator(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
@@ -129,18 +163,16 @@ class RelPermW_BrooksCorey(nn.Module):
         self.n_1: int = int(params.get("n_1", 2))
         self.n_2: int = int(params.get("n_3", 3))
         self.n_3: int = int(params.get("n_2", 1))
-        self._residual_saturation_w: float = params.get("w_res_sat", 0.3)
+        self._residual_saturation_w: float = params.get("residual_saturation_w", 0.3)
         """Wetting residual saturation."""
-        self._residual_saturation_n: float = params.get("n_res_sat", 0.3)
+        self._residual_saturation_n: float = params.get("residual_saturation_n", 0.3)
         """Nonwetting residual saturation."""
 
     def forward(self, S_w: torch.Tensor) -> torch.Tensor:
         S_w_normalized = (S_w - self._residual_saturation_w) / (
             1 - self._residual_saturation_w - self._residual_saturation_n
         )
-        out = S_w_normalized ** (self.n_1 + self.n_2 * self.n_3)  #
-        out = torch.where(out > 0.99, 0.99, out)
-        out = torch.where(out < 0.01, 0.01, out)
+        out = S_w_normalized ** (self.n_1 + self.n_2 * self.n_3)
         return out
 
 
@@ -160,9 +192,9 @@ class RelPermN_BrooksCorey(nn.Module):
         self.n_1: int = int(params.get("n_1", 2))
         self.n_2: int = int(params.get("n_3", 3))
         self.n_3: int = int(params.get("n_2", 1))
-        self._residual_saturation_w: float = params.get("w_res_sat", 0.3)
+        self._residual_saturation_w: float = params.get("residual_saturation_w", 0.3)
         """Wetting residual saturation."""
-        self._residual_saturation_n: float = params.get("n_res_sat", 0.3)
+        self._residual_saturation_n: float = params.get("residual_saturation_n", 0.3)
         """Nonwetting residual saturation."""
 
     def forward(self, S_w: torch.Tensor) -> torch.Tensor:
@@ -172,19 +204,63 @@ class RelPermN_BrooksCorey(nn.Module):
         out = ((1 - S_w_normalized) ** self.n_1) * (
             (1 - S_w_normalized**self.n_2) ** self.n_3
         )
-        out = torch.where(out > 0.99, 0.99, out)
-        out = torch.where(out < 0.01, 0.01, out)
         return out
 
 
-def power_w(S_w: torch.Tensor) -> torch.Tensor:
-    """Cubic power law for wetting rel. perm."""
-    return S_w**3
+class RelPermW_Corey(nn.Module):
+    """Generates wetting rel. perm. with the Corey model.
+
+    Default values correspond to a cubic law.
+
+    The return values are limited above and below.
+
+    """
+
+    def __init__(self, params: Optional[dict] = None) -> None:  #
+        super().__init__()
+        if params is None:
+            params = {}
+        self.power: int = int(params.get("power", 3))
+        self.linear_param: float = params.get("linear_param", 1.0)
+        self._residual_saturation_w: float = params.get("residual_saturation_w", 0.3)
+        """Wetting residual saturation."""
+        self._residual_saturation_n: float = params.get("residual_saturation_n", 0.3)
+        """Nonwetting residual saturation."""
+
+    def forward(self, S_w: torch.Tensor) -> torch.Tensor:
+        S_w_normalized = (S_w - self._residual_saturation_w) / (
+            1 - self._residual_saturation_w - self._residual_saturation_n
+        )
+        out = (S_w_normalized**self.power) * self.linear_param
+        return out
 
 
-def power_n(S_w: torch.Tensor) -> torch.Tensor:
-    """Cubic power law for wetting rel. perm."""
-    return (1 - S_w) ** 3
+class RelPermN_Corey(nn.Module):
+    """Generates nonwetting rel. perm. with the Corey model.
+
+    Default values correspond to a cubic law.
+
+    The return values are limited above and below.
+
+    """
+
+    def __init__(self, params: Optional[dict] = None) -> None:  #
+        super().__init__()
+        if params is None:
+            params = {}
+        self.power: int = int(params.get("power", 3))
+        self.linear_param: float = params.get("linear_param", 1.0)
+        self._residual_saturation_w: float = params.get("residual_saturation_w", 0.3)
+        """Wetting residual saturation."""
+        self._residual_saturation_n: float = params.get("residual_saturation_n", 0.3)
+        """Nonwetting residual saturation."""
+
+    def forward(self, S_w: torch.Tensor) -> torch.Tensor:
+        S_w_normalized = (S_w - self._residual_saturation_w) / (
+            1 - self._residual_saturation_w - self._residual_saturation_n
+        )
+        out = ((1 - S_w_normalized) ** self.power) * self.linear_param
+        return out
 
 
 class CapPress_BrooksCorey(nn.Module):
@@ -202,9 +278,9 @@ class CapPress_BrooksCorey(nn.Module):
         """Wetting threshold pressure."""
         self.n_thresh_press: float = params.get("n_thresh_press", -1.5)
         """Nonwetting threshold pressure."""
-        self._residual_saturation_w: float = params.get("w_res_sat", 0.3)
+        self._residual_saturation_w: float = params.get("residual_saturation_w", 0.3)
         """Wetting residual saturation."""
-        self._residual_saturation_n: float = params.get("n_res_sat", 0.3)
+        self._residual_saturation_n: float = params.get("residual_saturation_n", 0.3)
         """Nonwetting residual saturation."""
 
     def forward(self, S_w: torch.Tensor) -> torch.Tensor:
