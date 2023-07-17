@@ -234,7 +234,7 @@ params = {
     "meshing_arguments": {"cell_size": CELL_SIZE},
     "time_manager": pp.TimeManager(
         schedule=np.array([0, 1]),
-        dt_init=0.1,
+        dt_init=0.01,
         constant_dt=True,
     ),
     # fluid and solid params
@@ -262,7 +262,7 @@ params = {
 analysis = ConvergenceAnalysisExtended(
     Setup,
     params,
-    levels=7,
+    levels=5,
     temporal_refinement_rate=2,
 )
 results = analysis.run_analysis()

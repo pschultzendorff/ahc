@@ -47,7 +47,7 @@ def f_w(k: float) -> np.ndarray:
 
 
 def f_w_prime(k: float) -> np.ndarray:
-    return None
+    raise NotImplementedError
 
 
 # Initial parameter.

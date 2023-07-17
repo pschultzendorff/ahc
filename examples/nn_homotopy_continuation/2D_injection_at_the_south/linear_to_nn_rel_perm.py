@@ -187,7 +187,7 @@ logger.setLevel(logging.DEBUG)
 # Default parameters
 ####################
 # Solver setup
-MAX_NEWTON_ITERATIONS = 60
+MAX_NEWTON_ITERATIONS = 100
 N1_CONVERGENCE_TOL: float = 1e-5
 
 CELL_SIZE = 1.0
@@ -213,8 +213,8 @@ REL_PERM_N_NN_PATH: str = os.path.join("results", "rel_perm_nn", "nonwetting.pt"
 LIMIT_REL_PERM = False
 
 # Parameters for homotopy continuation
-HOMOTOPY_CONTINUATION_PARAM_MIN: float = 1.0
-HOMOTOPY_CONTINUATION_DECAY: float = 0.5
+HOMOTOPY_CONTINUATION_PARAM_MIN: float = 0.0
+HOMOTOPY_CONTINUATION_DECAY: float = 0.9
 
 CAP_PRESSURE_MODEL = "linear"
 CAP_PRESSURE_LINEAR_PARAM = 0.1
@@ -249,7 +249,7 @@ params = {
     "meshing_arguments": {"cell_size": CELL_SIZE},
     "time_manager": pp.TimeManager(
         schedule=np.array([0, 1.0]),
-        dt_init=0.1,
+        dt_init=0.125,
         constant_dt=True,
     ),
     # fluid and solid params
@@ -282,7 +282,7 @@ params = {
 analysis = ConvergenceAnalysisExtended(
     Setup,
     params,
-    levels=7,
+    levels=4,
     temporal_refinement_rate=2,
 )
 results = analysis.run_analysis()
