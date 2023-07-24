@@ -3,6 +3,7 @@
 So far, the following models are implemented:
 - Relative permeability:
     - Brooks-Corey
+    - power model (i.e., Corey)
 
 - Capillary pressure:
     - Brooks-Corey
@@ -39,7 +40,25 @@ class DatasetWithNoise(torch.utils.data.Dataset):
         model_params: Optional[dict] = None,
         mean: float = 1.5,
         std: float = 1.5,
+        biased_noise: bool = False,
     ) -> None:
+        """_summary_
+
+
+
+        Parameters:
+            len: _description_. Defaults to 1000.
+            model: _description_. Defaults to "Brooks-Corey_w".
+            model_params: _description_. Defaults to None.
+            mean: _description_. Defaults to 1.5.
+            std: _description_. Defaults to 1.5.
+            biased_noise: _description_. At the moment, the exact form of the biased
+                noise is hard coded. Defaults to False.
+
+        TODO: Fix the biased noise implementation s.t., e.g., a noise function is
+            passed. This would allow for much greater flexibility.
+
+        """
         super().__init__()
         if model_params is None:
             model_params = {"residual_saturation_w": 0.3, "residual_saturation_n": 0.3}
@@ -49,13 +68,14 @@ class DatasetWithNoise(torch.utils.data.Dataset):
         mean_tensor = torch.tensor([mean] * self.len).unsqueeze(-1)
         std_tensor = torch.tensor([std] * self.len).unsqueeze(-1)
         noise = torch.normal(mean_tensor, std_tensor)
-        # biased_noise = noise
-        # Noise only for :math:`0.4\leq S_w\leq0.6`.
-        biased_noise = torch.where(
-            torch.logical_and(self.S_w >= 0.4, self.S_w <= 0.6),
-            noise,
-            torch.zeros_like(noise),
-        )
+
+        if biased_noise:
+            # Noise only for :math:`0.4\leq S_w\leq0.6`.
+            noise = torch.where(
+                torch.logical_and(self.S_w >= 0.4, self.S_w <= 0.6),
+                noise,
+                torch.zeros_like(noise),
+            )
 
         if model == "Brooks-Corey_w":
             gen_func: nn.Module | Callable = RelPermW_BrooksCorey(model_params)
@@ -68,7 +88,7 @@ class DatasetWithNoise(torch.utils.data.Dataset):
         elif model in ["Corey_n", "power_n"]:
             gen_func = RelPermN_Corey(model_params)
 
-        target: torch.Tensor = gen_func(self.S_w) + biased_noise
+        target: torch.Tensor = gen_func(self.S_w) + noise
 
         # Sanitize rel. perm. data.
         if not model == "Brooks-Corey_pcap":

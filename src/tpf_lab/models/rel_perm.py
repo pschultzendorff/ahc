@@ -163,6 +163,8 @@ class PerturbedRelPermFractionalFlowSympy(functions.FractionalFlowSymPy):
 
 
 class RelPermNNEquations(TwoPhaseFlowEquations):
+    """Mixin that provides relative permeabilities given by neural networks."""
+
     _rel_perm_w_nn_function: Callable
     """Wetting rel. perm. function by a neural network.
 
@@ -208,6 +210,9 @@ class RelPermNNEquations(TwoPhaseFlowEquations):
 
 
 class RelPermNNSolutionStrategy(pp.SolutionStrategy):
+    """Load architecture and parameters for neural networks that provide relative
+    permeabilities."""
+
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
         if params is None:
@@ -269,6 +274,9 @@ class RelPermNNFractionalFlowNumpy(functions.FractionalFlowNumPy):
 class RelPermNNBuckleyLeverettAnalyticalSolution(analytical_solution.BuckleyLeverett):
     """Replace the ``sympy`` fractional flow function by a ``numpy`` fractional flow
     function to allow the implementation of ``torch.nn.Module`` as functions.
+
+    This allows for computation of the analytical solution of a Buckley-Leverett
+    problem that has neural networks in its fractional flow form.
 
     TODO: This is not a simple task, as the first and second deriatives of the
     ``torch.nn.Module`` needs to be constructed and translated to functions that handle

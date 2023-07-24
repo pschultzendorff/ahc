@@ -285,10 +285,10 @@ def save_convergence_results(
     Parameters:
         analysis: _description_
         results: _description_
-        level_type: _description_. Defaults to "time".
-        courant_number: _description_. Defaults to 0.0.
-        max_iterations: _description_. Defaults to 30.
-        foldername: _description_. Defaults to "results".
+        level_type: _description_. Defaults to ``"time"``.
+        courant_number: _description_. Defaults to ``0.0``.
+        max_iterations: _description_. Defaults to ``30``.
+        foldername: _description_. Defaults to ``"results"``.
 
     """
     # Order of convergence
@@ -384,10 +384,10 @@ def plot_convergence_for_timestep(
         results:
         foldername: _description_
         filename: _description_. Defaults to "convergence".
-        refinement_level: _description_. Defaults to 0.
-        time_step: _description_. Defaults to 1.
+        refinement_level: _description_. Defaults to ``0``.
+        time_step: _description_. Defaults to ``1``.
         additional_data: Additional keys to obtain data from the results. By default,
-        only the norms of the solution updates are plotted. Defaults to None.
+        only the norms of the solution updates are plotted. Defaults to ``None``.
 
     """
     if additional_keys is None:

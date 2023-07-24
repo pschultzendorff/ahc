@@ -186,6 +186,18 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         return error, converged, diverged
 
 
+def adaptive_lambda() -> float:
+    """Implement the step-length adaptation for :math:`\lambda` introduced by "Brown, D.
+    A., & Zingg, D. W. (2016). A monolithic homotopy continuation algorithm with
+    application to computational fluid dynamics. "
+
+    Returns:
+        Updated value for :math:`\lambda`
+
+    """
+    pass
+
+
 class HomotopyContinuationRelPermEquations_LineartoNN(
     HomotopyContinuationRelPermEquations
 ):
@@ -282,6 +294,7 @@ class HomotopyContinuationRelPermEquations_LineartoPerturbedCorey(
 
         Returns:
             Derivative of the error function in terms of :math:`S_w`.
+
         """
         s = self.equation_system.md_variable(self.saturation_var)
         xscales = [pp.ad.Scalar(xscale) for xscale in self._xscales]
