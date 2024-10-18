@@ -47,7 +47,7 @@ class DiagnosticsMixinExtended(pp.DiagnosticsMixin):
             plt.savefig(filename)
 
 
-class TwoPhaseFlowDataSaving(VerificationDataSaving):
+class DataSavingTwoPhaseFlow(VerificationDataSaving):
     """Model class mixin to save residual and number of Newton iterations for each time
     step."""
 
@@ -85,7 +85,7 @@ class TwoPhaseFlowDataSaving(VerificationDataSaving):
         )
 
 
-class BuckleyLeverettDataSaving(TwoPhaseFlowDataSaving):
+class BuckleyLeverettDataSaving(DataSavingTwoPhaseFlow):
     """Model class mixin to save L2-error, residual and number of Newton iterations each
     time step.
 

@@ -8,6 +8,7 @@ from typing import Any, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
+import tpf_lab.visualization.error_curves as error_curves
 import tqdm
 from buckley_leverett import (
     analytical_solution,
@@ -16,22 +17,17 @@ from buckley_leverett import (
     misc,
     numerical_solution,
 )
-
-import tpf_lab.visualization.error_curves as error_curves
+from porepy.models.run_models import run_time_dependent_model
 from tpf_lab.models.buckley_leverett import (
-    BuckleyLeverettEquations,
-    TwoPhaseFlowVariables,
     BuckleyLeverettBoundaryConditions,
-    BuckleyLeverettSolutionStrategy,
-    #
-    BuckleyLeverettDefaultGeometry,
-    #
-    BuckleyLeverettSemiAnalyticalSolution,
     BuckleyLeverettDataSaving,
+    BuckleyLeverettDefaultGeometry,
+    BuckleyLeverettEquations,
+    BuckleyLeverettSemiAnalyticalSolution,
+    BuckleyLeverettSolutionStrategy,
+    VariablesTPF,
     VerificationUtils,
 )
-
-from porepy.models.run_models import run_time_dependent_model
 from tpf_lab.visualization.diagnostics import DiagnosticsMixinExtended
 
 plt.rcParams.update(
@@ -58,7 +54,7 @@ class BuckleyLeverett_perturbed_mobility_w(BuckleyLeverettEquations):
 
 class BuckleyLeverettModifiedSetup(  # type: ignore
     BuckleyLeverett_perturbed_mobility_w,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettSolutionStrategy,
     #
@@ -68,8 +64,7 @@ class BuckleyLeverettModifiedSetup(  # type: ignore
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 class FractionalFlowSympy_PerturbedMobilityW(functions.FractionalFlowSymPy):

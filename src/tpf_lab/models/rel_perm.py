@@ -10,10 +10,8 @@ import porepy as pp
 import scipy.sparse as sps
 import sympy
 import torch
-from buckley_leverett import functions
-from buckley_leverett import analytical_solution
+from buckley_leverett import analytical_solution, functions
 from porepy.utils.examples_utils import VerificationUtils
-
 from tpf_lab.ml.nn import BaseNN
 from tpf_lab.ml.nn_ad import nn_wrapper
 from tpf_lab.models.buckley_leverett import (
@@ -23,9 +21,9 @@ from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettSolutionStrategy,
 )
 from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowSolutionStrategy,
-    TwoPhaseFlowVariables,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
 )
 from tpf_lab.numerics.ad.functions import ad_pow
 from tpf_lab.numerics.ad.functions import minimum as minimum_ad
@@ -38,7 +36,7 @@ from tpf_lab.visualization.diagnostics import (
 logger = logging.getLogger(__name__)
 
 
-class PerturbedRelPermEquations(TwoPhaseFlowEquations):
+class PerturbedRelPermEquations(EquationsTPF):
     _yscales: list[float]
     """_summary_
     
@@ -79,7 +77,7 @@ class PerturbedRelPermEquations(TwoPhaseFlowEquations):
         return error
 
 
-class PerturbedRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
+class PerturbedRelPermSolutionStrategy(SolutionStrategyTPF):
     """Fetch the necessary parameters for the perturbation equations."""
 
     def __init__(self, params: dict | None = None) -> None:
@@ -116,7 +114,7 @@ class BuckleyLeverettPerturbedRelPermSolutionStrategy(
 
 class BuckleyLeverettPerturbedRelPermSetup(  # type: ignore
     PerturbedRelPermEquations,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettPerturbedRelPermSolutionStrategy,
     #
@@ -126,8 +124,7 @@ class BuckleyLeverettPerturbedRelPermSetup(  # type: ignore
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 class PerturbedRelPermFractionalFlowSympy(functions.FractionalFlowSymPy):
@@ -162,7 +159,7 @@ class PerturbedRelPermFractionalFlowSympy(functions.FractionalFlowSymPy):
         )
 
 
-class RelPermNNEquations(TwoPhaseFlowEquations):
+class RelPermNNEquations(EquationsTPF):
     """Mixin that provides relative permeabilities given by neural networks."""
 
     _rel_perm_w_nn_function: Callable

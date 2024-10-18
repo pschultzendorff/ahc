@@ -8,7 +8,6 @@ from typing import Any, ClassVar, Literal, Optional, Protocol, Type
 import matplotlib.pyplot as plt
 import numpy as np
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
-
 from tpf_lab.utils import save_params_and_run_model
 from tpf_lab.visualization.diagnostics import (
     BuckleyLeverettSaveData,
@@ -191,7 +190,7 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
     def average_number_of_iterations(
         self, list_of_results: list
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Compute the average number of nonlinear iterations for each level.
+        r"""Compute the average number of nonlinear iterations for each level.
 
         Warning:
             The model might run up until :math:`1+\Delta t-\epsilon`, i.e., one time

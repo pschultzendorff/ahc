@@ -14,15 +14,16 @@ with var being some ad variable.
 Note that while the argument to AdFunction is a pp.ad.Operator, the wrapping in
 pp.ad.Function implies that upon parsing, the argument passed to f will be an AdArray.
 """
+
 from __future__ import annotations
 
 from typing import Callable, Union
 
 import numpy as np
-import scipy.sparse as sps
-
 import porepy as pp
+import scipy.sparse as sps
 from porepy.numerics.ad.forward_mode import AdArray
+from porepy.numerics.ad.functions import FloatType
 
 __all__ = ["ad_pow", "minimum"]
 
@@ -72,7 +73,7 @@ def ad_pow(var, exponent: float):
             )
 
 
-def minimum(var_0: AdArray, var_1: AdArray | np.ndarray) -> AdArray:
+def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
     """Ad minimum function represented as an ``AdArray``.
 
     The arguments can be either ``AdArrays`` or ``ndarrays``, this duality is needed to
@@ -86,7 +87,6 @@ def minimum(var_0: AdArray, var_1: AdArray | np.ndarray) -> AdArray:
         var_1: Second argument.
 
         If one of the input arguments is scalar, broadcasting will be used.
-
 
     Returns:
         The minimum of the two arguments, taken element-wise in the arrays. The return
@@ -176,7 +176,7 @@ def minimum(var_0: AdArray, var_1: AdArray | np.ndarray) -> AdArray:
 
 
 def bump_function(var, r_1: float, r_2: float):
-    """Bump function needed, e.g., for partition of unity.
+    r"""Bump function needed, e.g., for partition of unity.
 
     The function equals :math:`y(x)=0` for :math:`x\leq r_1`,  :math:`y(x)=1` for
     :math:`x\geq r_2` and is smooth on the entire domain.

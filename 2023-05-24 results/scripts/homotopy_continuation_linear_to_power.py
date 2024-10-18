@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
-
 from save_convergence_results import save_convergence_results
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
 from tpf_lab.models.buckley_leverett import (
@@ -16,7 +15,7 @@ from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettDefaultGeometry,
     BuckleyLeverettSemiAnalyticalSolution,
     DiagnosticsMixinExtended,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     VerificationUtils,
 )
 from tpf_lab.models.homotopy_continuation import (
@@ -35,7 +34,7 @@ logger.setLevel(logging.INFO)
 
 class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: ignore
     HomotopyContinuationRelPermEquations_LineartoPower,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     HomotopyContinuationRelPerm_LineartoPower_SolutionStrategy,
     #
@@ -45,8 +44,7 @@ class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: 
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 ####################

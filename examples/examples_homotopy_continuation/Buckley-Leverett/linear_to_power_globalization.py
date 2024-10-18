@@ -1,7 +1,6 @@
 """Analyze convergence etc. of homotopy continuation from a linear relative permeability
 model to a Corey relative permeability model."""
 
-
 import logging
 import math
 import os
@@ -11,11 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
-
 from tpf_lab.applications.convergence_analysis import (
+    BuckleyLeverettSaveData,
     ConvergenceAnalysisExtended,
     save_convergence_results,
-    BuckleyLeverettSaveData,
 )
 from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettBoundaryConditions,
@@ -24,12 +22,12 @@ from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettSemiAnalyticalSolution,
     BuckleyLeverettSolutionStrategy,
     DiagnosticsMixinExtended,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     VerificationUtils,
 )
 from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPermSolutionStrategy,
     HomotopyContinuationRelPermEquations_LineartoPower,
+    HomotopyContinuationRelPermSolutionStrategy,
 )
 
 # Fix seed for reproducability.
@@ -44,7 +42,7 @@ logger.setLevel(logging.INFO)
 # Setup the model class
 class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: ignore
     HomotopyContinuationRelPermEquations_LineartoPower,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettSolutionStrategy,
     HomotopyContinuationRelPermSolutionStrategy,
@@ -55,8 +53,7 @@ class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: 
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 ##########################

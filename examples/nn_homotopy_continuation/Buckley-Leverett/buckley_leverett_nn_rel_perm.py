@@ -10,7 +10,6 @@ import os
 
 import numpy as np
 import porepy as pp
-
 from tpf_lab.applications.convergence_analysis import (
     BuckleyLeverettSaveData,
     ConvergenceAnalysisExtended,
@@ -22,27 +21,23 @@ from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettDefaultGeometry,
     BuckleyLeverettEquations,
     BuckleyLeverettSolutionStrategy,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     VerificationUtils,
 )
-from tpf_lab.models.rel_perm import (
-    RelPermNNEquations,
-    RelPermNNSolutionStrategy,
-)
+from tpf_lab.models.rel_perm import RelPermNNEquations, RelPermNNSolutionStrategy
 
 
 class Setup(
     BuckleyLeverettEquations,
     RelPermNNEquations,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettSolutionStrategy,
     RelPermNNSolutionStrategy,
     BuckleyLeverettDefaultGeometry,
     BuckleyLeverettDataSaving,
     VerificationUtils,
-):
-    ...
+): ...
 
 
 # Setup logging.

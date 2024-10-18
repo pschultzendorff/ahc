@@ -4,9 +4,8 @@ from datetime import date
 
 import numpy as np
 import porepy as pp
-
 from tpf_lab.models.run_models import run_time_dependent_model
-from tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
+from tpf_lab.models.two_phase_flow import EquationsTPF
 from tpf_lab.utils import logging_redirect_tqdm, rm_out_padding
 
 # rm_out_padding()
@@ -29,7 +28,7 @@ logger.setLevel(logging.DEBUG)
 w_source_cell_index = 209
 
 
-class ModifiedModel(TwoPhaseFlowEquations):
+class ModifiedModel(EquationsTPF):
     def _source_w(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._source_w(g)
         array[w_source_cell_index] = 0.5

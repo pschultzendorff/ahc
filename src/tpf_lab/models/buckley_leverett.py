@@ -7,17 +7,16 @@ from typing import Any, Callable
 
 import numpy as np
 import porepy as pp
-import sympy
 import scipy.sparse as sps
+import sympy
 from buckley_leverett import analytical_solution, functions
 from porepy.utils.examples_utils import VerificationUtils
 from scipy import interpolate
-
 from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowSolutionStrategy,
-    TwoPhaseFlowVariables,
+    BoundaryConditionsTPF,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
 )
 from tpf_lab.numerics.ad.functions import ad_pow
 from tpf_lab.visualization.diagnostics import (
@@ -30,7 +29,7 @@ from tpf_lab.visualization.diagnostics import (
 logger = logging.getLogger(__name__)
 
 
-class BuckleyLeverettEquations(TwoPhaseFlowEquations):
+class BuckleyLeverettEquations(EquationsTPF):
     _angle: float
 
     def _vector_source_w(self, g: pp.Grid) -> np.ndarray:
@@ -61,7 +60,7 @@ class BuckleyLeverettEquations(TwoPhaseFlowEquations):
         return vals.ravel()
 
 
-class BuckleyLeverettBoundaryConditions(TwoPhaseFlowBoundaryConditions):
+class BuckleyLeverettBoundaryConditions(BoundaryConditionsTPF):
     _influx: float
 
     def _bc_type_pressure_w(self, g: pp.Grid) -> pp.BoundaryCondition:
@@ -157,7 +156,7 @@ class BuckleyLeverettDefaultGeometry(pp.ModelGeometry):
         )
 
 
-class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
+class BuckleyLeverettSolutionStrategy(SolutionStrategyTPF):
     save_data_time_step: Callable
     """Provided by ``BuckleyLeverettDataSaving``."""
     _flux_t: Callable
@@ -219,10 +218,10 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         num_cells: int = self.mdg.subdomains()[0].num_cells
         self.initial_saturation = np.full(num_cells, 1 - self._residual_saturation_n)
         self.initial_saturation[int(num_cells / 2) :] = self._residual_saturation_w
-        self.initial_saturation[
-            int(num_cells / 2) - 10 : int(num_cells / 2) + 10
-        ] = np.linspace(
-            1 - self._residual_saturation_n, self._residual_saturation_w, 20
+        self.initial_saturation[int(num_cells / 2) - 10 : int(num_cells / 2) + 10] = (
+            np.linspace(
+                1 - self._residual_saturation_n, self._residual_saturation_w, 20
+            )
         )
         self.equation_system.set_variable_values(
             self.initial_saturation,
@@ -231,7 +230,7 @@ class BuckleyLeverettSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         )
 
     def initial_pressure(self) -> None:
-        """Compute and set the initial pressure distribution s.t. :math:`u_\Sigma`=1.0
+        r"""Compute and set the initial pressure distribution s.t. :math:`u_\Sigma`=1.0
         across the entire domain."""
         # Assemble flow equation/nonwetting pressure variable subsystem and solve for
         # pressure.
@@ -394,7 +393,7 @@ class BuckleyLeverettSemiAnalyticalSolution:
 # ``BuckleyLeverettSolutionStrategy`` and ``BuckleyLeverettDataSaving``.
 class BuckleyLeverettSetup(  # type: ignore
     BuckleyLeverettEquations,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettSolutionStrategy,
     #
@@ -404,5 +403,4 @@ class BuckleyLeverettSetup(  # type: ignore
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...

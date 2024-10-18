@@ -1,24 +1,21 @@
 import logging
 import math
 import os
-import matplotlib.pyplot as plt
 
+import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from tpf_lab.models.buckley_leverett import (  # type: ignore
-    BuckleyLeverettEquations,
-    TwoPhaseFlowVariables,
     BuckleyLeverettBoundaryConditions,
-    BuckleyLeverettSolutionStrategy,
-    #
-    BuckleyLeverettDefaultGeometry,
-    #
-    BuckleyLeverettSemiAnalyticalSolution,
     BuckleyLeverettDataSaving,
-    VerificationUtils,
+    BuckleyLeverettDefaultGeometry,
+    BuckleyLeverettEquations,
+    BuckleyLeverettSemiAnalyticalSolution,
+    BuckleyLeverettSolutionStrategy,
     DiagnosticsMixinExtended,
+    VariablesTPF,
+    VerificationUtils,
 )
-
 
 # Fix seed for reproducability.
 np.random.seed(0)
@@ -57,7 +54,7 @@ class BuckleyLeverettModifiedSolutionStrategy(BuckleyLeverettSolutionStrategy):
 
 class BuckleyLeverettSetup(  # type: ignore
     BuckleyLeverettEquations,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettModifiedSolutionStrategy,
     #
@@ -67,8 +64,7 @@ class BuckleyLeverettSetup(  # type: ignore
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 ####################

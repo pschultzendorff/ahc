@@ -12,19 +12,18 @@ import random
 
 import numpy as np
 import porepy as pp
-
 from porepy.utils.examples_utils import VerificationUtils
 from tpf_lab.applications.convergence_analysis import (
     ConvergenceAnalysisExtended,
     save_convergence_results,
 )
 from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowSolutionStrategy,
+    BoundaryConditionsTPF,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
 )
-from tpf_lab.visualization.diagnostics import TwoPhaseFlowDataSaving
+from tpf_lab.visualization.diagnostics import DataSavingTwoPhaseFlow
 
 # Fix seed for reproducability.
 random.seed(0)
@@ -51,7 +50,7 @@ class ModifiedGeometry(pp.ModelGeometry):
         self._domain = pp.Domain(bounding_box)
 
 
-class ModifiedBoundaryConditions(TwoPhaseFlowBoundaryConditions):
+class ModifiedBoundaryConditions(BoundaryConditionsTPF):
     """Homogeneous Neumann bc (no flow) at the top and bottom. Homogeneous Dirichlet bc
     (open boundaries) at the sides."""
 
@@ -66,7 +65,7 @@ class ModifiedBoundaryConditions(TwoPhaseFlowBoundaryConditions):
         return pp.BoundaryCondition(g, np.logical_or(east, west), "dir")
 
 
-class ModifiedEquations(TwoPhaseFlowEquations):
+class ModifiedEquations(EquationsTPF):
     r"""Modifications to the two-phase flow model:
 
     - Source term in the subdomain :math:`\Omega_{in}=[0,1]\times[0,1]`; sink term in
@@ -108,7 +107,7 @@ class ModifiedEquations(TwoPhaseFlowEquations):
         return vals.ravel()
 
 
-class ModifiedSolutionStrategy(TwoPhaseFlowSolutionStrategy):
+class ModifiedSolutionStrategy(SolutionStrategyTPF):
     """Modifiy the initital saturation and upwind direction."""
 
     def set_discretization_parameters(self) -> None:
@@ -160,17 +159,16 @@ class ModifiedSolutionStrategy(TwoPhaseFlowSolutionStrategy):
 
 class Setup(  # type: ignore
     ModifiedEquations,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     ModifiedBoundaryConditions,
     # Solution strategy
     ModifiedSolutionStrategy,
     #
     ModifiedGeometry,
     #
-    TwoPhaseFlowDataSaving,
+    DataSavingTwoPhaseFlow,
     VerificationUtils,
-):
-    ...
+): ...
 
 
 ####################

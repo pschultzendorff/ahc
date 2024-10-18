@@ -7,25 +7,22 @@ from typing import Any, Optional
 
 import numpy as np
 import porepy as pp
-
 from tpf_lab.applications.convergence_analysis import (
     ConvergenceAnalysisExtended,
     save_convergence_results,
 )
-from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowDataSaving,
-    TwoPhaseFlowSolutionStrategy,
-    TwoPhaseFlowEquations,
-    VerificationUtils,
-    TwoPhaseFlowVariables,
-)
-from tpf_lab.models.rel_perm import (
-    RelPermNNSolutionStrategy,
-)
 from tpf_lab.models.homotopy_continuation import (
     HomotopyContinuationRelPermEquations_LineartoNN,
     HomotopyContinuationRelPermSolutionStrategy,
+)
+from tpf_lab.models.rel_perm import RelPermNNSolutionStrategy
+from tpf_lab.models.two_phase_flow import (
+    BoundaryConditionsTPF,
+    DataSavingTwoPhaseFlow,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
+    VerificationUtils,
 )
 
 
@@ -45,7 +42,7 @@ class ModifiedGeometry(pp.ModelGeometry):
         self._domain = pp.Domain(bounding_box)
 
 
-class ModifiedEquations(TwoPhaseFlowEquations):
+class ModifiedEquations(EquationsTPF):
     r"""Modifications to the two-phase flow model:
 
     - Source term in the subdomain :math:`\Omega_{in}=[0,1]\times[0,1]`; sink term in
@@ -106,7 +103,7 @@ class ModifiedEquations(TwoPhaseFlowEquations):
         return vals.ravel()
 
 
-class ModifiedSolutionStrategy(TwoPhaseFlowSolutionStrategy):
+class ModifiedSolutionStrategy(SolutionStrategyTPF):
     """Modifiy the initital saturation and upwind direction."""
 
     def __init__(self, params: Optional[dict] = None) -> None:
@@ -245,8 +242,8 @@ class ModifiedSolutionStrategy(TwoPhaseFlowSolutionStrategy):
 class Setup(
     ModifiedEquations,
     HomotopyContinuationRelPermEquations_LineartoNN,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowBoundaryConditions,
+    VariablesTPF,
+    BoundaryConditionsTPF,
     # Solution strategy
     ModifiedSolutionStrategy,
     RelPermNNSolutionStrategy,
@@ -254,10 +251,9 @@ class Setup(
     #
     ModifiedGeometry,
     #
-    TwoPhaseFlowDataSaving,
+    DataSavingTwoPhaseFlow,
     VerificationUtils,
-):
-    ...
+): ...
 
 
 # Setup logging.

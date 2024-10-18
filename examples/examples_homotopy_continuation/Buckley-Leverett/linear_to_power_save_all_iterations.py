@@ -8,7 +8,6 @@ import random
 
 import numpy as np
 import porepy as pp
-
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
 from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettBoundaryConditions,
@@ -17,14 +16,13 @@ from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettSemiAnalyticalSolution,
     BuckleyLeverettSolutionStrategy,
     DiagnosticsMixinExtended,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     VerificationUtils,
 )
 from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPermSolutionStrategy,
     HomotopyContinuationRelPermEquations_LineartoPower,
+    HomotopyContinuationRelPermSolutionStrategy,
 )
-
 from tpf_lab.utils import save_params_and_run_model
 
 # Fix seed for reproducability.
@@ -39,7 +37,7 @@ logger.setLevel(logging.INFO)
 # Setup the model class
 class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: ignore
     HomotopyContinuationRelPermEquations_LineartoPower,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettSolutionStrategy,
     HomotopyContinuationRelPermSolutionStrategy,
@@ -50,8 +48,7 @@ class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPower(  # type: 
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 ##########################

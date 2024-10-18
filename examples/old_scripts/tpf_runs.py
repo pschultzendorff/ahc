@@ -1,19 +1,18 @@
 """Some test runs with the ``two_phase_flow_model.TwoPhaseFlow`` class. If not noted
 otherwise, the runs were performed on a 2D grid with 20x20 cells.
 """
+
 import os
 from typing import Optional, Union
 
 import numpy as np
-
 import porepy as pp
 from porepy.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlowSetup
-
+from src.tpf_lab.models.two_phase_flow import TwoPhaseFlow
 
 # Simple test run
 # Neumann bc on three sides, Dirichlet bc on one side.
-model = TwoPhaseFlowSetup(
+model = TwoPhaseFlow(
     {
         "file_name": "simple",
         "folder_name": os.path.join("two_phase_flow_setup_run", "simple"),

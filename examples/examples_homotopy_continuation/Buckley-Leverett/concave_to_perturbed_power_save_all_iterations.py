@@ -8,24 +8,20 @@ import random
 
 import numpy as np
 import porepy as pp
-
 from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDataSaving,
     BuckleyLeverettDefaultGeometry,
     BuckleyLeverettSemiAnalyticalSolution,
     DiagnosticsMixinExtended,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     VerificationUtils,
 )
 from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPermSolutionStrategy,
     HomotopyContinuationRelPermEquations_ConcavetoPerturbedCorey,
+    HomotopyContinuationRelPermSolutionStrategy,
 )
-from tpf_lab.models.rel_perm import (
-    BuckleyLeverettPerturbedRelPermSolutionStrategy,
-)
-
+from tpf_lab.models.rel_perm import BuckleyLeverettPerturbedRelPermSolutionStrategy
 from tpf_lab.utils import save_params_and_run_model
 
 # Fix seed for reproducability.
@@ -40,7 +36,7 @@ logger.setLevel(logging.INFO)
 # Setup the model class
 class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_ConcavetoPerturbedPower(  # type: ignore
     HomotopyContinuationRelPermEquations_ConcavetoPerturbedCorey,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettPerturbedRelPermSolutionStrategy,
     HomotopyContinuationRelPermSolutionStrategy,
@@ -51,8 +47,7 @@ class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_ConcavetoPerturbedPower(
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 ##########################

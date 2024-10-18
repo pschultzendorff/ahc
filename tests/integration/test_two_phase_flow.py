@@ -36,15 +36,15 @@ to denote its residual. ``PorePy`` provides them in the form :math:`A=J` and
 Thus, we need to always multiply the residual by -1.
 
 """
+
 import numpy as np
 import porepy as pp
 import pytest
-
 from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowSolutionStrategy,
-    TwoPhaseFlowVariables,
+    BoundaryConditionsTPF,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
 )
 
 
@@ -60,7 +60,7 @@ class ModifiedGeometry(pp.ModelGeometry):
         return self.params.get("meshing_arguments", default_meshing_args)
 
 
-class TwoPhaseFlowEqationsSource(TwoPhaseFlowEquations):
+class TwoPhaseFlowEqationsSource(EquationsTPF):
     def _source_w(self, g: pp.Grid) -> np.ndarray:
         """Volumetric wetting source.
 
@@ -84,7 +84,7 @@ class TwoPhaseFlowEqationsSource(TwoPhaseFlowEquations):
         return vals.ravel()
 
 
-class TwoPhaseFlowEqationsSourceandGravity(TwoPhaseFlowEquations):
+class TwoPhaseFlowEqationsSourceandGravity(EquationsTPF):
     def _vector_source_w(self, g: pp.Grid) -> np.ndarray:
         """Vector volume source (gravity). Corresponds to the wetting buoyancy flow."""
         vals = np.zeros((self.mdg.dim_max(), g.num_cells))
@@ -101,24 +101,22 @@ class TwoPhaseFlowEqationsSourceandGravity(TwoPhaseFlowEquations):
 
 class TwoPhaseFlowModifiedSetup(
     TwoPhaseFlowEqationsSource,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowSolutionStrategy,
+    VariablesTPF,
+    BoundaryConditionsTPF,
+    SolutionStrategyTPF,
     ModifiedGeometry,
     pp.DataSavingMixin,
-):
-    ...
+): ...
 
 
 class TwoPhaseFlowModifiedSetupGravity(
     TwoPhaseFlowEqationsSourceandGravity,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowSolutionStrategy,
+    VariablesTPF,
+    BoundaryConditionsTPF,
+    SolutionStrategyTPF,
     ModifiedGeometry,
     pp.DataSavingMixin,
-):
-    ...
+): ...
 
 
 @pytest.fixture(scope="module")

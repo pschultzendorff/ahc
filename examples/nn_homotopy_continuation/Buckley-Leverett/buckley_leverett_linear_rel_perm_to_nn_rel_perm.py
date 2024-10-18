@@ -13,29 +13,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
-
 from tpf_lab.applications.convergence_analysis import (
     ConvergenceAnalysisExtended,
     save_convergence_results,
 )
 from tpf_lab.models.buckley_leverett import (
-    BuckleyLeverettEquations,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDataSaving,
-    BuckleyLeverettSolutionStrategy,
     BuckleyLeverettDefaultGeometry,
+    BuckleyLeverettEquations,
     BuckleyLeverettSemiAnalyticalSolution,
+    BuckleyLeverettSolutionStrategy,
     DiagnosticsMixinExtended,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     VerificationUtils,
+)
+from tpf_lab.models.homotopy_continuation import (
+    HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy,
+    HomotopyContinuationRelPermEquations_LineartoNN,
 )
 from tpf_lab.models.rel_perm import (
     BuckleyLeverettPerturbedRelPermSolutionStrategy,
     PerturbedRelPermFractionalFlowSympy,
-)
-from tpf_lab.models.homotopy_continuation import (
-    HomotopyContinuationRelPermEquations_LineartoNN,
-    HomotopyContinuationRelPerm_LineartoNN_SolutionStrategy,
 )
 from tpf_lab.utils import fix_seeds
 
@@ -50,7 +49,7 @@ logger.setLevel(logging.INFO)
 class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPerturbedCorey(  # type: ignore
     BuckleyLeverettEquations,
     HomotopyContinuationRelPermEquations_LineartoNN,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     # Solution strategy
     BuckleyLeverettPerturbedRelPermSolutionStrategy,
@@ -62,8 +61,7 @@ class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoPerturbedCorey( 
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 ####################

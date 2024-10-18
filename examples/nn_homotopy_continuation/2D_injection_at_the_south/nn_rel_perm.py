@@ -10,23 +10,19 @@ import os
 
 import numpy as np
 import porepy as pp
-
 from tpf_lab.applications.convergence_analysis import (
     BuckleyLeverettSaveData,
     ConvergenceAnalysisExtended,
     save_convergence_results,
 )
+from tpf_lab.models.rel_perm import RelPermNNEquations, RelPermNNSolutionStrategy
 from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowDataSaving,
-    TwoPhaseFlowSolutionStrategy,
-    TwoPhaseFlowEquations,
+    BoundaryConditionsTPF,
+    DataSavingTwoPhaseFlow,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
     VerificationUtils,
-    TwoPhaseFlowVariables,
-)
-from tpf_lab.models.rel_perm import (
-    RelPermNNEquations,
-    RelPermNNSolutionStrategy,
 )
 
 
@@ -46,7 +42,7 @@ class ModifiedGeometry(pp.ModelGeometry):
         self._domain = pp.Domain(bounding_box)
 
 
-class ModifiedEquations(TwoPhaseFlowEquations):
+class ModifiedEquations(EquationsTPF):
     r"""Modifications to the two-phase flow model:
 
     - Source term in the subdomain :math:`\Omega_{in}=[0,1]\times[0,1]`; sink term in
@@ -107,7 +103,7 @@ class ModifiedEquations(TwoPhaseFlowEquations):
         return vals.ravel()
 
 
-class ModifiedSolutionStrategy(TwoPhaseFlowSolutionStrategy):
+class ModifiedSolutionStrategy(SolutionStrategyTPF):
     """Modifiy the initital saturation and upwind direction."""
 
     def set_discretization_parameters(self) -> None:
@@ -160,18 +156,17 @@ class ModifiedSolutionStrategy(TwoPhaseFlowSolutionStrategy):
 class Setup(
     ModifiedEquations,
     RelPermNNEquations,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowBoundaryConditions,
+    VariablesTPF,
+    BoundaryConditionsTPF,
     # Solution strategy
     ModifiedSolutionStrategy,
     RelPermNNSolutionStrategy,
     #
     ModifiedGeometry,
     #
-    TwoPhaseFlowDataSaving,
+    DataSavingTwoPhaseFlow,
     VerificationUtils,
-):
-    ...
+): ...
 
 
 # Setup logging.

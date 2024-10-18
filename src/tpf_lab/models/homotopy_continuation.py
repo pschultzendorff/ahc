@@ -9,20 +9,16 @@ from typing import Any, Callable, Optional
 import numpy as np
 import porepy as pp
 import torch
-
 from tpf_lab.ml.nn import BaseNN
 from tpf_lab.ml.nn_ad import nn_wrapper
-from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowSolutionStrategy,
-)
+from tpf_lab.models.two_phase_flow import EquationsTPF, SolutionStrategyTPF
 from tpf_lab.numerics.ad.functions import ad_pow
 from tpf_lab.numerics.ad.functions import minimum as minimum_ad
 
 logger = logging.getLogger(__name__)
 
 
-class HomotopyContinuationRelPermEquations(TwoPhaseFlowEquations):
+class HomotopyContinuationRelPermEquations(EquationsTPF):
     _homotopy_continuation_param_ad: pp.ad.Scalar
     """Parameter for the homotopy continuation."""
     _rel_perm_w_init: Callable
@@ -72,7 +68,7 @@ class HomotopyContinuationRelPermEquations(TwoPhaseFlowEquations):
         )
 
 
-class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
+class HomotopyContinuationRelPermSolutionStrategy(SolutionStrategyTPF):
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
         if params is None:
@@ -91,7 +87,7 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         self.residuals_wrt_homotopy: list[float] = []
         """Store the residuals of the equation w.r.t. the homotopy."""
         self.residuals_wrt_goal_function: list[float] = []
-        """Store the residuals of the equation w.r.t. the goal function, i.e., w.r.t.
+        r"""Store the residuals of the equation w.r.t. the goal function, i.e., w.r.t.
         :math:`\lambda=0`."""
 
     def before_nonlinear_loop(self) -> None:
@@ -150,7 +146,7 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
         init_solution: np.ndarray,
         nl_params: dict[str, Any],
     ) -> tuple[float, bool, bool]:
-        """Extend the convergence check of the super class s.t. it fails when only one
+        r"""Extend the convergence check of the super class s.t. it fails when only one
         nonlinear iteration has passed.
 
         This is to ensure, that the homotopy continuation problem gets solved instead of
@@ -187,7 +183,7 @@ class HomotopyContinuationRelPermSolutionStrategy(TwoPhaseFlowSolutionStrategy):
 
 
 def adaptive_lambda() -> float:
-    """Implement the step-length adaptation for :math:`\lambda` introduced by "Brown, D.
+    r"""Implement the step-length adaptation for :math:`\lambda` introduced by "Brown, D.
     A., & Zingg, D. W. (2016). A monolithic homotopy continuation algorithm with
     application to computational fluid dynamics. "
 

@@ -1,15 +1,16 @@
+from typing import Any
+
 import numpy as np
 import porepy as pp
 import pytest
-from typing import Any
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
-from tpf_lab.models.two_phase_flow import TwoPhaseFlowSetup
+from tpf_lab.models.two_phase_flow import TwoPhaseFlow
 
 
 @pytest.fixture
 def analysis() -> ConvergenceAnalysisExtended:
     return ConvergenceAnalysisExtended(
-        TwoPhaseFlowSetup,
+        TwoPhaseFlow,
         {
             "folder_name": "folder_name",
             "file_name": "file_name",

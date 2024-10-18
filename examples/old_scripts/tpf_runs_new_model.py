@@ -8,18 +8,17 @@ of 0.01.
 import os
 
 import numpy as np
-
 import porepy as pp
-from tpf_lab.utils import save_params_and_run_model
 from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowSolutionStrategy,
+    BoundaryConditionsTPF,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
 )
+from tpf_lab.utils import save_params_and_run_model
 
 
-class WettingInflux(TwoPhaseFlowEquations):
+class WettingInflux(EquationsTPF):
     def _source_w(self, g: pp.Grid) -> np.ndarray:
         array = super()._source_w(g)
         array[209] = 1 / 0.025
@@ -28,15 +27,14 @@ class WettingInflux(TwoPhaseFlowEquations):
 
 class Setup(  # type: ignore
     WettingInflux,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowSolutionStrategy,
+    VariablesTPF,
+    BoundaryConditionsTPF,
+    SolutionStrategyTPF,
     #
     pp.ModelGeometry,
     #
     pp.DataSavingMixin,
-):
-    ...
+): ...
 
 
 # Simple test run

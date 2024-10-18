@@ -12,19 +12,19 @@ import random
 
 import numpy as np
 import porepy as pp
-
 from porepy.utils.examples_utils import VerificationUtils
 from tpf_lab.applications.convergence_analysis import (
     ConvergenceAnalysisExtended,
     save_convergence_results,
 )
 from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowSolutionStrategy,
+    BoundaryConditionsTPF,
+    ConstitutiveLawsTPF,
+    EquationsTPF,
+    SolutionStrategyTPF,
+    VariablesTPF,
 )
-from tpf_lab.visualization.diagnostics import TwoPhaseFlowDataSaving
+from tpf_lab.visualization.diagnostics import DataSavingTwoPhaseFlow
 
 # Fix seed for reproducability.
 random.seed(0)
@@ -51,7 +51,7 @@ class ModifiedGeometry(pp.ModelGeometry):
         self._domain = pp.Domain(bounding_box)
 
 
-class ModifiedEquations(TwoPhaseFlowEquations):
+class ModifiedEquations(EquationsTPF):
     r"""Modifications to the two-phase flow model:
 
     - Source term in the subdomain :math:`\Omega_{in}=[0,1]\times[0,1]`; sink term in
@@ -115,17 +115,17 @@ class ModifiedEquations(TwoPhaseFlowEquations):
 
 class Setup(  # type: ignore
     ModifiedEquations,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowBoundaryConditions,
+    VariablesTPF,
+    ConstitutiveLawsTPF,
+    BoundaryConditionsTPF,
     # Solution strategy
-    TwoPhaseFlowSolutionStrategy,
+    SolutionStrategyTPF,
     #
     ModifiedGeometry,
     #
-    TwoPhaseFlowDataSaving,
+    DataSavingTwoPhaseFlow,
     VerificationUtils,
-):
-    ...
+): ...
 
 
 ####################
@@ -176,7 +176,7 @@ params = {
     "file_name": "setup",
     "max_iterations": MAX_NEWTON_ITERATIONS,
     "progressbars": True,
-    "formulation": "n_pressure_w_saturation",
+    "formulation": "fractional_flow",
     # grid and time
     "meshing_arguments": DEFAULT_MESHING_ARGS,
     "time_manager": pp.TimeManager(
@@ -185,6 +185,7 @@ params = {
         constant_dt=True,
     ),
     # fluid and solid params
+    # TODO: Change this to MaterialParams
     "porosity": POROSITY,
     "viscosity_w": VISCOSITY_W,
     "viscosity_n": VISCOSITY_N,

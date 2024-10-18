@@ -3,17 +3,17 @@ neural network. If not noted otherwise, the runs were performed on a 2D grid wit
 cells.
 
 """
+
 import os
 from typing import Optional, Union
-import torch
-import numpy as np
 
+import numpy as np
 import porepy as pp
+import torch
 from porepy.models.run_models import run_time_dependent_model
-from src.tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
+from src.tpf_lab.models.two_phase_flow import EquationsTPF
 from tpf_lab.ml.nn import BaseNN
 from tpf_lab.ml.nn_ad import nn_wrapper
-
 
 # class TwoPhaseFlow_DataRelPerm(TwoPhaseFlow):
 #     def _w_rel_perm(self) -> pp.ad.Operator:
@@ -68,7 +68,7 @@ model._schedule = [0, 100.0]
 # )
 
 
-class TwoPhaseFlow_DataRelPerm(TwoPhaseFlowEquations):
+class TwoPhaseFlow_DataRelPerm(EquationsTPF):
     def __init__(self, params: Optional[dict] = None) -> None:
         super().__init__(params)
         model = BaseNN({"depth": 1, "act": "linear"})
@@ -115,7 +115,7 @@ run_time_dependent_model(
 )
 
 
-class TwoPhaseFlow_WSource(TwoPhaseFlowEquations):
+class TwoPhaseFlow_WSource(EquationsTPF):
     def _w_source(self, g: pp.Grid) -> np.ndarray:
         array: np.ndarray = super()._source_w(g)
         array[209] = 0.3

@@ -6,7 +6,6 @@ after some iterations.
 
 """
 
-
 import logging
 import math
 import os
@@ -16,18 +15,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from buckley_leverett import grid, misc, numerical_solution
-
-from tpf_lab.utils import save_convergence_results
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
 from tpf_lab.models.buckley_leverett import (
-    BuckleyLeverettEquations,
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDataSaving,
     BuckleyLeverettDefaultGeometry,
-    BuckleyLeverettSolutionStrategy_WobblyRelPerm,
+    BuckleyLeverettEquations,
     BuckleyLeverettSemiAnalyticalSolution,
+    BuckleyLeverettSolutionStrategy_WobblyRelPerm,
     DiagnosticsMixinExtended,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     VerificationUtils,
     WobblyFractionalFlowSympy,
 )
@@ -35,6 +32,7 @@ from tpf_lab.models.homotopy_continuation import (
     HomotopyContinuationRelPermEquations_LineartoPerturbedCorey,
     HomotopyContinuationRelPermSolutionStrategy,
 )
+from tpf_lab.utils import save_convergence_results
 
 # Fix seed for reproducability.
 random.seed(0)
@@ -48,7 +46,7 @@ logger.setLevel(logging.INFO)
 class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(  # type: ignore
     BuckleyLeverettEquations,
     HomotopyContinuationRelPermEquations_LineartoPerturbedCorey,
-    TwoPhaseFlowVariables,
+    VariablesTPF,
     BuckleyLeverettBoundaryConditions,
     # Solution strategy
     HomotopyContinuationRelPermSolutionStrategy,
@@ -60,8 +58,7 @@ class BuckleyLeverettSetup_HomotopyContinuation_RelPerm_LineartoWobbly(  # type:
     BuckleyLeverettDataSaving,
     VerificationUtils,
     DiagnosticsMixinExtended,
-):
-    ...
+): ...
 
 
 ####################

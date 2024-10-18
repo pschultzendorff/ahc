@@ -19,25 +19,22 @@ import random
 
 import numpy as np
 import porepy as pp
-
 from porepy.utils.examples_utils import VerificationUtils
 from tpf_lab.applications.convergence_analysis import (
     ConvergenceAnalysisExtended,
     save_convergence_results,
 )
-from tpf_lab.models.two_phase_flow import (
-    TwoPhaseFlowEquations,
-    TwoPhaseFlowBoundaryConditions,
-    TwoPhaseFlowVariables,
-)
-from tpf_lab.models.rel_perm import (
-    PerturbedRelPermSolutionStrategy,
-)
 from tpf_lab.models.homotopy_continuation import (
     HomotopyContinuationRelPermEquations_ConcavetoPerturbedCorey,
     HomotopyContinuationRelPermSolutionStrategy,
 )
-from tpf_lab.visualization.diagnostics import TwoPhaseFlowDataSaving
+from tpf_lab.models.rel_perm import PerturbedRelPermSolutionStrategy
+from tpf_lab.models.two_phase_flow import (
+    BoundaryConditionsTPF,
+    EquationsTPF,
+    VariablesTPF,
+)
+from tpf_lab.visualization.diagnostics import DataSavingTwoPhaseFlow
 
 # Fix seed for reproducability.
 random.seed(0)
@@ -64,11 +61,10 @@ class ModifiedGeometry(pp.ModelGeometry):
         self._domain = pp.Domain(bounding_box)
 
 
-class ModifiedBoundaryConditions(TwoPhaseFlowBoundaryConditions):
-    ...
+class ModifiedBoundaryConditions(BoundaryConditionsTPF): ...
 
 
-class ModifiedEquations(TwoPhaseFlowEquations):
+class ModifiedEquations(EquationsTPF):
     r"""Modifications to the two-phase flow model:
 
     Source term in the subdomain :math:`\Omega_{in}=[0,1]\times[0,1]`; sink term in
@@ -106,8 +102,8 @@ class ModifiedEquations(TwoPhaseFlowEquations):
 class Setup(  # type: ignore
     HomotopyContinuationRelPermEquations_ConcavetoPerturbedCorey,
     ModifiedEquations,
-    TwoPhaseFlowVariables,
-    TwoPhaseFlowBoundaryConditions,
+    VariablesTPF,
+    BoundaryConditionsTPF,
     # Solution strategy
     HomotopyContinuationRelPermSolutionStrategy,
     # To read perturbations from param list.
@@ -115,10 +111,9 @@ class Setup(  # type: ignore
     #
     ModifiedGeometry,
     #
-    TwoPhaseFlowDataSaving,
+    DataSavingTwoPhaseFlow,
     VerificationUtils,
-):
-    ...
+): ...
 
 
 ####################

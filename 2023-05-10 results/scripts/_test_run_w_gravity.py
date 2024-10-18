@@ -6,9 +6,8 @@ from typing import Optional, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
-
 from tpf_lab.models.run_models import run_time_dependent_model
-from tpf_lab.models.two_phase_flow import TwoPhaseFlowEquations
+from tpf_lab.models.two_phase_flow import EquationsTPF
 from tpf_lab.utils import logging_redirect_tqdm
 
 w_source_cell_index = 209
@@ -31,7 +30,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
 
 
-class TwoPhaseFlow_wGravity(TwoPhaseFlowEquations):
+class TwoPhaseFlow_wGravity(EquationsTPF):
     # def _source_w(self, g: pp.Grid) -> np.ndarray:
     #     array: np.ndarray = super()._source_w(g)
     #     array[w_source_cell_index] = 0.5
