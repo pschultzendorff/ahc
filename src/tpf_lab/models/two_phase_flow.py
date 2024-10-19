@@ -14,16 +14,16 @@ Furthermore, multiple different models for both the capillary pressure, as well 
 relative permeability are implemented.
 
 TODO:
-    - Change bc_values to `ad.BoundaryCondition`
+    - Change bc_values to ``ad.BoundaryCondition``
     - Right now alot of the things in this model are typed as multi-grid objects. For
-      example, the variables are of type `MultiGridVariable`. To simplify things, change
-      to `Variable`. Does this make sense? `EquationSystem` does not have a function to
+      example, the variables are of type ``MultiGridVariable``. To simplify things, change
+      to ``Variable``. Does this make sense? ``EquationSystem`` does not have a function to
       initialize single grid variables.
     - Implement new PorePy functionalities that allow for easier model setup, e.g.,
-      everything set by `set_material` can be passed as parameters and does not have to
-      be hardcoded. Also, make use of `Units`.
+      everything set by ``set_material`` can be passed as parameters and does not have to
+      be hardcoded. Also, make use of ``Units``.
     - Remove or fix the unit documentation. The units can depend on the instance of
-      `porepy.Units` passed to the simulation.
+      ``porepy.Units`` passed to the simulation.
     - Make use of TypeVars for typing of some functions and in general type everything.
     - Negative phase sources give the wrong results (i.e., no fluid gets pulled). Fix
       this!!!
@@ -373,13 +373,13 @@ class DarcyFluxes:
         # the saturation. This would require to upwind phase mobilities and capillary
         # pressures at Neumann boundaries to determine phase fluxes. Upwinding direction
         # would also be based on phase fluxes (from the previous time step)
-        # This is a bit tricky in PorePy, since `upwind.bound_transport_neu()` is `1` on
-        # **all** Neumann boundary faces while `upwind.upwind()` is `0` on all Neumann
+        # This is a bit tricky in PorePy, since ``upwind.bound_transport_neu()`` is ``1`` on
+        # **all** Neumann boundary faces while ``upwind.upwind()`` is ``0`` on all Neumann
         # boundary faces, independent of flow direction.
         # This could be solved in the following way:
-        # 1. We use one upwind discretization with `phase.mobility_key` to obtain
-        # `upwind.bound_transport_neu()` and manually null all outflow boundary faces.
-        # 2. We use a second upwind discretization with `all_bc_dir_key` that
+        # 1. We use one upwind discretization with ``phase.mobility_key`` to obtain
+        # ``upwind.bound_transport_neu()`` and manually null all outflow boundary faces.
+        # 2. We use a second upwind discretization with ``all_bc_dir_key`` that
         # corresponds to fully Dirichlet bc and manually null all cells adjacent to an
         # inflow boundary.
         # Code proposal:
@@ -457,10 +457,10 @@ class DarcyFluxes:
         # Variables and bc.
         p_n_bc = pp.ad.DenseArray(self.bc_dirichlet_pressure_values(g, self.nonwetting))
 
-        # NOTE: `bc_saturation_values` and hence `p_cap_bc` is not `0` on Neumann bc
-        # faces! Using `tpfa.bound_flux() @ p_cap_bc` directly would add some phase
+        # NOTE: ``bc_saturation_values`` and hence ``p_cap_bc`` is not ``0`` on Neumann bc
+        # faces! Using ``tpfa.bound_flux() @ p_cap_bc`` directly would add some phase
         # potential and thus Darcy flux depending on the saturation boundary values to
-        # faces where the flux is fixed via Neumann bc. We thus set `p_cap_bc` to zero
+        # faces where the flux is fixed via Neumann bc. We thus set ``p_cap_bc`` to zero
         # on all Neumann faces.
         p_cap_bc: pp.ad.Operator = self.cap_press(
             pp.ad.DenseArray(self.bc_dirichlet_saturation_values(g, self.wetting))
@@ -493,7 +493,7 @@ class DarcyFluxes:
         # saturation values at Neumann boundaries. In this case:
         # - Neumann boundaries: the total flux is fixed and independent of the
         #   mobilities. We add the Neumann bc values to the total flux by using an
-        #   upwind discretization, but crucially `p_n_bc` is zero on Neumann faces s.t.
+        #   upwind discretization, but crucially ``p_n_bc`` is zero on Neumann faces s.t.
         #   the Mpfa discretization does not add any phase potential and thus flux here.
 
         mpfa = pp.ad.MpfaAd(self.flux_key, [g])
@@ -503,14 +503,14 @@ class DarcyFluxes:
         # reasons.
         # NOTE: The flux key is the same as for the total flux discretization, i.e., the
         # boundary condition types coincide. Same considerations as above apply, except
-        # that we explicitly have to set `p_cap_bc` to zero on Neumann faces as
+        # that we explicitly have to set ``p_cap_bc`` to zero on Neumann faces as
         # described above.
         tpfa = pp.ad.TpfaAd(self.flux_key, [g])
 
         # NOTE: Neither 'MpfaAd' nor 'TpfaAd' allow to separate Dirichlet and Neumann
         # conditions. As a workaround, we use an upwind discretization initialized
         # with any discretization key (all have the same bc type). On Neumann boundary
-        # faces the `upwind_n.bound_transport_neu` matrix takes value `1` and we can
+        # faces the ``upwind_n.bound_transport_neu`` matrix takes value ``1`` and we can
         # simply multiply with the total flux bc values to obtain the the inflow/outflow
         # at Neumann faces.
         upwind_t = pp.ad.UpwindAd(self.flux_key, [g])
@@ -570,6 +570,7 @@ class EquationsTPF(pp.BalanceEquation):
     model classes (CompressibleFlow).
 
     Public attributes:
+    TODO: Update this list!
         primary_pressure_var: Name assigned to the pressure variable in the
             highest-dimensional subdomain. Will be used throughout the simulations,
             including in ParaView export. The default variable name is "wetting
@@ -671,7 +672,7 @@ class EquationsTPF(pp.BalanceEquation):
 
     # Grid and boundary conditions
     mdg: pp.MixedDimensionalGrid
-    """Provided by a mixin of type ``ModelGeometry``."""
+    """Provided by a mixin of instance :class:`~porepy.models.geometry.ModelGeometry`."""
 
     bc_dirichlet_pressure_values: Callable[[pp.Grid, Phase], np.ndarray]
     """Phase dependent pressure bc values. Normally provided by a mixin of instance
@@ -738,7 +739,7 @@ class EquationsTPF(pp.BalanceEquation):
         porosity. Value and unit are set by :attr:`self.solid`."""
         return np.full(g.num_cells, self.solid.porosity())
 
-    def set_equations(self) -> None:
+    def set_equations(self, equation_names: Optional[dict[str, str]] = None) -> None:
         """Define equations."""
         try:
             self.equation_system.remove_equation("Flow equation")
@@ -899,8 +900,8 @@ class VariablesTPF(pp.VariableMixin):
             s_normalized: Normalized wetting saturation.
 
         Raises:
-            ValueError: If neither `saturation` has a `name` attribute specifying the
-            phase nor `phase` is specified.
+            ValueError: If neither ``saturation`` has a ``name`` attribute specifying the
+            phase nor ``phase`` is specified.
 
         """
         if saturation.name.startswith(self.wetting.name) or getattr(
@@ -923,8 +924,8 @@ class VariablesTPF(pp.VariableMixin):
             )
         else:
             raise ValueError(
-                "Either `saturation` must have a `name` attribute"
-                + " specifying the phase or `phase` must be specified."
+                "Either ``saturation`` must have a ``name`` attribute"
+                + " specifying the phase or ``phase`` must be specified."
             )
         return s_normalized
 
@@ -966,7 +967,7 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
         """Phase dependent pressure bc values.
 
         Note: Make sure that this is zero at Neumann boundaries to not accidentally prescibe
-        a flux. Both `Mpfa.bound_flux()` and `Tpfa.bound_flux()` provide matrices with `1`
+        a flux. Both ``Mpfa.bound_flux()`` and ``Tpfa.bound_flux()`` provide matrices with ``1``
         values at Neumann boundaries.
 
         """
@@ -1110,7 +1111,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         self.flux_key: str = "total_flux"
         """Keyword to define define parameters and discretizations for the total flux.
 
-        The corresponding `tpfa` and `mpfa` discretizations are used to calculate
+        The corresponding ``tpfa`` and ``mpfa`` discretizations are used to calculate
         **all** pressure potentials, i.e., wetting, nonwetting, and capillary.
 
         """
@@ -1126,7 +1127,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             As phase potentials can have opposite signs, independent upwind
             discretization are required to evaluate phase mobilities.
             # TODO: I do not think this is true, as this would imply negative fractional
-            flow. Check the inline comment in `set_discretization_parameters()` when
+            flow. Check the inline comment in ``set_discretization_parameters()`` when
             changing this.
 
             """
@@ -1225,8 +1226,8 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                     "second_order_tensor": diffusivity,
                     "ambient_dimension": sd.dim,
                     # We initialize the Darcy flux to one just s.t.
-                    # `Upwind.discretize()` can be called. This does not need to be
-                    # updated, as only `Upwind.bound_transport_neu()` is used, which
+                    # ``Upwind.discretize()`` can be called. This does not need to be
+                    # updated, as only ``Upwind.bound_transport_neu()`` is used, which
                     # does not depend on the Darcy flux.
                     "darcy_flux": np.ones(sd.num_faces),
                 },
@@ -1234,9 +1235,9 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             # Upwinding is done for both phases separately, hence we create two different
             # data dictionaries.
             # NOTE: This is not really necessary and we could just as well use the flux
-            # data, as the `bc_type` are identical for all discretizations. The
+            # data, as the ``bc_type`` are identical for all discretizations. The
             # delicaties of boundary conditions for fractional flow in PorePy are dealt
-            # with in `DarcyFluxes.mobility()` and `DarcyFluxes.total_flux()`.
+            # with in ``DarcyFluxes.mobility()`` and ``DarcyFluxes.total_flux()``.
             for phase in self.phases:
                 pp.initialize_data(
                     sd,
@@ -1245,7 +1246,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                     {
                         "bc": self.bc_type(sd),
                         # We initialize the Darcy flux to one just s.t.
-                        # `Upwind.discretize()` can be called.
+                        # ``Upwind.discretize()`` can be called.
                         "darcy_flux": np.ones(sd.num_faces),
                     },
                 )
@@ -1253,7 +1254,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             # for Neumann boundaries in terms of total flux and saturation values.
             # To correctly upwind phase mobilities at Neumann boundaries, we need
             # another upwind discretization with full Dirichlet boundaries. Check
-            # `DarcyFluxes.mobility()` for more details.
+            # ``DarcyFluxes.mobility()`` for more details.
             # bc_dir = pp.BoundaryCondition(sd, sd.get_all_boundary_faces(), "dir")
             # pp.initialize_data(
             #     sd,
@@ -1295,7 +1296,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
 
     def rediscretize(self) -> None:
         # TODO Discretize only nonlinear discretizations. Make sure to call this in
-        # `before_nonlinear_iteration` instead of `discretize`.
+        # ``before_nonlinear_iteration`` instead of ``discretize``.
         ...
 
     def set_nonlinear_discretizations(self) -> None:
@@ -1359,41 +1360,6 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         nonwetting flux need to be computed.
 
         """
-        # Evaluate and update secondary pressure variable.
-        secondary_pressure = self.equation_system.get_variables(
-            variables=[self.primary_pressure_var]
-        )[0] - self.cap_press(
-            self.equation_system.get_variables(variables=[self.primary_saturation_var])[
-                0
-            ]
-        )
-        secondary_pressure_sol = secondary_pressure.value(self.equation_system)
-        #  As the values were computed with the additive value of the primary pressure
-        #  and saturation variable, we set ``additive=False``.
-        self.equation_system.set_variable_values(
-            np.array(secondary_pressure_sol),
-            variables=[self.secondary_pressure_var],
-            iterate_index=0,
-            additive=False,
-        )
-
-        # Evaluate and update secondary saturation variable.
-        secondary_saturation = (
-            pp.ad.Scalar(1)
-            - self.equation_system.get_variables(
-                variables=[self.primary_saturation_var]
-            )[0]
-        )
-        secondary_saturation_sol = secondary_saturation.value(self.equation_system)
-        #  As the values were computed with the additive value of the primary saturation
-        # # variable, we set ``additive=False``.
-        self.equation_system.set_variable_values(
-            np.array(secondary_saturation_sol),
-            variables=[self.secondary_saturation_var],
-            iterate_index=0,
-            additive=False,
-        )
-
         # Compute the Darcy flux for upwinding.
         # -> Needs to happen at each nonlinear iteration, because we are starting with a
         # bad guess (previous timestep) and improve towards the solution. We want to use
@@ -1421,7 +1387,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                 # data[pp.PARAMETERS][self.all_bc_dir_key].update({"darcy_flux": vals})
 
         # TODO: Do I need to reset discretization parameters as is done by
-        # `pp.solution_strategy.SolutionStrategy`?
+        # ``pp.solution_strategy.SolutionStrategy``?
         self.discretize()
 
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
@@ -1434,6 +1400,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             nonlinear_increment: The new solution, as computed by the non-linear solver.
 
         """
+        # Update primary variables.
         self.equation_system.shift_iterate_values(max_index=len(self.iterate_indices))
         self.equation_system.set_variable_values(
             values=nonlinear_increment,
@@ -1441,22 +1408,48 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             additive=True,
             iterate_index=0,
         )
+
+        # Evaluate and update secondary variables.
+        if self.formulation == "fractional_flow":
+            secondary_pressure = self.equation_system.get_variables(
+                variables=[self.primary_pressure_var]
+            )[0] - self.cap_press(
+                self.equation_system.get_variables(
+                    variables=[self.primary_saturation_var]
+                )[0]
+            )
+        secondary_saturation = (
+            pp.ad.Scalar(1)
+            - self.equation_system.get_variables(
+                variables=[self.primary_saturation_var]
+            )[0]
+        )
+        secondary_pressure_sol = secondary_pressure.value(self.equation_system)
+        secondary_saturation_sol = secondary_saturation.value(self.equation_system)
+        #  As the values were computed with the additive value of the primary pressure
+        #  and saturation variable, we set ``additive=False``.
+        self.equation_system.set_variable_values(
+            np.concatenate(
+                [np.array(secondary_pressure_sol), np.array(secondary_saturation_sol)]
+            ),
+            variables=[self.secondary_pressure_var, self.secondary_saturation_var],
+            iterate_index=0,
+            additive=False,
+        )
+
         self.nonlinear_solver_statistics.num_iteration += 1
 
     # Ignore mypy complaining about uncompatible signature.
     # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
-    def after_nonlinear_convergence(  # type: ignore
-        self, iteration_counter: int
-    ) -> None:
+    def after_nonlinear_convergence(self) -> None:  # type: ignore
         """Export and move to the next time step.
 
-        When `self._limit_saturation_change == True`, check if the wetting saturation
+        When ``self._limit_saturation_change == True``, check if the wetting saturation
         has changed too much
 
         Parameters:
             solution: _description_
             errors: _description_
-            iteration_counter: _description_
 
         """
         # If the saturation changes to much, decrease the time step and calculate again.
@@ -1480,7 +1473,13 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                 )
                 return None
 
-        # Distribute both pressure variables and the saturation variable.
+        # Distribute primary variables.
+        # TODO At the moment this sets **all** iterate variables to the time step
+        # solution (also secondary variables). This should be changed.
+        # Secondary variables are not updated yet, so this will make things confusing.
+        self.equation_system.shift_time_step_values(
+            max_index=len(self.time_step_indices)
+        )
         timestep_solution = self.equation_system.get_variable_values(iterate_index=0)
         self.equation_system.set_variable_values(
             timestep_solution, time_step_index=0, additive=False

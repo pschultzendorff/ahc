@@ -177,5 +177,6 @@ params = {
     "cap_press_constants": {"model": None},
 }
 
+logger.info("start")
 model = ModifiedTwoPhaseFlow(params)
 pp.run_time_dependent_model(model=model, params=params)
