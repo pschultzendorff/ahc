@@ -9,6 +9,7 @@ functions" [Jenny et. al, 2009].
 import logging
 import pathlib
 import random
+import shutil
 import warnings
 
 import numpy as np
@@ -46,9 +47,9 @@ class ModifiedGeometry(pp.ModelGeometry):
         """
         bounding_box: dict[str, pp.number] = {
             "xmin": 0,
-            "xmax": 120,
+            "xmax": 40,
             "ymin": 0,
-            "ymax": 60,
+            "ymax": 40,
             # "xmin": 0,
             # "xmax": 2,
             # "ymin": 0,
@@ -66,26 +67,26 @@ class ModifiedEquations(EquationsTPF):
 
     """
 
-    def _permeability(self, g: pp.Grid) -> np.ndarray:
-        # Function for base-10 log. of permeability along x-axis.
-        def function_x(x: float) -> float:
-            return 3 * x * (x - 0.7) * (x - 2.3)
+    # def _permeability(self, g: pp.Grid) -> np.ndarray:
+    #     # Function for base-10 log. of permeability along x-axis.
+    #     def function_x(x: float) -> float:
+    #         return 3 * x * (x - 0.7) * (x - 2.3)
 
-        # Function for base-10 log. of permeability along y-axis.
-        def function_y(x: float) -> float:
-            return 5 * (x - 0.2) * (x - 0.8) * (x + 2)
+    #     # Function for base-10 log. of permeability along y-axis.
+    #     def function_y(x: float) -> float:
+    #         return 5 * (x - 0.2) * (x - 0.8) * (x + 2)
 
-        log_permeability = np.zeros([60, 120], dtype=float)
-        # log_permeability = np.zeros([2, 2], dtype=float)
-        for i, row in enumerate(log_permeability):
-            for j, _ in enumerate(row):
-                log_permeability[i, j] = function_x(i / 60.0) * function_y(j / 120.0)
-                # log_permeability[i, j] = function_x(i / 2.0) * function_y(j / 2.0)
+    #     log_permeability = np.zeros([60, 120], dtype=float)
+    #     # log_permeability = np.zeros([2, 2], dtype=float)
+    #     for i, row in enumerate(log_permeability):
+    #         for j, _ in enumerate(row):
+    #             log_permeability[i, j] = function_x(i / 60.0) * function_y(j / 120.0)
+    #             # log_permeability[i, j] = function_x(i / 2.0) * function_y(j / 2.0)
 
-        # Add noise.
-        log_permeability += np.random.normal(0, 0.2, [60, 120])
-        # log_permeability += np.random.normal(0, 0.2, [2, 2])
-        return (10**log_permeability).flatten()
+    #     # Add noise.
+    #     log_permeability += np.random.normal(0, 0.2, [60, 120])
+    #     # log_permeability += np.random.normal(0, 0.2, [2, 2])
+    #     return (10**log_permeability).flatten()
 
     def phase_fluid_source(self, g: pp.Grid, phase: Phase) -> np.ndarray:
         """Volumetric phase source term. Given as volumetric flux. This
@@ -101,11 +102,11 @@ class ModifiedEquations(EquationsTPF):
         if phase.name == "wetting":
             array = super().phase_fluid_source(g, phase)
             array[0] = 3
-            # array[119] = -3
+            # array[39] = -3
             return array
         elif phase.name == "nonwetting":
             array = super().phase_fluid_source(g, phase)
-            array[119] = 3
+            # array[39] = 3
             return array
 
             # return np.zeros(g.num_cells)
@@ -129,6 +130,7 @@ foldername: pathlib.Path = (
 )
 
 try:
+    shutil.rmtree(foldername)
     foldername.mkdir(parents=True)
 except Exception:
     pass
@@ -166,8 +168,8 @@ params = {
     # grid and time
     "meshing_arguments": {"cell_size": 1.0},
     "time_manager": pp.TimeManager(
-        schedule=np.array([0, 20]),
-        dt_init=0.02,
+        schedule=np.array([0, 5]),
+        dt_init=0.05,
         constant_dt=True,
     ),
     "material_constants": {

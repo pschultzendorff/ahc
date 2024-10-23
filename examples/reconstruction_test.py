@@ -9,6 +9,7 @@ functions" [Jenny et. al, 2009].
 import logging
 import pathlib
 import random
+import shutil
 import warnings
 
 import numpy as np
@@ -114,8 +115,6 @@ class ModifiedEquations(EquationsTPF):
             array[19] = 3
             return array
 
-            # return np.zeros(g.num_cells)
-
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
 
@@ -136,6 +135,7 @@ foldername: pathlib.Path = (
 )
 
 try:
+    shutil.rmtree(foldername)
     foldername.mkdir(parents=True)
 except Exception:
     pass

@@ -4,6 +4,8 @@ FIXME Evaluation of global and complimentary pressure is done super inefficientl
 Instead of evaluating the expressions for each cell, we should evaluate the expressions
 once from :math:`\hat{s}_w = 0` to :math:`\hat{s}_w = 1` for sufficiently many
 integration points and then interpolate the values for each cell.
+FIXME Even more efficient would be to calculate the integral with fine resolution ONCE
+before the simulation and then just interpolate.
 
 """
 
@@ -80,8 +82,14 @@ class PressureMixin:
         # TODO: Change this s.t. p and s are ``pp.ad.DenseArray``.
         # Question: What to do with negative saturation values during Newton?
         # Limit s from below and above by residual saturations.
-        # FIXME Using epsilon here instead of the normalized saturation is not the same!
-        s[s > 1 - self.nonwetting.constants.residual_saturation() - epsilon] = 0
+        # FIXME Using epsilon here instead of at the normalized saturation is not the
+        # same!
+        s[s > 1 - self.nonwetting.constants.residual_saturation() - epsilon] = (
+            1 - self.nonwetting.constants.residual_saturation() - epsilon
+        )
+        s[s < self.wetting.constants.residual_saturation() + epsilon] = (
+            self.wetting.constants.residual_saturation() + epsilon
+        )
         intervals = np.linspace(
             np.full(s.shape, self.wetting.constants.residual_saturation() + epsilon),
             s,
@@ -110,6 +118,12 @@ class PressureMixin:
 
         integral: Integral = self.quadrature.integrate(func, intervals)
         return p + integral.elementwise[:, 0]
+
+    def interpolate_global_pressure(
+        self, p: np.ndarray, s: np.ndarray, epsilon: float = 1e-6
+    ) -> np.ndarray:
+        """Interpolate global pressure for a given saturation value."""
+        pass
 
     def eval_global_pressure(self) -> None:
         """Evaluate the global pressure field on the grid and store it in the data
@@ -156,7 +170,12 @@ class PressureMixin:
         # TODO: Change this s.t. p and s are ``pp.ad.DenseArray``.
         # Question: What to do with negative saturation values during Newton?
         # Limit s from below to 0 and from above to 1
-        s[s > 1 - self.nonwetting.constants.residual_saturation() - epsilon] = 0
+        s[s > 1 - self.nonwetting.constants.residual_saturation() - epsilon] = (
+            1 - self.nonwetting.constants.residual_saturation() - epsilon
+        )
+        s[s < self.wetting.constants.residual_saturation() + epsilon] = (
+            self.wetting.constants.residual_saturation() + epsilon
+        )
         intervals = np.linspace(
             np.full(s.shape, self.wetting.constants.residual_saturation() + epsilon),
             s,
@@ -256,6 +275,7 @@ class PressureReconstructionMixin:
     mdg: pp.MixedDimensionalGrid
     iterate_indices: list
     bc_type: Callable[[pp.Grid], pp.BoundaryCondition]
+    flux_key: str
 
     def reconstruct_pressure(
         self,
@@ -337,7 +357,7 @@ class PressureReconstructionMixin:
 
             # Obtain local gradients
             loc_grad = np.zeros((sd.dim, nc))
-            perm = sd_data[pp.PARAMETERS]["total_flux"]["second_order_tensor"].values
+            perm = sd_data[pp.PARAMETERS][self.flux_key]["second_order_tensor"].values
             for ci in range(nc):
                 loc_grad[: sd.dim, ci] = -np.linalg.inv(
                     perm[: sd.dim, : sd.dim, ci]
@@ -363,7 +383,7 @@ class PressureReconstructionMixin:
 
             # Treatment of boundary conditions
             # TODO How to do this?
-            bc = sd_data[pp.PARAMETERS]["total_flux"]["bc"]
+            bc = sd_data[pp.PARAMETERS][self.flux_key]["bc"]
 
             bc_dir_values = np.zeros(sd.num_faces)
             external_dirichlet_boundary = np.logical_and(
@@ -586,23 +606,34 @@ class EquilibratedFluxMixin:
                 iterate_index=0,
             )
 
-    def divergence_mismatch(
-        self, equilibrated_flux: pp.ad.SparseArray
-    ) -> pp.ad.SparseArray:
+    wetting: Phase
+    nonwetting: Phase
+    flux_key: str
+    formulation: str
+    time_manager: pp.TimeManager
+    phase_fluid_source: Callable[[pp.Grid, Phase], np.ndarray]
+    total_fluid_source: Callable[[pp.Grid], np.ndarray]
+    vector_source: Callable[[pp.Grid, Phase], np.ndarray]
+    _porosity: Callable[[pp.Grid], np.ndarray]
+    cap_press: Callable[[pp.ad.Operator], np.ndarray]
+    phase_mobility: Callable[[pp.Grid, Phase], np.ndarray]
+    total_mobility: Callable[[pp.Grid], np.ndarray]
+    total_flux: Callable[[pp.Grid], pp.ad.Operator]
+    volume_integral: Callable[[pp.ad.Operator, list[pp.Grid], int], pp.ad.Operator]
+
+    def divergence_mismatch(self) -> None:
         r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)` and
         being mass conservative.
 
-        We calculate how far the equilibrated total flux :math:`\sigma_t` is from
-        satisfying
-        ..math::
-            (q_t^n - \nabla \cdot \sigma_t, 1)_K = 0,
+        Check :meth:`tpf_lab.models.two_phase_flow.EquationsTPF.set_equations` for
+        details.
 
-        and how far the equilibrated wetting flux :math:`\sigma_w` is from satisfying
-        ..math::
-            (q_w^n - \partial_t^n(\varphi s_{w, h, \tau)}) - \nabla \cdot
-            \sigma_w, 1)_K = 0,
-
-        where :math:`n` is the discrete time step and :math:`K` is a given grid cell.
+        TODO Calculate the elementwise mismatch.
+        TODO Have a phase mass balance equation for the reconstructed phase fluxes.
+        TODO This copies 90% of the code from ``set_equations``. Make ``set_equations``
+        more flexible and call (with the reconstructed flux) to avoid this.
+        TODO The equation does not need to be redefined at each Newton iteration.
+        Instead, save it to the equation system and just reevaluate.
 
         """
         # TEST -> Local mass conservation
@@ -620,7 +651,7 @@ class EquilibratedFluxMixin:
         # )
         # END OF TEST
 
-        g = self.mdg.subdomains()[0]
+        g, data = self.mdg.subdomains(return_data=True)[0]
 
         # Spatial discretization operators.
         div = pp.ad.Divergence([g])
@@ -648,7 +679,9 @@ class EquilibratedFluxMixin:
         # Ad equations
         if self.formulation == "fractional_flow":
             # Note, that for ``flux_t``, the total mobility is already included.
-            flux_t = self.total_flux(g)
+            flux_t = pp.ad.DenseArray(
+                pp.get_solution_values("total_flux_equilibrated", data, iterate_index=0)
+            )
             fractional_flow_w = mobility_w / mobility_t
             vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
             vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
@@ -670,8 +703,11 @@ class EquilibratedFluxMixin:
                 )
                 - self.volume_integral(source_ad_w, [g], 1)
             )
-        flow_equation.set_name("Flow equation")
-        transport_equation.set_name("Transport equation")
+        flow_equation.set_name("Flow equation mismatch")
+        transport_equation.set_name("Transport equation mismatch")
+        logger.info(
+            f"Flow equation mismatch {np.sum(flow_equation.value(self.equation_system))}"
+        )
 
 
 class ReconstructionSolutionStrategy(SolutionStrategyTPF):
@@ -697,6 +733,7 @@ class ReconstructionSolutionStrategy(SolutionStrategyTPF):
         [Literal["total", "capillary", PHASENAME]], None
     ]
     extend_fv_fluxes: Callable[[Literal["total", "capillary", PHASENAME]], None]
+    divergence_mismatch: Callable[[], None]
     compute_errors: Callable
 
     def __init__(self, params: dict[str, Any]) -> None:
@@ -850,6 +887,7 @@ class ReconstructionSolutionStrategy(SolutionStrategyTPF):
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE], ["total", "capillary"]
         ):
             self.reconstruct_pressure(pressure_key, flux_name)
+        self.divergence_mismatch()
 
         # self.compute_errors()
 

@@ -9,6 +9,7 @@ functions" [Jenny et. al, 2009].
 import logging
 import pathlib
 import random
+import shutil
 import warnings
 
 import numpy as np
@@ -129,6 +130,7 @@ foldername: pathlib.Path = (
 )
 
 try:
+    shutil.rmtree(foldername)
     foldername.mkdir(parents=True)
 except Exception:
     pass
