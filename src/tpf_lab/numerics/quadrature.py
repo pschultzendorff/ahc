@@ -221,10 +221,12 @@ class GaussLegendreQuadrature1D(BaseScheme):
         - ``elements`` has shape ``(2, num_elements, 1)``
         - The vertices of each element are in the order left, right.
 
+        Note that we allow elements to have volume 0.
+
         """
         assert elements.shape == (2, elements.shape[1], 1)
         assert np.all(
-            elements[0, :, 0] < elements[1, :, 0]
+            elements[0, :, 0] <= elements[1, :, 0]
         ), "Element vertices ordered wrongly."
 
     def _points_setter(self) -> None:
@@ -293,6 +295,8 @@ class GaussLegendreQuadrature2D(BaseScheme):
         - The vertices of each element are in the order top-left, top-right,
             bottom-left, bottom-right.
 
+        Note that we allow elements to have volume 0.
+
         """
         assert elements.shape == (4, elements.shape[1], 2)
         assert np.all(
@@ -308,10 +312,10 @@ class GaussLegendreQuadrature2D(BaseScheme):
             elements[2, :, 1] == elements[3, :, 1]
         ), "Bottom side (y-axis) vertices of an element have differing y-coordinates."
         assert np.all(
-            elements[0, :, 0] < elements[1, :, 0]
+            elements[0, :, 0] <= elements[1, :, 0]
         ), "Element vertices ordered wrongly."
         assert np.all(
-            elements[0, :, 1] < elements[2, :, 1]
+            elements[0, :, 1] <= elements[2, :, 1]
         ), "Element vertices ordered wrongly."
 
     def _points_setter(self) -> None:
@@ -386,6 +390,8 @@ class GaussLegendreQuadrature3D(BaseScheme):
             bottom-left-front, bottom-right-front, top-left-back, top-right-back,
             bottom-left-back, bottom-right-back
 
+        Note that we allow elements to have volume 0.
+
         """
         assert elements.shape == [8, elements.shape[1], 3]
         assert np.all(
@@ -425,13 +431,13 @@ class GaussLegendreQuadrature3D(BaseScheme):
             == elements[7, :, 2]
         ), "Back side (z-axis) vertices of an element have differing z-coordinates."
         assert np.all(
-            elements[0, :, 0] < elements[1, :, 0]
+            elements[0, :, 0] <= elements[1, :, 0]
         ), "Element vertices ordered wrongly."
         assert np.all(
-            elements[0, :, 1] < elements[2, :, 1]
+            elements[0, :, 1] <= elements[2, :, 1]
         ), "Element vertices ordered wrongly."
         assert np.all(
-            elements[0, :, 2] < elements[5, :, 2]
+            elements[0, :, 2] <= elements[5, :, 2]
         ), "Element vertices ordered wrongly."
 
     def _points_setter(self) -> None:

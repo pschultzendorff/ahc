@@ -1,22 +1,18 @@
 # Two-phase flow in PorePy.
 
-This repo contains a working two-phase flow model in PorePy, functionality to
-include neural networks into PorePy models, and some miscellaneous additions to PorePy
-functionality.
+This repo contains a working two-phase flow model in PorePy, a posteriori error
+estimators, an adaptive homotopy continuation algorithm, integration of neural networks
+into PorePy models, and some miscellaneous additions to PorePy functionality.
 
-Furthermore, some notebooks with setup tests and more advanced experiments are included.
 
-As of now the code works with PorePy commit 278a2cf654224c6bd06b3c36b538bdb8fa03b8c7
-(10th February 2023). Later or earlier commits migh work as well (as long as the new
-model framework is implemented), but this was not tested.
-
+As of now the code works with PorePy commit c5732db (19th October 2024). Some modules
+are not yet updated to modern PorePy. Checkout the other branches for this.
 
 ### PorePy changes/additions
 In ``./src`` the adaptions to PorePy are found.
 
 #### Two-phase flow model
-Two formulations of the model are implemented: Nonwetting pressure-wetting saturation
-and (the more unusual) wetting pressure-wetting saturation.
+Implemented in the fractional flow formulation.
 
 #### Neural networks
 Neural networks from `Pytorch` can be included as `ad.Function` into the PorePy `ad`
@@ -26,14 +22,9 @@ neural network into a function. This acts like the functions in `ad.functions`.
 Some artificial data for rel. perm. and cap. pressure functions is provided, as well as
 simple neural networks and a training function. 
 
-#### Progress bar
-This repo adds progress bars, both for time steps and solver iterations to Porepy, for a
-less cluttered interface. However, if run in Jupyter Notebooks, this displays
-incorrectly and at each time step a blank line appears.
+#### Homotopy Continuation
 
-This is a well-known issue with `tqdm` and Jupyter:
-https://github.com/jupyter-widgets/ipywidgets/issues/1845. To circumvent this, add the
-content of `custom.css` to the same file in your Jupyter config (may be found under
-`~/.jupyter/custom/custom.css`).
-
-#### Adaptive time stepping
+#### A posteriori error estimates
+- Equilibrated flux and pressure reconstructions. Based on Jhabriel Valera's
+  (unpublished) work.
+- Error estimates.

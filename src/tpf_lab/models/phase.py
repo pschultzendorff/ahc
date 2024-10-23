@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import abc
-from typing import Any, Callable, Optional, Union, overload
+from typing import Any, Callable, Literal, Optional, Type, TypeAlias, Union, overload
 
 import numpy as np
 import porepy as pp
 from porepy import MaterialConstants
+from tpf_lab.constants_and_typing import NONWETTING, PHASENAME, WETTING
 
 number = pp.number
 
@@ -18,8 +19,8 @@ class Phase:
 
     """
 
-    def __init__(self, name: str) -> None:
-        self.name: str = str(name)
+    def __init__(self, name: PHASENAME) -> None:
+        self.name: PHASENAME = name
         """Name given to the phase at instantiation."""
 
         # TODO: Should the following be here or in without ``self`` right after the

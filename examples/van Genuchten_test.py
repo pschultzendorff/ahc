@@ -124,7 +124,9 @@ class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): .
 
 
 # Set up folder and files for logging/plots/saved time steps.
-foldername: pathlib.Path = pathlib.Path(__file__).parent / "results" / "Corey_test"
+foldername: pathlib.Path = (
+    pathlib.Path(__file__).parent / "results" / "van Genuchten_test"
+)
 
 try:
     foldername.mkdir(parents=True)
@@ -177,13 +179,12 @@ params = {
         "wetting": wetting_constants,
         "nonwetting": nonwetting_constants,
     },
+    # van Genuchten-Mualem
     "rel_perm_constants": {
-        "model": "Corey",
-        "linear_param_w": 1.0,
-        "linear_param_n": 1.0,
+        "model": "van Genuchten-Mualem",
         "limit": False,
     },
-    "cap_press_constants": {"model": None},
+    "cap_press_constants": {"model": "van Genuchten"},
 }
 
 logger.info("start")

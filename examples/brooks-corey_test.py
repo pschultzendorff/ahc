@@ -101,14 +101,14 @@ class ModifiedEquations(EquationsTPF):
         if phase.name == "wetting":
             array = super().phase_fluid_source(g, phase)
             array[0] = 3
-            array[119] = -3
+            # array[119] = -3
             return array
         elif phase.name == "nonwetting":
-            # array = super().phase_fluid_source(g, phase)
-            # array[-1] = 3
-            # return array
+            array = super().phase_fluid_source(g, phase)
+            array[119] = 3
+            return array
 
-            return np.zeros(g.num_cells)
+            # return np.zeros(g.num_cells)
 
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
@@ -124,7 +124,9 @@ class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): .
 
 
 # Set up folder and files for logging/plots/saved time steps.
-foldername: pathlib.Path = pathlib.Path(__file__).parent / "results" / "Corey_test"
+foldername: pathlib.Path = (
+    pathlib.Path(__file__).parent / "results" / "Brooks-Corey_test"
+)
 
 try:
     foldername.mkdir(parents=True)
@@ -152,10 +154,6 @@ nonwetting_constants: PhaseConstants = PhaseConstants(
     }
 )
 
-assert isinstance(
-    wetting_constants, pp.models.material_constants.MaterialConstants
-), "Wrong type for phase constants."
-
 params = {
     # Base folder and file name. These will get changed by
     # ``ConvergenceAnalysisExtended``.
@@ -169,7 +167,7 @@ params = {
     "meshing_arguments": {"cell_size": 1.0},
     "time_manager": pp.TimeManager(
         schedule=np.array([0, 20]),
-        dt_init=0.1,
+        dt_init=0.02,
         constant_dt=True,
     ),
     "material_constants": {
@@ -177,13 +175,15 @@ params = {
         "wetting": wetting_constants,
         "nonwetting": nonwetting_constants,
     },
+    # Brooks-Corey-Burdine
     "rel_perm_constants": {
-        "model": "Corey",
-        "linear_param_w": 1.0,
-        "linear_param_n": 1.0,
+        "model": "Brooks-Corey",
         "limit": False,
+        "n1": 2,
+        "n2": 1 + 2 / 2,
+        "n3": 1,
     },
-    "cap_press_constants": {"model": None},
+    "cap_press_constants": {"model": "Brooks-Corey", "entry_pressure": 1e-2, "n_b": 2},
 }
 
 logger.info("start")

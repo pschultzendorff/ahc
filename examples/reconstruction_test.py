@@ -15,6 +15,12 @@ import numpy as np
 import porepy as pp
 from numba import config
 from tpf_lab.models.phase import Phase, PhaseConstants
+from tpf_lab.models.reconstructions import (
+    EquilibratedFluxMixin,
+    PressureMixin,
+    PressureReconstructionMixin,
+    ReconstructionSolutionStrategy,
+)
 from tpf_lab.models.two_phase_flow import (
     BoundaryConditionsTPF,
     EquationsTPF,
@@ -46,9 +52,9 @@ class ModifiedGeometry(pp.ModelGeometry):
         """
         bounding_box: dict[str, pp.number] = {
             "xmin": 0,
-            "xmax": 120,
+            "xmax": 20,
             "ymin": 0,
-            "ymax": 60,
+            "ymax": 20,
             # "xmin": 0,
             # "xmax": 2,
             # "ymin": 0,
@@ -66,26 +72,26 @@ class ModifiedEquations(EquationsTPF):
 
     """
 
-    def _permeability(self, g: pp.Grid) -> np.ndarray:
-        # Function for base-10 log. of permeability along x-axis.
-        def function_x(x: float) -> float:
-            return 3 * x * (x - 0.7) * (x - 2.3)
+    # def _permeability(self, g: pp.Grid) -> np.ndarray:
+    #     # Function for base-10 log. of permeability along x-axis.
+    #     def function_x(x: float) -> float:
+    #         return 3 * x * (x - 0.7) * (x - 2.3)
 
-        # Function for base-10 log. of permeability along y-axis.
-        def function_y(x: float) -> float:
-            return 5 * (x - 0.2) * (x - 0.8) * (x + 2)
+    #     # Function for base-10 log. of permeability along y-axis.
+    #     def function_y(x: float) -> float:
+    #         return 5 * (x - 0.2) * (x - 0.8) * (x + 2)
 
-        log_permeability = np.zeros([60, 120], dtype=float)
-        # log_permeability = np.zeros([2, 2], dtype=float)
-        for i, row in enumerate(log_permeability):
-            for j, _ in enumerate(row):
-                log_permeability[i, j] = function_x(i / 60.0) * function_y(j / 120.0)
-                # log_permeability[i, j] = function_x(i / 2.0) * function_y(j / 2.0)
+    #     log_permeability = np.zeros([60, 120], dtype=float)
+    #     # log_permeability = np.zeros([2, 2], dtype=float)
+    #     for i, row in enumerate(log_permeability):
+    #         for j, _ in enumerate(row):
+    #             log_permeability[i, j] = function_x(i / 60.0) * function_y(j / 120.0)
+    #             # log_permeability[i, j] = function_x(i / 2.0) * function_y(j / 2.0)
 
-        # Add noise.
-        log_permeability += np.random.normal(0, 0.2, [60, 120])
-        # log_permeability += np.random.normal(0, 0.2, [2, 2])
-        return (10**log_permeability).flatten()
+    #     # Add noise.
+    #     log_permeability += np.random.normal(0, 0.2, [60, 120])
+    #     # log_permeability += np.random.normal(0, 0.2, [2, 2])
+    #     return (10**log_permeability).flatten()
 
     def phase_fluid_source(self, g: pp.Grid, phase: Phase) -> np.ndarray:
         """Volumetric phase source term. Given as volumetric flux. This
@@ -101,14 +107,14 @@ class ModifiedEquations(EquationsTPF):
         if phase.name == "wetting":
             array = super().phase_fluid_source(g, phase)
             array[0] = 3
-            array[119] = -3
+            # array[119] = -3
             return array
         elif phase.name == "nonwetting":
-            # array = super().phase_fluid_source(g, phase)
-            # array[-1] = 3
-            # return array
+            array = super().phase_fluid_source(g, phase)
+            array[19] = 3
+            return array
 
-            return np.zeros(g.num_cells)
+            # return np.zeros(g.num_cells)
 
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
@@ -120,11 +126,14 @@ class ModifiedBoundaryConditions(BoundaryConditionsTPF):
         return pp.BoundaryCondition(g, north_faces, "dir")
 
 
-class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): ...  # type: ignore
+# class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): ...  # type: ignore
+class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, EquilibratedFluxMixin, PressureMixin, PressureReconstructionMixin, ReconstructionSolutionStrategy, TwoPhaseFlow): ...  # type: ignore
 
 
 # Set up folder and files for logging/plots/saved time steps.
-foldername: pathlib.Path = pathlib.Path(__file__).parent / "results" / "Corey_test"
+foldername: pathlib.Path = (
+    pathlib.Path(__file__).parent / "results" / "reconstruction_test"
+)
 
 try:
     foldername.mkdir(parents=True)
@@ -152,10 +161,6 @@ nonwetting_constants: PhaseConstants = PhaseConstants(
     }
 )
 
-assert isinstance(
-    wetting_constants, pp.models.material_constants.MaterialConstants
-), "Wrong type for phase constants."
-
 params = {
     # Base folder and file name. These will get changed by
     # ``ConvergenceAnalysisExtended``.
@@ -166,10 +171,11 @@ params = {
     "progressbars": True,
     "formulation": "fractional_flow",
     # grid and time
+    "grid_type": "simplex",
     "meshing_arguments": {"cell_size": 1.0},
     "time_manager": pp.TimeManager(
         schedule=np.array([0, 20]),
-        dt_init=0.1,
+        dt_init=0.02,
         constant_dt=True,
     ),
     "material_constants": {
@@ -177,13 +183,15 @@ params = {
         "wetting": wetting_constants,
         "nonwetting": nonwetting_constants,
     },
+    # Brooks-Corey-Burdine
     "rel_perm_constants": {
-        "model": "Corey",
-        "linear_param_w": 1.0,
-        "linear_param_n": 1.0,
+        "model": "Brooks-Corey",
         "limit": False,
+        "n1": 2,
+        "n2": 1 + 2 / 2,  # 1 + 2 / n_b
+        "n3": 1,
     },
-    "cap_press_constants": {"model": None},
+    "cap_press_constants": {"model": "Brooks-Corey", "entry_pressure": 1e-2, "n_b": 2},
 }
 
 logger.info("start")
