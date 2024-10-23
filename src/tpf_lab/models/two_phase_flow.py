@@ -13,7 +13,7 @@ is implemented.
 Furthermore, multiple different models for both the capillary pressure, as well as the
 relative permeability are implemented.
 
-TODO:
+TODO
     - Change bc_values to ``ad.BoundaryCondition``
     - Right now alot of the things in this model are typed as multi-grid objects. For
       example, the variables are of type ``MultiGridVariable``. To simplify things, change
@@ -86,6 +86,7 @@ class RelativePermeability:
     """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
 
     def set_rel_perm_constants(self) -> None:
+        # FIXME: Does it make sense to have all as :class:`~porepy.ad.Scalar`?
         rel_perm_constants: dict[str, Any] = self.params.get("rel_perm_constants", {})
         self._rel_perm_model: Literal["Brooks-Corey", "Corey", "power", "linear"] = (
             rel_perm_constants.get("model", "Brooks-Corey")
@@ -112,7 +113,7 @@ class RelativePermeability:
         self._m_g: float
 
         # Lower and upper limits for the rel.perm
-        # TODO: Should these be set in the phase constants and align with residual
+        # TODO Should these be set in the phase constants and align with residual
         # saturations?
         self._limit_rel_perm: bool = rel_perm_constants.get("limit", False)
         self._rel_perm_w_max: float = rel_perm_constants.get("max_w", 1.0)
@@ -122,9 +123,12 @@ class RelativePermeability:
 
     def _rel_perm_linear_param(self, phase: Phase) -> pp.ad.Scalar:
         return pp.ad.Scalar(
-            self._rel_perm_linear_param_w
-            if phase.name == WETTING
-            else self._rel_perm_linear_param_n
+            (
+                self._rel_perm_linear_param_w
+                if phase.name == WETTING
+                else self._rel_perm_linear_param_n
+            ),
+            name=f"{phase.name} rel. perm. linear_param",
         )
 
     def _rel_perm_limit(self, phase: Phase, limit: Literal["min", "max"]) -> float:
@@ -200,6 +204,7 @@ class RelativePermeability:
                 )
 
         elif self._rel_perm_model == "van Genuchten-Mualem":
+            # FIXME Fix this in :meth:`set_rel_perm_constants`.
             self._m_g: float = 1 - 1 / self._n_g
             if phase.name == WETTING:
                 rel_perm = s_phase ** pp.ad.Scalar(self._kappa_g) * (
@@ -213,6 +218,7 @@ class RelativePermeability:
                 ) ** pp.ad.Scalar(self._m_g * 2)
 
         elif self._rel_perm_model == "van Genuchten-Burdine":
+            # FIXME Fix this in :meth:`set_rel_perm_constants`.
             self._m_g: float = 1 - 2 / self._n_g
             if phase.name == WETTING:
                 rel_perm = s_phase ** pp.ad.Scalar(2) * (
@@ -238,6 +244,7 @@ class RelativePermeability:
             )
             rel_perm = minimum_func(maximum_func(rel_perm))
 
+        rel_perm.set_name(f"{phase.name} rel. perm.")
         return rel_perm
 
 
@@ -253,6 +260,7 @@ class CapillaryPressure:
     """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
 
     def set_cap_press_constants(self) -> None:
+        # FIXME: Does it make sense to have all as :class:`~porepy.ad.Scalar`?
         cap_press_constants: dict[str, Any] = self.params.get("cap_press_constants", {})
         self._cap_press_model = cap_press_constants.get("model", None)
         # Brooks-Corey model
@@ -306,22 +314,28 @@ class CapillaryPressure:
         s_normalized = self.normalize_saturation(
             saturation_w, self.wetting, limit=True, epsilon=1e-7
         )
-        s_normalized.name = "normalized wetting saturation"
+        s_normalized.set_name(f"{self.wetting.name}_s_normalized")
         if self._cap_press_model == "Brooks-Corey":
-            entry_pressure = pp.ad.Scalar(self._entry_pressure)
-            return entry_pressure * s_normalized ** pp.ad.Scalar(-1 / self._n_b)
+            entry_pressure = pp.ad.Scalar(self._entry_pressure, name="entry pressure")
+            p_c: OperatorType = entry_pressure * s_normalized ** pp.ad.Scalar(
+                -1 / self._n_b
+            )
         elif self._cap_press_model == "linear":
-            cap_press_linear_param = pp.ad.Scalar(self._cap_press_linear_param)
-            return cap_press_linear_param * s_normalized
+            cap_press_linear_param = pp.ad.Scalar(
+                self._cap_press_linear_param, name="cap. press. linear param"
+            )
+            p_c = cap_press_linear_param * s_normalized
         elif self._cap_press_model == "van Genuchten":
             beta_g = pp.ad.Scalar(self._beta_g)
-            return (
+            p_c = (
                 (((s_normalized ** pp.ad.Scalar(-1 / self._m_g)) - pp.ad.Scalar(1)))
                 ** pp.ad.Scalar(1 / self._n_g)
             ) / beta_g
         else:
             # Return cap. pressure 0.
-            return pp.ad.Scalar(0) * s_normalized
+            p_c = pp.ad.Scalar(0) * s_normalized
+        p_c.set_name("cap. press.")
+        return p_c
 
     def cap_press_deriv(self, saturation_w: OperatorType) -> OperatorType:
         s_normalized = self.normalize_saturation(
@@ -423,26 +437,29 @@ class DarcyFluxes:
     """
 
     def phase_mobility(self, g: pp.Grid, phase: Phase) -> pp.ad.Operator:
-        # TODO: Does it make more sense to get this from the dictionary? Would need to
+        # TODO Does it make more sense to get this from the dictionary? Would need to
         # change ``BuckleyLeverett`` then, as the mobilities are updated at iterations
         # via ``self._bc_values_mobility_w``.
-        # NOTE: At Neumann boundaries, both phase fluxes are prescribed, hence no need
+        # NOTE At Neumann boundaries, both phase fluxes are prescribed, hence no need
         # to determine any phase mobilities.
 
         saturation_w = self.wetting.s
         saturation_w_bc = pp.ad.DenseArray(
-            self.bc_dirichlet_saturation_values(g, self.wetting)
+            self.bc_dirichlet_saturation_values(g, self.wetting),
+            name=f"{self.wetting.name}_s_bc",
         )
-        viscosity = pp.ad.Scalar(phase.constants.viscosity())
+        viscosity = pp.ad.Scalar(
+            phase.constants.viscosity(), name=f"{phase.name}_viscosity"
+        )
         upwind = pp.ad.UpwindAd(phase.mobility_key, [g])
 
-        mobility = upwind.upwind() @ (
-            self.rel_perm(saturation_w, phase) / viscosity
-        ) + upwind.bound_transport_dir() @ (
-            self.rel_perm(saturation_w_bc, phase) / viscosity
+        mobility = (
+            upwind.upwind() @ (self.rel_perm(saturation_w, phase) / viscosity)
+            + upwind.bound_transport_dir()
+            @ (self.rel_perm(saturation_w_bc, phase) / viscosity)
         )
-
-        # NOTE: Alternatively to the current presciption of both phase fluxes at Neumann
+        mobility.set_name(f"{phase.name} mobility")
+        # NOTE Alternatively to the current presciption of both phase fluxes at Neumann
         # boundaries, one could also prescibe both the total flux over boundaries and
         # the saturation. This would require to upwind phase mobilities and capillary
         # pressures at Neumann boundaries to determine phase fluxes. Upwinding direction
@@ -466,11 +483,12 @@ class DarcyFluxes:
         return mobility
 
     def total_mobility(self, g: pp.Grid) -> pp.ad.Operator:
-        # TODO: To avoid zero total mobility, one might add a small value
-        # ``pp.ad.Scalar(1e-7)``.
+        """We add a small epsilon to avoid division by zero when calculating the
+        fractional flow at Neumann boundaries."""
         return pp.ad.sum_operator_list(
-            [self.phase_mobility(g, phase) for phase in self.phases]
-        )
+            [self.phase_mobility(g, phase) for phase in self.phases],
+            name="total mobility",
+        ) + pp.ad.Scalar(1e-7)
 
     def phase_flux(self, g: pp.Grid, phase: Phase) -> pp.ad.Operator:
         """Phase volume flux. Combines advective and buoyancy components.
@@ -531,7 +549,7 @@ class DarcyFluxes:
         # Variables and bc.
         p_n_bc = pp.ad.DenseArray(self.bc_dirichlet_pressure_values(g, self.nonwetting))
 
-        # NOTE: ``bc_saturation_values`` and hence ``p_cap_bc`` is not ``0`` on Neumann bc
+        # NOTE ``bc_saturation_values`` and hence ``p_cap_bc`` is not ``0`` on Neumann bc
         # faces! Using ``tpfa.bound_flux() @ p_cap_bc`` directly would add some phase
         # potential and thus Darcy flux depending on the saturation boundary values to
         # faces where the flux is fixed via Neumann bc. We thus set ``p_cap_bc`` to zero
@@ -540,8 +558,13 @@ class DarcyFluxes:
             pp.ad.DenseArray(self.bc_dirichlet_saturation_values(g, self.wetting))
         )
 
+        # Null Neumann boundaries and recreate array.
+        # FIXME This is a little inefficient. Would be nicer if we didn't have to
+        # recreate the array.
+        p_cap_values: np.ndarray = p_cap_bc.value(self.equation_system)
         neumann_ind = np.where(self.bc_type(g).is_neu)[0]
-        p_cap_bc.value(self.equation_system)[neumann_ind] = 0
+        p_cap_values[neumann_ind] = 0
+        p_cap_bc = pp.ad.DenseArray(p_cap_values)
 
         # Sum phase Neumann boundary fluxes to obtain total Neumann boundary flux.
         flux_t_bc_neu = pp.ad.sum_operator_list(
@@ -556,14 +579,14 @@ class DarcyFluxes:
         vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
 
         # Spatial discretization operators.
-        # NOTE: Some notes on the boundary conditions of the potential discretizations
+        # NOTE Some notes on the boundary conditions of the potential discretizations
         # and the total flux:
         # - Neumann boundaries: both phase fluxes are prescribed, the total flux is the
         #   sum of both.
         # - Dirichlet boundaries: the total flux is a function of the mobilities and
         #   phase potentials.
 
-        # NOTE: Again, we could also use an alternative formulation with total flux and
+        # NOTE Again, we could also use an alternative formulation with total flux and
         # saturation values at Neumann boundaries. In this case:
         # - Neumann boundaries: the total flux is fixed and independent of the
         #   mobilities. We add the Neumann bc values to the total flux by using an
@@ -572,16 +595,16 @@ class DarcyFluxes:
 
         mpfa = pp.ad.MpfaAd(self.flux_key, [g])
 
-        # NOTE: We use TPFA for discretization of the capillary flux. Don't know the
+        # NOTE We use TPFA for discretization of the capillary flux. Don't know the
         # reason, but apparently this was somehow necessary in 2023. Possibly stability
         # reasons.
-        # NOTE: The flux key is the same as for the total flux discretization, i.e., the
+        # NOTE The flux key is the same as for the total flux discretization, i.e., the
         # boundary condition types coincide. Same considerations as above apply, except
         # that we explicitly have to set ``p_cap_bc`` to zero on Neumann faces as
         # described above.
         tpfa = pp.ad.TpfaAd(self.flux_key, [g])
 
-        # NOTE: Neither 'MpfaAd' nor 'TpfaAd' allow to separate Dirichlet and Neumann
+        # NOTE Neither 'MpfaAd' nor 'TpfaAd' allow to separate Dirichlet and Neumann
         # conditions. As a workaround, we use an upwind discretization initialized
         # with any discretization key (all have the same bc type). On Neumann boundary
         # faces the ``upwind_n.bound_transport_neu`` matrix takes value ``1`` and we can
@@ -644,7 +667,7 @@ class EquationsTPF(pp.BalanceEquation):
     model classes (CompressibleFlow).
 
     Public attributes:
-    TODO: Update this list!
+    TODO Update this list!
         primary_pressure_var: Name assigned to the pressure variable in the
             highest-dimensional subdomain. Will be used throughout the simulations,
             including in ParaView export. The default variable name is "wetting
@@ -768,13 +791,13 @@ class EquationsTPF(pp.BalanceEquation):
         """Volumetric phase source term. Given as volumetric flux. This
         unmodified base function assumes a zero phase source.
 
-        NOTE: This is the average value per grid cell, i.e., it gets scaled with the
+        NOTE This is the average value per grid cell, i.e., it gets scaled with the
         cell volume in the equation.
 
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
-        # TODO: Does this has to be a vector instead?
+        # TODO Does this has to be a vector instead?
         return np.zeros(g.num_cells)
 
     def total_fluid_source(self, g: pp.Grid) -> np.ndarray:
@@ -782,7 +805,7 @@ class EquationsTPF(pp.BalanceEquation):
 
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
-        NOTE: This is the average value per grid cell, i.e., it gets scaled with the
+        NOTE This is the average value per grid cell, i.e., it gets scaled with the
         cell volume in the equation.
 
         """
@@ -855,6 +878,9 @@ class EquationsTPF(pp.BalanceEquation):
             vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
 
             flow_equation = div @ flux_t - self.volume_integral(source_ad_t, [g], 1)
+            # FIXME Do we need to add the wetting flux at Neumann boundaries to the
+            # transport equation? Then we would either have to set fractional flow to
+            # zero there or the total flux to zero.
             transport_equation = (
                 porosity_ad * (self.volume_integral(dt_s, [g], 1))
                 + div
@@ -864,7 +890,7 @@ class EquationsTPF(pp.BalanceEquation):
                     * mobility_n
                     * (
                         flux_mpfa.flux() @ p_cap
-                        # TODO: Plus boundary values here or are they included in the total flux?
+                        # TODO Plus boundary values here or are they included in the total flux?
                         + flux_mpfa.vector_source() @ vector_source_w
                         - flux_mpfa.vector_source() @ vector_source_n
                     )
@@ -918,7 +944,7 @@ class VariablesTPF(pp.VariableMixin):
     """
 
     # def __init__(self, params: Optional[dict]) -> None:
-    #     # TODO: Should this be here or right after the class?
+    #     # TODO Should this be here or right after the class?
     #     self.primary_pressure_var: str
     #     self.primary_saturation_var: str
     #     self.secondary_pressure_var: str
@@ -935,7 +961,7 @@ class VariablesTPF(pp.VariableMixin):
                 subdomains,
                 tags={"si_units": "Pa"},
             )
-            # TODO: Check that the pressure units are correct.
+            # TODO Check that the pressure units are correct.
             phase.s = self.equation_system.create_variables(
                 f"{phase.name}_s",
                 {"cells": 1},
@@ -943,7 +969,7 @@ class VariablesTPF(pp.VariableMixin):
                 tags={"si_units": "-"},
             )
 
-        # NOTE: The division into primary/secondary variables is internal to this model
+        # NOTE The division into primary/secondary variables is internal to this model
         # only and not connected to ``pp.PRIMARY_VARIABLES``.
         if self.formulation == "fractional_flow":
             self.primary_pressure_var = f"{self.nonwetting.name}_p"
@@ -955,7 +981,7 @@ class VariablesTPF(pp.VariableMixin):
         self,
         saturation: pp.ad.Operator,
         phase: Optional[Phase] = None,
-        # TODO: Make epsilon a keyword argument or not?
+        # TODO Make epsilon a keyword argument or not?
         limit: bool = False,
         epsilon: float = 0.0,
     ) -> pp.ad.Operator:
@@ -1098,7 +1124,7 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
     dim: int
     """Normally provided by a mixin of instance :class:`ModelGeometry`."""
 
-    # TODO: Could use a protocol here to account for optional function arguments.
+    # TODO Could use a protocol here to account for optional function arguments.
     domain_boundary_sides: Callable[[pp.Grid | pp.BoundaryGrid], pp.domain.DomainSides]
     """Normally provided by a mixin of instance :class:`ModelGeometry`."""
 
@@ -1119,24 +1145,31 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
     def bc_dirichlet_pressure_values(self, g: pp.Grid, phase: Phase) -> np.ndarray:
         """Phase dependent pressure bc values.
 
-        Note: Make sure that this is zero at Neumann boundaries to not accidentally prescibe
-        a flux. Both ``Mpfa.bound_flux()`` and ``Tpfa.bound_flux()`` provide matrices with ``1``
-        values at Neumann boundaries.
+        Note: On Neumann boundaries, the pressure values MUST be 0 to not accidentally
+        prescibe a flux! Both ``Mpfa.bound_flux()`` and ``Tpfa.bound_flux()`` provide
+        matrices with ``1`` values at Neumann boundaries.
 
         """
         # Homogeneous Dirichlet conditions for both phases.
         return np.zeros(g.num_faces)
 
-    # Ignore Pylance complaining. Function will alwayss return a value.
+    # Ignore Pylance complaining. Function will always return a value.
     def bc_dirichlet_saturation_values(self, g: pp.Grid, phase: Phase) -> np.ndarray:  # type: ignore
-        """Phase dependent saturation bc values."""
+        """Phase dependent saturation bc values.
+
+        Note: On Neumann boundaries, the saturation values MUST be 0!
+
+        """
         # Homogeneous Dirichlet conditions for both phases.
         if phase.name == WETTING:
-            return np.full(g.num_faces, 0.5)
+            s_bc: np.ndarray = np.full(g.num_faces, 0.5)
         elif phase.name == NONWETTING:
-            return np.ones(g.num_faces) - self.bc_dirichlet_saturation_values(
-                g, self.wetting
-            )
+            s_bc: np.ndarray = np.ones(
+                g.num_faces
+            ) - self.bc_dirichlet_saturation_values(g, self.wetting)
+        neu_ind: np.ndarray = self.bc_type(g).is_neu
+        s_bc[neu_ind] = 0
+        return s_bc
 
     def bc_neumann_flux_values(self, g: pp.Grid, phase: Phase) -> np.ndarray:
         """Phase flux bc values."""
@@ -1145,7 +1178,7 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
     def update_all_boundary_conditions(self) -> None:
         """Set values for the saturation, flux, and  and the darcy flux on
         boundaries."""
-        # TODO: This does not work as of yet. Replace the direct call of the functions
+        # TODO This does not work as of yet. Replace the direct call of the functions
         # ``self.bc_..._values`` with ``create_boundary_operator`` called on the
         # appropriate key.
         # super().update_all_boundary_conditions()
@@ -1291,7 +1324,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         **all** pressure potentials, i.e., wetting, nonwetting, and capillary.
 
         """
-        # NOTE: The following is only relevant when using an alternative formulation
+        # NOTE The following is only relevant when using an alternative formulation
         # for Neumann boundaries in terms of total flux and saturation values.
         # self.all_bc_dir_key: str = "all_bc_dir"
         """Keyword to define upwind discretization with fully Dirichlet bc."""
@@ -1302,7 +1335,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
 
             As phase potentials can have opposite signs, independent upwind
             discretization are required to evaluate phase mobilities.
-            # TODO: I do not think this is true, as this would imply negative fractional
+            # TODO I do not think this is true, as this would imply negative fractional
             flow. Check the inline comment in ``set_discretization_parameters()`` when
             changing this.
 
@@ -1435,7 +1468,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             )
             # Upwinding is done for both phases separately, hence we create two different
             # data dictionaries.
-            # NOTE: This is not really necessary and we could just as well use the flux
+            # NOTE This is not really necessary and we could just as well use the flux
             # data, as the ``bc_type`` are identical for all discretizations. The
             # delicaties of boundary conditions for fractional flow in PorePy are dealt
             # with in ``DarcyFluxes.mobility()`` and ``DarcyFluxes.total_flux()``.
@@ -1451,7 +1484,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                         "darcy_flux": np.ones(sd.num_faces),
                     },
                 )
-            # NOTE: The following is only relevant when using an alternative formulation
+            # NOTE The following is only relevant when using an alternative formulation
             # for Neumann boundaries in terms of total flux and saturation values.
             # To correctly upwind phase mobilities at Neumann boundaries, we need
             # another upwind discretization with full Dirichlet boundaries. Check
@@ -1524,7 +1557,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
     def _export(self):
         if hasattr(self, "exporter"):
             self.exporter.write_vtu(
-                # TODO: Prescribe the data to export.
+                # TODO Prescribe the data to export.
                 [],
                 time_step=self.time_manager.time_index,
             )
@@ -1551,10 +1584,10 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         """Compute Darcy flux based on previous pressure solution to determine upstream
         direction.
 
-        # TODO: Do we need to do the rediscretization of the upwinding at every
+        # TODO Do we need to do the rediscretization of the upwinding at every
         iteration? Or only at the first one?
 
-        # TODO: Is it smarter to calculate and distribute the secondary variables
+        # TODO Is it smarter to calculate and distribute the secondary variables
         **after** the nonlinear iterations?
 
         To evaluate the phase-mobilities separately, both the wetting, as well as the
@@ -1566,7 +1599,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         # bad guess (previous timestep) and improve towards the solution. We want to use
         # the better guess of the Darcy flux for discretization.
 
-        # NOTE: This should only be done with care at the first iteration of the initial
+        # NOTE This should only be done with care at the first iteration of the initial
         # time step, as the upwind direction will not align with the initital guess for
         # upwinding then.
         # -> Might be unwanted or wanted behavior.
@@ -1584,10 +1617,10 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                     vals = self.phase_potential(sd, phase).value(self.equation_system)
                     data[pp.PARAMETERS][phase.mobility_key].update({"darcy_flux": vals})
 
-                # NOTE: Only needed for the alternative formulation of Neumann bc.
+                # NOTE Only needed for the alternative formulation of Neumann bc.
                 # data[pp.PARAMETERS][self.all_bc_dir_key].update({"darcy_flux": vals})
 
-        # TODO: Do I need to reset discretization parameters as is done by
+        # TODO Do I need to reset discretization parameters as is done by
         # ``pp.solution_strategy.SolutionStrategy``?
         self.discretize()
 
@@ -1663,7 +1696,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                 > self._max_saturation_change
             ):
                 # This is set to false again in ``before_nonlinear_loop``.
-                # NOTE: This is not a very nice solution, however, as of now I didn't
+                # NOTE This is not a very nice solution, however, as of now I didn't
                 # find a way to pass ``recompute_solution`` to
                 # ``time_manager.compute_time_step()`` in ``run_time_dependent_model``
                 # without the code getting really messy.

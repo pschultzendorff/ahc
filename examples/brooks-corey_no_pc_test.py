@@ -121,7 +121,7 @@ class ModifiedBoundaryConditions(BoundaryConditionsTPF):
         return pp.BoundaryCondition(g, north_faces, "dir")
 
 
-class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): ...  # type: ignore
+class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, ModifiedBoundaryConditions, TwoPhaseFlow): ...  # type: ignore
 
 
 # Set up folder and files for logging/plots/saved time steps.
@@ -162,7 +162,7 @@ params = {
     "folder_name": foldername,
     "file_name": "setup",
     "max_iterations": 60,
-    "nl_convergence_tol": 1e-5,
+    "nl_convergence_tol": 1e-10,
     "progressbars": True,
     "formulation": "fractional_flow",
     # grid and time

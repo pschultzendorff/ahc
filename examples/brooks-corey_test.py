@@ -121,7 +121,7 @@ class ModifiedBoundaryConditions(BoundaryConditionsTPF):
         return pp.BoundaryCondition(g, north_faces, "dir")
 
 
-class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): ...  # type: ignore
+class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, ModifiedBoundaryConditions, TwoPhaseFlow): ...  # type: ignore
 
 
 # Set up folder and files for logging/plots/saved time steps.
