@@ -4,8 +4,8 @@ import numpy as np
 import porepy as pp
 import pytest
 from tpf_lab.constants_and_typing import NONWETTING, WETTING
+from tpf_lab.models.flow_and_transport import TwoPhaseFlow
 from tpf_lab.models.phase import Phase, PhaseConstants
-from tpf_lab.models.two_phase_flow import TwoPhaseFlow
 
 # TODO Change the residual saturation of one phase and adjust the tests.
 

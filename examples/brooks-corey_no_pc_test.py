@@ -15,12 +15,12 @@ import warnings
 import numpy as np
 import porepy as pp
 from numba import config
-from tpf_lab.models.phase import Phase, PhaseConstants
-from tpf_lab.models.two_phase_flow import (
+from tpf_lab.models.flow_and_transport import (
     BoundaryConditionsTPF,
     EquationsTPF,
     TwoPhaseFlow,
 )
+from tpf_lab.models.phase import Phase, PhaseConstants
 
 # Disable numba JIT for debugging.
 config.DISABLE_JIT = True
@@ -101,12 +101,12 @@ class ModifiedEquations(EquationsTPF):
         # TODO: Does this has to be a vector instead?
         if phase.name == "wetting":
             array = super().phase_fluid_source(g, phase)
-            array[0] = 3
-            array[39] = -3
+            array[0] = 0.5
+            array[39] = -0.5
             return array
         elif phase.name == "nonwetting":
             array = super().phase_fluid_source(g, phase)
-            # array[39] = 3
+            # array[39] = -0.5
             return array
 
             # return np.zeros(g.num_cells)
@@ -137,7 +137,7 @@ except Exception:
 
 solid_constants: pp.SolidConstants = pp.SolidConstants(
     {
-        "porosity": 0.1,
+        "porosity": 1.0,
         "permeability": 1.0,
     }
 )
@@ -168,8 +168,8 @@ params = {
     # grid and time
     "meshing_arguments": {"cell_size": 1.0},
     "time_manager": pp.TimeManager(
-        schedule=np.array([0, 5]),
-        dt_init=0.05,
+        schedule=np.array([0, 20]),
+        dt_init=0.2,
         constant_dt=True,
     ),
     "material_constants": {

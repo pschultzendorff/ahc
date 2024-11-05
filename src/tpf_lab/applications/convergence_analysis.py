@@ -9,10 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from porepy.applications.convergence_analysis import ConvergenceAnalysis
 from tpf_lab.utils import save_params_and_run_model
-from tpf_lab.visualization.diagnostics import (
-    BuckleyLeverettSaveData,
-    TwoPhaseFlowSaveData,
-)
+from tpf_lab.visualization.diagnostics import SaveDataBL, SaveDataTPF
 
 # Get module wide logger.
 logger = logging.getLogger(__name__)
@@ -165,7 +162,7 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
     def transform_results_to_classical(
         self,
         list_of_results: list,
-        save_data_class: Type[IsDataclass] = TwoPhaseFlowSaveData,
+        save_data_class: Type[IsDataclass] = SaveDataTPF,
     ) -> list[IsDataclass]:
         """Transform the results from ``run_analysis`` to the format the super class
         uses."""
@@ -270,7 +267,7 @@ def save_convergence_results(
     courant_number: float = 0.0,
     max_iterations: int = 30,
     foldername: str = "results",
-    save_data_class: Type[IsDataclass] = TwoPhaseFlowSaveData,
+    save_data_class: Type[IsDataclass] = SaveDataTPF,
 ) -> None:
     """Small script save the results of a convergence analysis and plot some graphs.
 

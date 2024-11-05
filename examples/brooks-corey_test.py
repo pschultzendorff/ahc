@@ -15,12 +15,12 @@ import warnings
 import numpy as np
 import porepy as pp
 from numba import config
-from tpf_lab.models.phase import Phase, PhaseConstants
-from tpf_lab.models.two_phase_flow import (
+from tpf_lab.models.flow_and_transport import (
     BoundaryConditionsTPF,
     EquationsTPF,
     TwoPhaseFlow,
 )
+from tpf_lab.models.phase import Phase, PhaseConstants
 
 # Disable numba JIT for debugging.
 config.DISABLE_JIT = True

@@ -4,7 +4,7 @@ import numpy as np
 import porepy as pp
 import pytest
 from tpf_lab.applications.convergence_analysis import ConvergenceAnalysisExtended
-from tpf_lab.models.two_phase_flow import TwoPhaseFlow
+from tpf_lab.models.flow_and_transport import TwoPhaseFlow
 
 
 @pytest.fixture

@@ -28,3 +28,9 @@ simple neural networks and a training function.
 - Equilibrated flux and pressure reconstructions. Based on Jhabriel Valera's
   (unpublished) work.
 - Error estimates.
+
+# TODO
+- We **always** work on only one subdomain. Remove all ``for`` loops through subdomains.
+- Often we call ``pp.shift_solution_values`` even though this is not necessary!
+- Rename every method and attribute that contains ``continuation`` to ``hc`` to make
+  things more readable!

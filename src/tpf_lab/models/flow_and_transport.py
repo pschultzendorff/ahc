@@ -53,322 +53,28 @@ import abc
 import logging
 import time
 from functools import partial
-from typing import Any, Callable, Literal, Optional, TypeVar
+from typing import Any, Callable, Literal, NamedTuple, Optional, TypeVar
 
 import numpy as np
 import porepy as pp
 from porepy.utils.examples_utils import VerificationUtils
-from tpf_lab.constants_and_typing import NONWETTING, PHASENAME, WETTING, OperatorType
+from tpf_lab.constants_and_typing import (
+    NONWETTING,
+    PHASENAME,
+    REL_PERM_MODEL,
+    WETTING,
+    OperatorType,
+)
+from tpf_lab.models.constitutive_laws_tpf import CapillaryPressure, RelativePermeability
 from tpf_lab.models.phase import Phase, PhaseConstants
 from tpf_lab.numerics.ad.functions import ad_pow as ad_pow
 from tpf_lab.numerics.ad.functions import minimum
-from tpf_lab.visualization.diagnostics import (
-    DataSavingTwoPhaseFlow,
-    TwoPhaseFlowSaveData,
-)
+from tpf_lab.visualization.diagnostics import DataSavingTPF, SaveDataTPF
 
 logger = logging.getLogger(__name__)
 
 
 # region CONSTITUTIVE LAWS
-
-
-class RelativePermeability:
-
-    normalize_saturation: Callable[[pp.ad.Operator], pp.ad.Operator]
-    """Normalize saturation. Normally provided by a mixin of instance
-    :class:`VariablesTPF`.
-
-    """
-    params: dict[str, Any]
-    """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-    wetting: Phase
-    """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-
-    def set_rel_perm_constants(self) -> None:
-        # FIXME: Does it make sense to have all as :class:`~porepy.ad.Scalar`?
-        rel_perm_constants: dict[str, Any] = self.params.get("rel_perm_constants", {})
-        self._rel_perm_model: Literal["Brooks-Corey", "Corey", "power", "linear"] = (
-            rel_perm_constants.get("model", "Brooks-Corey")
-        )
-
-        # Brooks-Corey model
-        self._n1: int = rel_perm_constants.get("n1", 1)
-        self._n2: int = rel_perm_constants.get("n2", 1)
-        self._n3: int = rel_perm_constants.get("n3", 1)
-
-        # Power law (Corey model)
-        self._rel_perm_power: int = rel_perm_constants.get("power", 3)
-        self._rel_perm_linear_param_w: float = rel_perm_constants.get(
-            "linear_param_w", 1.0
-        )
-        self._rel_perm_linear_param_n: float = rel_perm_constants.get(
-            "linear_param_n", 1.0
-        )
-
-        # van Genuchten model
-        self._kappa_g: float = rel_perm_constants.get("kappa_g", 1.0)
-        self._n_g: int = rel_perm_constants.get("n_g", 2)
-        # To be calculated later from ``self._n_g``.
-        self._m_g: float
-
-        # Lower and upper limits for the rel.perm
-        # TODO Should these be set in the phase constants and align with residual
-        # saturations?
-        self._limit_rel_perm: bool = rel_perm_constants.get("limit", False)
-        self._rel_perm_w_max: float = rel_perm_constants.get("max_w", 1.0)
-        self._rel_perm_w_min: float = rel_perm_constants.get("min_w", 1.0)
-        self._rel_perm_n_max: float = rel_perm_constants.get("max_w", 0.0)
-        self._rel_perm_n_min: float = rel_perm_constants.get("min_n", 0.0)
-
-    def _rel_perm_linear_param(self, phase: Phase) -> pp.ad.Scalar:
-        return pp.ad.Scalar(
-            (
-                self._rel_perm_linear_param_w
-                if phase.name == WETTING
-                else self._rel_perm_linear_param_n
-            ),
-            name=f"{phase.name} rel. perm. linear_param",
-        )
-
-    def _rel_perm_limit(self, phase: Phase, limit: Literal["min", "max"]) -> float:
-        if limit == "min":
-            return (
-                self._rel_perm_w_min if phase.name == WETTING else self._rel_perm_n_min
-            )
-        elif limit == "max":
-            return (
-                self._rel_perm_w_max if phase.name == WETTING else self._rel_perm_n_max
-            )
-
-    def rel_perm(self, saturation_w: OperatorType, phase: Phase) -> OperatorType:
-        r"""Phase relative permeability.
-
-        The following two models are implemented:
-
-        Brooks-Corey model
-        .. math::
-            k_{r,w}(\hat{S}_w) = \hat{S}_w^{n_1 + n_2 \cdot n_3}, \\
-            k_{r,n}(\hat{S}_w) = (1 - \hat{S}_w)^{n_1}(1 - \hat{S}_w^{n_2})^{n_3}, \\
-            \text{where} \\
-            \hat{S}_w = \frac{S_w - S_{w,res}}{1 - S_{w,res} - S_{n,res}}
-
-        The default values (Brooks–Corey–Burdine model) are
-        .. math::
-            n_1 = 2, n_2 = 1 + 2/n_b, n_3 = 1.
-
-        Corey model
-        .. math::
-            k_{r,w}(S_w) = \hat{S}_w^3, \\
-            k_{r,n}(S_w) = (1 - \hat{S}_w)^3.
-
-        To avoid ill-conditioned equation systems and crashing of the Newton solver at
-        unphysical saturations (i.e., :math:`S_w\not\in[0,1]`), the nonwetting rel.
-        perm. can be limited below and above.
-
-        .. math::
-            \hat{k}_{r,\alpha}(S_w) = \min\{\max\{k_{r,\alpha}, k_{r,\alpha}^{max}\}, k_{r,\alpha}^{min}},
-
-        Parameters:
-            saturation_w: Wetting phase saturation. Can, e.g., be of instance
-            :class:`~porepy.ad.MixedDimensionalVariable` or
-            :class:`~porepy.ad.SparseArray` (for saturation boundary values).
-
-        Returns:
-            Phase relative permeability.
-
-        """
-        # Normalize saturation and compute both phase saturations.
-        s_w_normalized = self.normalize_saturation(saturation_w, phase=self.wetting)
-        if phase.name == WETTING:
-            s_phase: pp.ad.Operator = s_w_normalized
-        elif phase.name == NONWETTING:
-            s_phase = pp.ad.Scalar(1) - s_w_normalized
-
-        # Compute relative permeability based on chosen model.
-        if self._rel_perm_model in ["Corey", "power"]:
-            rel_perm: pp.ad.Operator = (
-                s_phase ** pp.ad.Scalar(3)
-            ) * self._rel_perm_linear_param(phase)
-
-        elif self._rel_perm_model == "linear":
-            rel_perm = s_phase * self._rel_perm_linear_param(phase)
-
-        elif self._rel_perm_model == "Brooks-Corey":
-            if phase.name == WETTING:
-                rel_perm = s_phase ** pp.ad.Scalar(self._n1 + self._n2 * self._n3)
-            elif phase.name == NONWETTING:
-                rel_perm = (s_phase ** pp.ad.Scalar(self._n1)) * (
-                    (pp.ad.Scalar(1) - s_w_normalized ** pp.ad.Scalar(self._n2))
-                    ** pp.ad.Scalar(self._n3)
-                )
-
-        elif self._rel_perm_model == "van Genuchten-Mualem":
-            # FIXME Fix this in :meth:`set_rel_perm_constants`.
-            self._m_g: float = 1 - 1 / self._n_g
-            if phase.name == WETTING:
-                rel_perm = s_phase ** pp.ad.Scalar(self._kappa_g) * (
-                    pp.ad.Scalar(1)
-                    - (pp.ad.Scalar(1) - s_phase ** pp.ad.Scalar(1 / self._m_g))
-                    ** pp.ad.Scalar(self._m_g)
-                ) ** pp.ad.Scalar(2)
-            elif phase.name == NONWETTING:
-                rel_perm = s_phase ** pp.ad.Scalar(self._kappa_g) * (
-                    pp.ad.Scalar(1) - s_w_normalized ** pp.ad.Scalar(1 / self._m_g)
-                ) ** pp.ad.Scalar(self._m_g * 2)
-
-        elif self._rel_perm_model == "van Genuchten-Burdine":
-            # FIXME Fix this in :meth:`set_rel_perm_constants`.
-            self._m_g: float = 1 - 2 / self._n_g
-            if phase.name == WETTING:
-                rel_perm = s_phase ** pp.ad.Scalar(2) * (
-                    pp.ad.Scalar(1)
-                    - (pp.ad.Scalar(1) - s_phase ** pp.ad.Scalar(1 / self._m_g))
-                    ** pp.ad.Scalar(self._m_g)
-                )
-            elif phase.name == NONWETTING:
-                rel_perm = s_phase ** pp.ad.Scalar(2) * (
-                    pp.ad.Scalar(1) - s_w_normalized ** pp.ad.Scalar(1 / self._m_g)
-                ) ** pp.ad.Scalar(self._m_g)
-
-        # Limit relative permeability above and below.
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(
-                    pp.ad.functions.maximum, var_1=self._rel_perm_limit(phase, "min")
-                ),
-                "max",
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum, var_1=self._rel_perm_limit(phase, "max")), "min"
-            )
-            rel_perm = minimum_func(maximum_func(rel_perm))
-
-        rel_perm.set_name(f"{phase.name} rel. perm.")
-        return rel_perm
-
-
-class CapillaryPressure:
-
-    normalize_saturation: Callable[[pp.ad.Operator], pp.ad.Operator]
-    """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-    normalize_saturation_deriv: Callable[[Phase], pp.ad.Scalar]
-    """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-    wetting: Phase
-    """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-    params: dict[str, Any]
-    """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-
-    def set_cap_press_constants(self) -> None:
-        # FIXME: Does it make sense to have all as :class:`~porepy.ad.Scalar`?
-        cap_press_constants: dict[str, Any] = self.params.get("cap_press_constants", {})
-        self._cap_press_model = cap_press_constants.get("model", None)
-        # Brooks-Corey model
-        self._entry_pressure: float = cap_press_constants.get("entry_pressure", 1.0)
-        self._n_b: int = cap_press_constants.get("n_b", 2)
-        # van Genuchten model
-        self._n_g: int = cap_press_constants.get("n_g", 2)
-        self._m_g: int = cap_press_constants.get("m_g", 2)
-        self._beta_g: float = cap_press_constants.get("beta_g", 1.0)
-        # linear model
-        self._cap_press_linear_param: float = cap_press_constants.get(
-            "linear_param", 1.0
-        )
-
-    def verify_cap_press_rel_perm_constants(self) -> None:
-        """Verify that the capillary pressure and relative permeability constants are
-        consistent.
-
-        """
-        ...
-
-    def cap_press(self, saturation_w: OperatorType) -> OperatorType:
-        r"""Capillary pressure function.
-
-        The following three models are implemented:
-
-        Brooks-Corey model
-        .. math::
-            p_c(\hat{S}_w)=p_e\hat{S}_w^{n_b}
-
-        Linear model
-        .. math::
-            p_c(\hat{S}_w)=c\hat{S}_w
-
-        van Genuchten model
-        .. math::
-            p_c(\hat{S}_w)=\frac{(\hat{S}_w^{m_g}-1)^{-n_g}}{\beta_g}
-
-        All three models are computed in terms of the normalized saturation
-        .. math::
-            \hat{S}_w=\frac{S_w - S_w^{min}}{S_w^{max} - S_w^{min}},
-
-        If none of the models is chosen, the capillary pressure is set to 0.
-
-        Parameters:
-            saturation_w: Wetting phase saturation. Can, e.g., be of instance
-            :class:`~porepy.ad.MixedDimensionalVariable` or
-            :class:`~porepy.ad.SparseArray` (for saturation boundary values).
-
-        """
-        s_normalized = self.normalize_saturation(
-            saturation_w, self.wetting, limit=True, epsilon=1e-7
-        )
-        s_normalized.set_name(f"{self.wetting.name}_s_normalized")
-        if self._cap_press_model == "Brooks-Corey":
-            entry_pressure = pp.ad.Scalar(self._entry_pressure, name="entry pressure")
-            p_c: OperatorType = entry_pressure * s_normalized ** pp.ad.Scalar(
-                -1 / self._n_b
-            )
-        elif self._cap_press_model == "linear":
-            cap_press_linear_param = pp.ad.Scalar(
-                self._cap_press_linear_param, name="cap. press. linear param"
-            )
-            p_c = cap_press_linear_param * s_normalized
-        elif self._cap_press_model == "van Genuchten":
-            beta_g = pp.ad.Scalar(self._beta_g)
-            p_c = (
-                (((s_normalized ** pp.ad.Scalar(-1 / self._m_g)) - pp.ad.Scalar(1)))
-                ** pp.ad.Scalar(1 / self._n_g)
-            ) / beta_g
-        else:
-            # Return cap. pressure 0.
-            p_c = pp.ad.Scalar(0) * s_normalized
-        p_c.set_name("cap. press.")
-        return p_c
-
-    def cap_press_deriv(self, saturation_w: OperatorType) -> OperatorType:
-        s_normalized = self.normalize_saturation(
-            saturation_w, phase=self.wetting, limit=True, epsilon=1e-7
-        )
-        s_normalized_deriv = self.normalize_saturation_deriv(self.wetting)
-        if self._cap_press_model == "Brooks-Corey":
-            entry_pressure = pp.ad.Scalar(self._entry_pressure)
-            return (
-                entry_pressure
-                * pp.ad.Scalar(-1 / self._n_b)
-                * s_normalized ** pp.ad.Scalar(-1 / self._n_b - 1)
-            ) * s_normalized_deriv
-        elif self._cap_press_model == "linear":
-            cap_press_linear_param = pp.ad.Scalar(self._cap_press_linear_param)
-            return cap_press_linear_param * s_normalized_deriv
-        elif self._cap_press_model == "van Genuchten":
-            beta_g = pp.ad.Scalar(self._beta_g)
-            return (
-                pp.ad.Scalar(1 / self._n_g - 1)
-                * (
-                    ((s_normalized ** pp.ad.Scalar(-1 / self._m_g)) - pp.ad.Scalar(1))
-                    ** pp.ad.Scalar(1 / self._n_g - 1)
-                )
-                / beta_g
-                * pp.ad.Scalar(-1 / self._m_g)
-                * (s_normalized ** pp.ad.Scalar(-1 / self._m_g - 1))
-                * s_normalized_deriv
-            )
-        else:
-            # Return cap. pressure 0.
-            return pp.ad.Scalar(0) * s_normalized
-        pass
 
 
 class DarcyFluxes:
@@ -453,10 +159,10 @@ class DarcyFluxes:
         )
         upwind = pp.ad.UpwindAd(phase.mobility_key, [g])
 
-        mobility = (
-            upwind.upwind() @ (self.rel_perm(saturation_w, phase) / viscosity)
-            + upwind.bound_transport_dir()
-            @ (self.rel_perm(saturation_w_bc, phase) / viscosity)
+        mobility = upwind.upwind() @ (
+            self.rel_perm(saturation_w, phase) / viscosity
+        ) + upwind.bound_transport_dir() @ (
+            self.rel_perm(saturation_w_bc, phase) / viscosity
         )
         mobility.set_name(f"{phase.name} mobility")
         # NOTE Alternatively to the current presciption of both phase fluxes at Neumann
@@ -493,18 +199,17 @@ class DarcyFluxes:
     def phase_flux(self, g: pp.Grid, phase: Phase) -> pp.ad.Operator:
         """Phase volume flux. Combines advective and buoyancy components.
 
-        Note: This misses the fluxes at the Neumann boundaries.
-
         SI Units: kg/s -> Depends on the units of the other parameters.
 
         """
         # Phase data.
         p_bc = pp.ad.DenseArray(self.bc_dirichlet_pressure_values(g, phase))
         vector_source = pp.ad.DenseArray(self.vector_source(g, phase))
+        flux_bc_neu = pp.ad.DenseArray(self.bc_neumann_flux_values(g, phase))
 
         # Discretizations.
         mpfa = pp.ad.MpfaAd(self.flux_key, [g])
-        upwind = pp.ad.UpwindAd(phase.mobility_key, [g])
+        upwind = pp.ad.UpwindAd(self.flux_key, [g])
 
         # Phase flux terms.
         p_diff: pp.ad.Operator = mpfa.flux() @ phase.p + mpfa.bound_flux() @ p_bc
@@ -513,13 +218,20 @@ class DarcyFluxes:
         # Phase mobility.
         mobility = self.phase_mobility(g, phase)
 
-        # Add together:
-        flux: pp.ad.Operator = mobility * (p_diff - flux_buoyancy)
+        # Add together.
+        flux: pp.ad.Operator = (
+            mobility * (p_diff - flux_buoyancy)
+            + upwind.bound_transport_neu() @ flux_bc_neu
+        )
         flux.set_name(f"{phase.name} volume flux")
         return flux
 
     def phase_potential(self, g: pp.Grid, phase: Phase) -> pp.ad.Operator:
-        """Phase potential flux. Combines advective and buoyancy components."""
+        """Phase potential flux. Combines advective and buoyancy components.
+
+        Note: This is zero at Neumann boundaries.
+
+        """
         # Phase data.
         p_bc = pp.ad.DenseArray(self.bc_dirichlet_pressure_values(g, phase))
         vector_source = pp.ad.DenseArray(self.vector_source(g, phase))
@@ -865,15 +577,15 @@ class EquationsTPF(pp.BalanceEquation):
         p_cap = self.cap_press(self.wetting.s)
         # p_cap_bc = pp.ad.DenseArray(self._bc_values_cap_press(g))
 
-        mobility_w = self.phase_mobility(g, self.wetting)
-        mobility_n = self.phase_mobility(g, self.nonwetting)
-        mobility_t = self.total_mobility(g)
+        mobility_w: pp.ad.Operator = self.phase_mobility(g, self.wetting)
+        mobility_n: pp.ad.Operator = self.phase_mobility(g, self.nonwetting)
+        mobility_t: pp.ad.Operator = self.total_mobility(g)
 
         # Ad equations
         if self.formulation == "fractional_flow":
             # Note, that for ``flux_t``, the total mobility is already included.
             flux_t = self.total_flux(g)
-            fractional_flow_w = mobility_w / mobility_t
+            fractional_flow_w: pp.ad.Operator = mobility_w / mobility_t
             vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
             vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
 
@@ -981,7 +693,6 @@ class VariablesTPF(pp.VariableMixin):
         self,
         saturation: pp.ad.Operator,
         phase: Optional[Phase] = None,
-        # TODO Make epsilon a keyword argument or not?
         limit: bool = False,
         epsilon: float = 0.0,
     ) -> pp.ad.Operator:
@@ -1361,7 +1072,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         self._max_saturation_change: float = 0.2
 
         # Data saving.
-        self.results: list[TwoPhaseFlowSaveData] = []
+        self.results: list[SaveDataTPF] = []
         """List of stored results from the convergence analysis."""
 
     def is_time_dependent(self) -> bool:
@@ -1562,23 +1273,25 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                 time_step=self.time_manager.time_index,
             )
 
-    # Nonlinear loop.
+    # region NONLINEAR LOOP
     def before_nonlinear_loop(self) -> None:
         """Set the starting estimate to the solution from the previous timestep."""
         self.time_manager._recomp_sol = False
-        self.nonlinear_solver_statistics.num_iteration = 0
+        self.nonlinear_solver_statistics.reset()
+
         assembled_variables = self.equation_system.get_variable_values(
             time_step_index=0
         )
         self.equation_system.set_variable_values(
             assembled_variables, iterate_index=0, additive=False
         )
-        if self._limit_saturation_change:
-            self._prev_saturation: np.ndarray = (
-                self.equation_system.get_variable_values(
-                    variables=[self.primary_saturation_var], time_step_index=0
-                )
-            )
+        # FIXME
+        # if self._limit_saturation_change:
+        #     self._prev_saturation: np.ndarray = (
+        #         self.equation_system.get_variable_values(
+        #             variables=[self.primary_saturation_var], time_step_index=0
+        #         )
+        #     )
 
     def before_nonlinear_iteration(self) -> None:
         """Compute Darcy flux based on previous pressure solution to determine upstream
@@ -1644,6 +1357,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         )
 
         # Evaluate and update secondary variables.
+        # TODO Shift this to a separate method.
         if self.formulation == "fractional_flow":
             secondary_pressure = self.equation_system.get_variables(
                 variables=[self.primary_pressure_var]
@@ -1686,6 +1400,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             errors: _description_
 
         """
+        # FIXME Call ``super().after_nonlinear_convergence()``?
         # If the saturation changes to much, decrease the time step and calculate again.
         if self._limit_saturation_change:
             new_saturation: np.ndarray = self.equation_system.get_variable_values(
@@ -1746,6 +1461,8 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         )
         logger.debug(f'{{"converged": {"false"}}}')
         raise ValueError("nonlinear iterations did not converge")
+
+    # endregion
 
     def after_simulation(self):
         pass

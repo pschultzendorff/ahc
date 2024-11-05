@@ -1,8 +1,9 @@
+from typing import Any
+
 import numpy as np
 import porepy as pp
 import pytest
-from typing import Any
-from tpf_lab.models.homotopy_continuation import adaptive_lambda
+from deprecated.homotopy_continuation import adaptive_lambda
 
 
 def test_adaptive_lambda_(

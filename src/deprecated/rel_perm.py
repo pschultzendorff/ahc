@@ -20,17 +20,14 @@ from tpf_lab.models.buckley_leverett import (
     BuckleyLeverettSemiAnalyticalSolution,
     BuckleyLeverettSolutionStrategy,
 )
-from tpf_lab.models.two_phase_flow import (
+from tpf_lab.models.flow_and_transport import (
     EquationsTPF,
     SolutionStrategyTPF,
     VariablesTPF,
 )
 from tpf_lab.numerics.ad.functions import ad_pow
 from tpf_lab.numerics.ad.functions import minimum as minimum_ad
-from tpf_lab.visualization.diagnostics import (
-    BuckleyLeverettDataSaving,
-    DiagnosticsMixinExtended,
-)
+from tpf_lab.visualization.diagnostics import DataSavingBL, DiagnosticsMixinExtended
 
 # Setup logging.
 logger = logging.getLogger(__name__)
@@ -121,7 +118,7 @@ class BuckleyLeverettPerturbedRelPermSetup(  # type: ignore
     BuckleyLeverettDefaultGeometry,
     #
     BuckleyLeverettSemiAnalyticalSolution,
-    BuckleyLeverettDataSaving,
+    DataSavingBL,
     VerificationUtils,
     DiagnosticsMixinExtended,
 ): ...

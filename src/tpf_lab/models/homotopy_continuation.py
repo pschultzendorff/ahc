@@ -1,510 +1,415 @@
-"""Homotopy continuations for the ``TwoPhaseFlow`` model."""
-
-import copy
+import json
 import logging
-import time
-from functools import partial
-from typing import Any, Callable, Optional
+from collections import namedtuple
+from dataclasses import dataclass
+from typing import Any, Callable, Literal, NamedTuple, Optional
 
 import numpy as np
 import porepy as pp
-import torch
-from tpf_lab.ml.nn import BaseNN
-from tpf_lab.ml.nn_ad import nn_wrapper
-from tpf_lab.models.two_phase_flow import EquationsTPF, SolutionStrategyTPF
-from tpf_lab.numerics.ad.functions import ad_pow
-from tpf_lab.numerics.ad.functions import minimum as minimum_ad
+import sympy as sym
+from porepy.utils.ui_and_logging import (
+    logging_redirect_tqdm_with_level as logging_redirect_tqdm,
+)
+from tpf_lab.constants_and_typing import REL_PERM_MODEL, OperatorType
+from tpf_lab.models.constitutive_laws_tpf import RelativePermeability, RelPermConstants
+from tpf_lab.models.flow_and_transport import RelativePermeability, SolutionStrategyTPF
+from tpf_lab.models.phase import Phase
+from tqdm.auto import trange
 
 logger = logging.getLogger(__name__)
 
 
-class HomotopyContinuationRelPermEquations(EquationsTPF):
-    _homotopy_continuation_param_ad: pp.ad.Scalar
-    """Parameter for the homotopy continuation."""
-    _rel_perm_w_init: Callable
-    """Initial rel. perm. for the homotopy continuation. I.e., the rel. perm. equals
-    this for :math:`k=1`.
+class HCSolverStatistics(pp.SolverStatistics):
+    hc_lambda_fl: float = 1.0
+    hc_lambda_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
+    hc_num_iteration: int = 0
 
-    Provided by a mixin of type ``TwoPhaseFlowEquations``.
+    def reset_hc(self) -> None:
+        """Reset the homotopy continuation statistics object."""
+        self.hc_num_iteration = 0
+        self.hc_lambda_fl = 1.0
+        self.hc_lambda_ad.set_value(1.0)
+
+    def save(self) -> None:
+        """Save the statistics object to a JSON file."""
+        if self.path is not None:
+            # Check if object exists and append to it
+            if self.path.exists():
+                with self.path.open("r") as file:
+                    data = json.load(file)
+            else:
+                data = {}
+
+            # Append data - assume the index corresponds to time step
+            ind = len(data) + 1
+            data[ind] = {
+                "nl_num_iteration": self.num_iteration,
+                "nl_increment_norms": self.nonlinear_increment_norms,
+                "nl_residual_norms": self.residual_norms,
+                "hc_num_iteration": self.hc_num_iteration,
+                "hc_lambda": self.hc_lambda_fl,
+            }
+
+            # Save to file
+            with self.path.open("w") as file:
+                json.dump(data, file, indent=4)
+
+
+class RelativePermeabilityHC(RelativePermeability):
+    """
+
+    FIXME: Have two different fluxes and add them (weighted) together instead of a
+    permeability that changes all the time. -> The system does not need to be assembled
+    at each continuation iteration.
 
     """
-    _rel_perm_w_goal: Callable
-    """Goal rel. perm. for the homotopy continuation. I.e., the rel. perm. equals this
-    for :math:`k=0`.
 
-    Provided by a mixin of type ``TwoPhaseFlowEquations``.
+    nonlinear_solver_statistics: HCSolverStatistics
+    """Homotopy continuation parameters. Normally provided by a mixin of instance
+    :class:`SolutionStrategyHC`."""
 
-    """
+    _rel_perm_constants_1: RelPermConstants
+    _rel_perm_constants_2: RelPermConstants
 
-    _rel_perm_n_init: Callable
-    """Initial rel. perm. for the homotopy continuation. I.e., the rel. perm. equals
-    this for :math:`k=1`.
+    def set_rel_perm_constants(self) -> None:
+        rel_perm_constants: dict[str, dict] = self.params.get("rel_perm_constants", {})
+        rel_perm_1_constants: dict[str, Any] = rel_perm_constants.get("model_1", {})
+        rel_perm_2_constants: dict[str, Any] = rel_perm_constants.get("model_2", {})
 
-    Provided by a mixin of type ``TwoPhaseFlowEquations``.
+        self._rel_perm_constants_1 = RelPermConstants.from_dict(rel_perm_1_constants)
+        self._rel_perm_constants_2 = RelPermConstants.from_dict(rel_perm_2_constants)
 
-    """
-    _rel_perm_n_goal: Callable
-    """Goal rel. perm. for the homotopy continuation. I.e., the rel. perm. equals this
-    for :math:`k=0`.
-
-    Provided by a mixin of type ``TwoPhaseFlowEquations``.
-
-    """
-
-    def _rel_perm_w(self) -> pp.ad.Operator:
-        r"""Homotopy continuation wetting phase relative permeability."""
+    def rel_perm(self, saturation_w: OperatorType, phase: Phase) -> OperatorType:
+        rel_perm_1: OperatorType = super().rel_perm(
+            saturation_w, phase, rel_perm_constants=self._rel_perm_constants_1
+        )
+        rel_perm_2: OperatorType = super().rel_perm(
+            saturation_w, phase, rel_perm_constants=self._rel_perm_constants_2
+        )
         return (
-            self._homotopy_continuation_param_ad * self._rel_perm_w_init()
-            + (pp.ad.Scalar(1) - self._homotopy_continuation_param_ad)
-            * self._rel_perm_w_goal()
-        )
-
-    def _rel_perm_n(self) -> pp.ad.Operator:
-        r"""Homotopy continuation nonwetting phase relative permeability."""
-        return (
-            self._homotopy_continuation_param_ad * self._rel_perm_n_init()
-            + (pp.ad.Scalar(1) - self._homotopy_continuation_param_ad)
-            * self._rel_perm_n_goal()
+            self.nonlinear_solver_statistics.hc_lambda_ad * rel_perm_1
+            + (pp.ad.Scalar(1) - self.nonlinear_solver_statistics.hc_lambda_ad)
+            * rel_perm_2
         )
 
 
-class HomotopyContinuationRelPermSolutionStrategy(SolutionStrategyTPF):
-    def __init__(self, params: Optional[dict] = None) -> None:
-        super().__init__(params)
-        if params is None:
-            params = {}
-        # Parameters for the homotopy continuation.
-        self._homotopy_continuation_param: float = 1
-        self._homotopy_continuation_param_ad: pp.ad.Scalar = pp.ad.Scalar(
-            self._homotopy_continuation_param
-        )
-        self._homotopy_continuation_param_min: float = params.get(
-            "homotopy_continuation_param_min", 0.0
-        )
-        self._homotopy_continuation_decay: float = params.get(
-            "homotopy_continuation_decay", 0.5
-        )
-        self.residuals_wrt_homotopy: list[float] = []
-        """Store the residuals of the equation w.r.t. the homotopy."""
-        self.residuals_wrt_goal_function: list[float] = []
-        r"""Store the residuals of the equation w.r.t. the goal function, i.e., w.r.t.
-        :math:`\lambda=0`."""
+class SolutionStrategyHC(SolutionStrategyTPF):
 
-    def before_nonlinear_loop(self) -> None:
-        # Reset continuation parameter.
-        self._homotopy_continuation_param = 1
+    transfer_solution: Callable
+    """Provided by a mixin of type :class:`Postprocessing`."""
+    extend_normal_fluxes: Callable
+    """Provided by a mixin of type :class:`Postprocessing`."""
+    reconstruct_potentials: Callable
+    """Provided by a mixin of type :class:`Postprocessing`."""
+    solid: pp.SolidConstants
+    permeability: Callable
+
+    nonlinear_solver_statistics: HCSolverStatistics
+    """Solver statistics for the homotopy continuation and nonlinear solver."""
+
+    # FIXME We need to store the global estimators as well. Should they be stored for
+    # each nonlinear iteration, each HC iteration or whatsoever?
+    residuals_wrt_homotopy: list[float] = []
+    """Store the residuals of the equation w.r.t. the current homotopy iteration."""
+    residuals_wrt_goal_function: list[float] = []
+    r"""Store the residuals of the equation w.r.t. the goal system, i.e., w.r.t.
+    :math:`\lambda = 0`."""
+
+    @property
+    def hc_indices(self) -> list[int]:
+        """Return the indices of the homotopy continuation variables."""
+        return [0]
+
+    def set_solver_statistics(self) -> None:
+        """Copied code from
+        :meth:`pp.solution_strategy.SolutionStrategy.set_solver_statistics` with changes
+        to ensure that :attr:`self.statistics` is of type :class:`HCSolverStatistics`.
+
+        """
+        # Retrieve the value with a default of pp.SolverStatistics
+        statistics = self.params.get("nonlinear_solver_statistics", HCSolverStatistics)
+        # Explicitly check if the retrieved value is a class and a subclass of
+        # pp.SolverStatistics for type checking.
+        if isinstance(statistics, type) and issubclass(statistics, HCSolverStatistics):
+            self.nonlinear_solver_statistics = statistics()
+        else:
+            raise ValueError(
+                f"Expected a subclass of HCSolverStatistics, got {statistics}."
+            )
+
+    # region HC LOOP
+    def before_hc_loop(self) -> None:
+        """Reset HC parameter and residuals."""
+        self.nonlinear_solver_statistics.reset_hc()
         # Reset residuals arrays.
         self.residuals_wrt_homotopy = []
         self.residuals_wrt_goal_function = []
-        # Update ad homotopy continuation parameter.
-        setattr(
-            self._homotopy_continuation_param_ad,
-            "_value",
-            self._homotopy_continuation_param,
+        # Set the starting estimate to the solution from the previous time step.
+        assembled_variables = self.equation_system.get_variable_values(
+            time_step_index=0
         )
-        return super().before_nonlinear_loop()
+        self.equation_system.set_variable_values(
+            assembled_variables, hc_index=0, additive=False
+        )
 
-    def before_nonlinear_iteration(self) -> None:
-        return super().before_nonlinear_iteration()
+    def before_hc_iteration(self) -> None:
+        pass
 
-    def after_nonlinear_iteration(self, solution: np.ndarray) -> None:
+    def after_hc_iteration(self, decay: float) -> None:
+        """Decay HC parameter and compute residuals."""
         # Compute residual (PorePys residual is actually the norm of the solution).
         b = self.linear_system[1]
         self.residuals_wrt_homotopy.append(float(np.linalg.norm(b)) / np.sqrt(b.size))
+
         # Set homotopy continuation param to zero, compute the residual and reset.
-        setattr(
-            self._homotopy_continuation_param_ad,
-            "_value",
-            0,
-        )
+        self.nonlinear_solver_statistics.hc_lambda_ad.set_value(0)
         self.assemble_linear_system()
         b = self.linear_system[1]
         self.residuals_wrt_goal_function.append(
             float(np.linalg.norm(b)) / np.sqrt(b.size)
         )
-        # Decay continuation parameter.
-        self._homotopy_continuation_param *= self._homotopy_continuation_decay
-        if self._homotopy_continuation_param <= self._homotopy_continuation_param_min:
-            self._homotopy_continuation_param = 0
-        # Update ad homotopy continuation parameter.
-        setattr(
-            self._homotopy_continuation_param_ad,
-            "_value",
-            self._homotopy_continuation_param,
+
+        # Decay HC parameter.
+        self.nonlinear_solver_statistics.hc_lambda_fl *= decay
+        self.nonlinear_solver_statistics.hc_lambda_ad.set_value(
+            self.nonlinear_solver_statistics.hc_lambda_fl
         )
+        self.nonlinear_solver_statistics.hc_num_iteration += 1
         logger.info(
-            f"Decayed homotopy_continuation_param to"
-            + f" {self._homotopy_continuation_param:.2f}"
+            f"Decayed hc_lambda to"
+            + f" {self.nonlinear_solver_statistics.hc_lambda_fl:.2f}"
         )
 
-        return super().after_nonlinear_iteration(solution)
+    def after_hc_convergence(self) -> None:
+        """Move to the next time step."""
+        self.equation_system.shift_time_step_values(
+            max_index=len(self.time_step_indices)
+        )
+        time_step_solution = self.equation_system.get_variable_values(hc_index=0)
+        self.equation_system.set_variable_values(
+            time_step_solution, time_step_index=0, additive=False
+        )
 
-    def check_convergence(
+        self.convergence_status = True
+        self._export()
+        logger.debug(f'{{"converged": {"true"}}}')
+        # Save data (and calculate L2 error only after the time step solution was
+        # distributed).
+        self.save_data_time_step(
+            # self.nonlinear_solver_statistics.residual_norms,
+            # self.nonlinear_solver_statistics.num_iteration,
+        )
+
+    def hc_check_convergence(
         self,
-        solution: np.ndarray,
-        prev_solution: np.ndarray,
-        init_solution: np.ndarray,
-        nl_params: dict[str, Any],
-    ) -> tuple[float, bool, bool]:
-        r"""Extend the convergence check of the super class s.t. it fails when only one
-        nonlinear iteration has passed.
+        hc_params: dict[str, Any],
+    ) -> bool:
+        """Calculate error estimators and stop if NHC error is small enough."""
+        if (
+            self.nonlinear_solver_statistics.hc_num_iteration
+            >= hc_params["hc_max_iterations"]
+        ):
+            logger.info(
+                f"Reached maximum number of homotopy continuation iterations "
+                f"{hc_params["hc_max_iterations"]}. Stopping homotopy continuation."
+            )
+            return True
+        elif (
+            self.nonlinear_solver_statistics.hc_lambda_fl <= hc_params["hc_lambda_min"]
+        ):
+            logger.info(
+                f"HC parameter decreased below minimal value"
+                f" {hc_params["hc_lambda_min"]}. Stopping homotopy continuation."
+            )
+            return True
+        else:
+            return False
+        # self.transfer_solution()
+        # self.extend_normal_fluxes()
+        # self.reconstruct_potentials()
+        # hc_error: float = self.HC_error_est()
+        # discr_error: float = self.discr_error_est()
+        # if hc_error <= self.hc.error_ratio * discr_error:
+        #     logger.info(
+        #         f"HC error {hc_error} smaller than {self.hc.error_ratio} * "
+        #         f"discr_error {discr_error}. Stopping homotopy continuation."
+        #     )
+        #     self.hc_is_converged = True
+        # else:
+        #     self.hc_is_converged = False
+        # return self.hc_is_converged
 
-        This is to ensure, that the homotopy continuation problem gets solved instead of
-        the problem at :math:`\lambda=1`, i.e. the initial problem of the homotopy
-        continuation.
+    # endregion
+
+    # region NONLINEAR LOOP
+    def before_nonlinear_loop(self) -> None:
+        """Set the starting estimate to the solution from the previous continuation
+        step."""
+        self.time_manager._recomp_sol = False
+        self.nonlinear_solver_statistics.reset()
+
+        assembled_variables = self.equation_system.get_variable_values(hc_index=0)
+        self.equation_system.set_variable_values(
+            assembled_variables, iterate_index=0, additive=False
+        )
+        # FIXME
+        # if self._limit_saturation_change:
+        #     self._prev_saturation: np.ndarray = (
+        #         self.equation_system.get_variable_values(
+        #             variables=[self.primary_saturation_var], time_step_index=0
+        #         )
+        #     )
+
+    def after_nonlinear_convergence(self) -> None:  # type: ignore
+        """Export and move to the next homotopy continuation step.
+
+        When ``self._limit_saturation_change == True``, check if the wetting saturation
+        has changed too much
+
+        """
+        # FIXME Call ``super().after_nonlinear_convergence()``?
+        # FIXME Limit saturation change.
+        # If the saturation changes to much, decrease the time step and calculate again.
+        # if self._limit_saturation_change:
+        #     new_saturation: np.ndarray = self.equation_system.get_variable_values(
+        #         variables=[self.primary_saturation_var], iterate_index=0
+        #     )
+        #     if (
+        #         np.max(np.abs(new_saturation - self._prev_saturation))
+        #         > self._max_saturation_change
+        #     ):
+        #         # This is set to false again in ``before_nonlinear_loop``.
+        #         # NOTE This is not a very nice solution, however, as of now I didn't
+        #         # find a way to pass ``recompute_solution`` to
+        #         # ``time_manager.compute_time_step()`` in ``run_time_dependent_model``
+        #         # without the code getting really messy.
+        #         self.time_manager._recomp_sol = True
+        #         self.convergence_status = False
+        #         logger.debug(
+        #             "Saturation grew to quickly. Trying again with a smaller time step."
+        #         )
+        #         return None
+
+        # Distribute primary variables.
+        # TODO At the moment this sets **all** iterate variables to the time step
+        # solution (also secondary variables). This should be changed.
+        # Secondary variables are not updated yet, so this will make things confusing.
+        self.equation_system.shift_hc_values(max_index=len(self.hc_indices))
+        hc_solution = self.equation_system.get_variable_values(iterate_index=0)
+        self.equation_system.set_variable_values(
+            hc_solution, hc_index=0, additive=False
+        )
+
+    # endregion
+    def HC_error_est(self) -> None:
+        """Calculate homotopy continuation error estimator.
+
+        Note: For now, we assume homogeneous Dirichlet and Neuman bc.
+
+        """
+        # TODO: Write this function.
+        pass
+
+    def discr_error_est(self) -> None:
+        """Calculate discretization error estimator.
+
+        Note: For now, we assume homogeneous Dirichlet and Neuman bc. The error is then
+        bounded by the sum of the residual estimator, the flux estimator, and the
+        nonconformity estimator. As we use cell-centered finite volumes, the flux
+        estimator is zero.
+
+        """
+        # TODO: Write this function.
+        pass
+
+    def residual_est(self) -> None:
+        """
+        TODO: Is this always zero for CCFV as suggested by chapter 8.4.2 of M. Vohralík,
+        “A posteriori error estimates for efficiency and error control in numerical
+        simulations”?
+
+        """
+        # TODO: Write this function.
+        pass
+
+    def total_error(self) -> None:
+        """Calculate total error by comparing with the exact solution."""
+        # TODO: Write this function.
+        pass
+
+
+class HCSolver:
+    def __init__(self, params=None) -> None:
+        if params is None:
+            params = {}
+
+        default_params: dict[str, Any] = {
+            "hc_max_iterations": 10,
+            "hc_lambda_min": 0.0,
+            "hc_lambda_decay": 0.9,
+            # Adaptivity parameters.
+            "hc_error_ratio": 0.05,
+        }
+        """Defines the ratio between the homotopy continuation error and the
+        discretization errror at which the Newton homotopy continuation is stopped.
+
+        FIXME Shift this to estimators?
+
+        """
+        default_params.update(params)
+        self.params = default_params
+        self.progress_bar_position: int = params.setdefault("progress_bar_position", 0)
+
+        params["progress_bar_position"] += 1
+        self.nonlinear_solver = pp.NewtonSolver(params)
+
+    def solve(self, model) -> bool:
+        """Solve the nonlinaer problem using the homotopy continuation (HC) algorithm.
 
         Parameters:
-            solution: Newly obtained solution vector prev_solution: Solution obtained in
-            the previous non-linear iteration. init_solution: Solution obtained from the
-            previous time-step. nl_params: Dictionary of parameters used for the
-            convergence check.
-                Which items are required will depend on the convergence test to be
-                implemented.
+            model: The model instance specifying the problem to be solved.
 
         Returns:
-            The method returns the following tuple:
-
-            float:
-                Error, computed to the norm in question.
-            boolean:
-                True if the solution is converged according to the test implemented by
-                this method.
-            boolean:
-                True if the solution is diverged according to the test implemented by
-                this method.
+            bool: ``True`` if the HC algorithm is converged.
 
         """
-        error, converged, diverged = super().check_convergence(
-            solution, prev_solution, init_solution, nl_params
-        )
-        if self._nonlinear_iteration == 1:
-            converged = False
-        return error, converged, diverged
+        hc_is_converged: bool = False
+        model.before_hc_loop()
 
+        def hc_step() -> None:
+            nonlocal hc_is_converged
+            model.before_hc_iteration()
+            self.nonlinear_solver.solve(model)
+            model.after_hc_iteration(self.params["hc_lambda_decay"])
+            hc_is_converged = model.hc_check_convergence(self.params)
 
-def adaptive_lambda() -> float:
-    r"""Implement the step-length adaptation for :math:`\lambda` introduced by "Brown, D.
-    A., & Zingg, D. W. (2016). A monolithic homotopy continuation algorithm with
-    application to computational fluid dynamics. "
-
-    Returns:
-        Updated value for :math:`\lambda`
-
-    """
-    pass
-
-
-class HomotopyContinuationRelPermEquations_LineartoNN(
-    HomotopyContinuationRelPermEquations
-):
-    _rel_perm_w_nn_function: Callable
-    """Wetting rel. perm. function by a neural network.
-
-    Provided by a mixin of type ``TwoPhaseFlowSolutionStrategy``.
-
-    """
-    _rel_perm_n_nn_function: Callable
-    """Nonwetting rel. perm. function by a neural network.
-
-    Provided by a mixin of type ``TwoPhaseFlowSolutionStrategy``.
-
-    """
-
-    def _rel_perm_w_init(self) -> pp.ad.Operator:
-        r"""Linear wetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
-        rel_perm = s_normalized * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
+        # Redirect the root logger, s.t. no logger interferes with the progressbars.
+        with logging_redirect_tqdm([logging.root]):
+            # Initialize a progress bar. Length is the number of maximal Newton
+            # iterations.
+            hc_progressbar = trange(  # type: ignore
+                self.params["hc_max_iterations"],
+                desc="HC loop",
+                position=self.progress_bar_position,
+                leave=False,
+                dynamic_ncols=True,
             )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
 
-    def _rel_perm_w_goal(self) -> pp.ad.Operator:
-        r"""Machine learned wetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm = self._rel_perm_w_nn_function(s_normalized)
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
+            while (
+                model.nonlinear_solver_statistics.hc_num_iteration
+                <= self.params["hc_max_iterations"]
+                and not hc_is_converged
+            ):
+                hc_progressbar.set_description_str(
+                    "HC iteration number "
+                    + f"{model.nonlinear_solver_statistics.hc_num_iteration + 1} of"
+                    + f" {self.params['hc_max_iterations']}"
+                )
+                hc_progressbar.set_postfix_str(
+                    f"lambda = {model.nonlinear_solver_statistics.hc_lambda_fl:.2f}"
+                )
+                hc_step()
+                hc_progressbar.update(n=1)
 
-    def _rel_perm_n_init(self) -> pp.ad.Operator:
-        r"""Linear nonwetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
-        rel_perm = (pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-    def _rel_perm_n_goal(self) -> pp.ad.Operator:
-        r"""Machine learned wetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm = self._rel_perm_n_nn_function(s_normalized)
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-
-class HomotopyContinuationRelPermEquations_LineartoPerturbedCorey(
-    HomotopyContinuationRelPermEquations
-):
-    """Wetting rel. perm. linear to perturbed. Nonwetting rel. perm linear to power."""
-
-    _yscales: list[float]
-    _xscales: list[float]
-    _offsets: list[float]
-
-    def _error_function_deriv(self) -> pp.ad.Operator:
-        """Returns the derivative of the error function w.r.t. the saturation.
-
-        This can be used to simulate perturbations in the cap. pressure and rel. perm.
-        models.
-
-        Returns:
-            Derivative of the error function in terms of :math:`S_w`.
-
-        """
-        s = self.equation_system.md_variable(self.saturation_var)
-        xscales = [pp.ad.Scalar(xscale) for xscale in self._xscales]
-        yscales = [pp.ad.Scalar(yscale) for yscale in self._yscales]
-        offsets = [pp.ad.Scalar(offset) for offset in self._offsets]
-        exp_func = pp.ad.Function(pp.ad.functions.exp, "exp")
-        square_func = pp.ad.Function(partial(ad_pow, exponent=2), "square")
-        error = pp.ad.Scalar(0) * s
-        for xscale, yscale, offset in zip(xscales, yscales, offsets):
-            error = error + yscale * exp_func(
-                pp.ad.Scalar(-1) * xscale * square_func(s - offset)
-            )
-        return error
-
-    def _rel_perm_w_init(self) -> pp.ad.Operator:
-        r"""Linear wetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
-        rel_perm = s_normalized * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-    def _rel_perm_w_goal(self) -> pp.ad.Operator:
-        r"""Wobbly wetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
-        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
-        rel_perm = cube_func(s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            rel_perm = minimum_func(maximum_func(rel_perm))
-        return rel_perm + self._error_function_deriv()
-
-    def _rel_perm_n_init(self) -> pp.ad.Operator:
-        r"""Linear nonwetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
-        rel_perm = (pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-    def _rel_perm_n_goal(self) -> pp.ad.Operator:
-        r"""Nonwetting phase relative permeability. Power model"""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
-        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
-        rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-
-class HomotopyContinuationRelPermEquations_PowertoPerturbedCorey(
-    HomotopyContinuationRelPermEquations_LineartoPerturbedCorey
-):
-    """Wetting rel. perm. power to perturbed power. Nonwetting rel. perm power to
-    power."""
-
-    def _rel_perm_w_init(self) -> pp.ad.Operator:
-        r"""Power wetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
-        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
-        rel_perm = cube_func(s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-    def _rel_perm_n_init(self) -> pp.ad.Operator:
-        r"""Power nonwetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
-        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
-        rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-
-class HomotopyContinuationRelPermEquations_ConcavetoPerturbedCorey(
-    HomotopyContinuationRelPermEquations_LineartoPerturbedCorey
-):
-    """Concave fractional flow function to perturbed power rel. perms.
-
-    Nonwetting rel. perm. is power to power. Wetting rel. perm. is linear to perturbed
-    power.
-
-    """
-
-    def _rel_perm_n_init(self) -> pp.ad.Operator:
-        r"""Power nonwetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
-        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
-        rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-
-class HomotopyContinuationRelPermEquations_LineartoPower(
-    HomotopyContinuationRelPermEquations
-):
-    def _rel_perm_w_init(self) -> pp.ad.Operator:
-        r"""Linear wetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
-        rel_perm = s_normalized * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-    def _rel_perm_w_goal(self) -> pp.ad.Operator:
-        r"""Wetting phase relative permeability. Power model"""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_w)
-        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
-        rel_perm = cube_func(s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_w_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_w_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-    def _rel_perm_n_init(self) -> pp.ad.Operator:
-        r"""Linear wonwetting phase relative permeability."""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
-        rel_perm = (pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
-
-    def _rel_perm_n_goal(self) -> pp.ad.Operator:
-        r"""Nonwetting phase relative permeability. Power model"""
-        s_normalized = self._s_normalized()
-        rel_perm_linear_param = pp.ad.Scalar(self._rel_perm_linear_param_n)
-        cube_func = pp.ad.Function(partial(ad_pow, exponent=3), "cube")
-        rel_perm = cube_func(pp.ad.Scalar(1) - s_normalized) * rel_perm_linear_param
-        if self._limit_rel_perm:
-            maximum_func = pp.ad.Function(
-                partial(pp.ad.functions.maximum, var_1=self._rel_perm_n_min), "max"
-            )
-            minimum_func = pp.ad.Function(
-                partial(minimum_ad, var_1=self._rel_perm_n_max), "min"
-            )
-            return minimum_func(maximum_func(rel_perm))
-        else:
-            return rel_perm
+        hc_progressbar.close()
+        return hc_is_converged

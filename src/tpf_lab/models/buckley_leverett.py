@@ -12,7 +12,7 @@ import sympy
 from buckley_leverett import analytical_solution, functions
 from porepy.utils.examples_utils import VerificationUtils
 from scipy import interpolate
-from tpf_lab.models.two_phase_flow import (
+from tpf_lab.models.flow_and_transport import (
     BoundaryConditionsTPF,
     EquationsTPF,
     SolutionStrategyTPF,
@@ -20,9 +20,9 @@ from tpf_lab.models.two_phase_flow import (
 )
 from tpf_lab.numerics.ad.functions import ad_pow
 from tpf_lab.visualization.diagnostics import (
-    BuckleyLeverettDataSaving,
-    BuckleyLeverettSaveData,
+    DataSavingBL,
     DiagnosticsMixinExtended,
+    SaveDataBL,
 )
 
 # Setup logging.
@@ -199,7 +199,7 @@ class BuckleyLeverettSolutionStrategy(SolutionStrategyTPF):
 
         # Data saving.
         # Ignore mypy complaining about incompatible type with superclass.
-        self.results: list[BuckleyLeverettSaveData] = []  # type: ignore
+        self.results: list[SaveDataBL] = []  # type: ignore
         """List of stored results from the convergence analysis."""
 
     def prepare_simulation(self) -> None:
@@ -400,7 +400,7 @@ class BuckleyLeverettSetup(  # type: ignore
     BuckleyLeverettDefaultGeometry,
     #
     BuckleyLeverettSemiAnalyticalSolution,
-    BuckleyLeverettDataSaving,
+    DataSavingBL,
     VerificationUtils,
     DiagnosticsMixinExtended,
 ): ...

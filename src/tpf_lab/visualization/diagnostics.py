@@ -19,7 +19,7 @@ else:
 
 
 @dataclass
-class TwoPhaseFlowSaveData:
+class SaveDataTPF:
     solution_norms: list[float]
     residuals_wrt_homotopy: list[float]
     residuals_wrt_goal_function: list[float]
@@ -27,12 +27,24 @@ class TwoPhaseFlowSaveData:
 
     iteration_counter: int
 
+    time_steps: list[float]
+    time_step_sizes: list[float]
+    time_indices: list[int]
+
     time: float
     time_index: int
 
 
 @dataclass
-class BuckleyLeverettSaveData(TwoPhaseFlowSaveData):
+class SaveDataHC:
+    hc_lambda: list[list[float]]
+    """:math:`lambda` for each time step and each homotopy continuation step."""
+    error_estimates: list[list[dict[str, np.ndarray]]]
+    """Local error estimates for each time step and each homotopy continuation step."""
+
+
+@dataclass
+class SaveDataBL(SaveDataTPF):
     l2_error: float
 
 
@@ -47,7 +59,7 @@ class DiagnosticsMixinExtended(pp.DiagnosticsMixin):
             plt.savefig(filename)
 
 
-class DataSavingTwoPhaseFlow(VerificationDataSaving):
+class DataSavingTPF(VerificationDataSaving):
     """Model class mixin to save residual and number of Newton iterations for each time
     step."""
 
@@ -75,7 +87,7 @@ class DataSavingTwoPhaseFlow(VerificationDataSaving):
         else:
             residuals_wrt_homotopy = [0] * iteration_counter
             residuals_wrt_goal_function = [0] * iteration_counter
-        return TwoPhaseFlowSaveData(
+        return SaveDataTPF(
             solution_norms=solution_norms,
             residuals_wrt_goal_function=residuals_wrt_goal_function,
             residuals_wrt_homotopy=residuals_wrt_homotopy,
@@ -85,7 +97,10 @@ class DataSavingTwoPhaseFlow(VerificationDataSaving):
         )
 
 
-class BuckleyLeverettDataSaving(DataSavingTwoPhaseFlow):
+class DataSavingHC(DataSavingTPF): ...
+
+
+class DataSavingBL(DataSavingTPF):
     """Model class mixin to save L2-error, residual and number of Newton iterations each
     time step.
 
@@ -153,7 +168,7 @@ class BuckleyLeverettDataSaving(DataSavingTwoPhaseFlow):
         else:
             residuals_wrt_homotopy = [0] * iteration_counter
             residuals_wrt_goal_function = [0] * iteration_counter
-        return BuckleyLeverettSaveData(
+        return SaveDataBL(
             solution_norms=solution_norms,
             residuals_wrt_goal_function=residuals_wrt_goal_function,
             residuals_wrt_homotopy=residuals_wrt_homotopy,

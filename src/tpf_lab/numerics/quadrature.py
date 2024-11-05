@@ -1,10 +1,10 @@
 import abc
 import logging
-import math
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional, Self
 
 import numpy as np
-import scipy as sp
+import porepy as pp
+import scipy.sparse as sps
 
 logger = logging.getLogger("__name__")
 
@@ -14,6 +14,36 @@ class Integral:
     def __init__(self, values: np.ndarray) -> None:
         self.shape: tuple = values.shape
         self._elementwise: np.ndarray = values
+
+    def __add__(self, other: Self) -> Self:
+        if self.shape == other.shape:
+            return Integral(self.elementwise + other.elementwise)
+        else:
+            raise ValueError(f"Shapes {self.shape} and {other.shape} not aligned.")
+
+    def __neg__(self, other: Self) -> Self:
+        if self.shape == other.shape:
+            return Integral(self.elementwise - other.elementwise)
+        else:
+            raise ValueError(f"Shapes {self.shape} and {other.shape} not aligned.")
+
+    def __mul__(self, other: Self | float) -> Self:
+        if isinstance(other, float):
+            return Integral(other * self.elementwise)
+        elif isinstance(other, Integral):
+            raise TypeError(
+                f"__mul__ not implemented for types {type(self)}"
+                + f" and {type(other)}."
+            )
+
+    def __rmul__(self, other: Self | float) -> Self:
+        if isinstance(other, float):
+            return Integral(other * self.elementwise)
+        elif isinstance(other, Integral):
+            raise TypeError(
+                f"__rmul__ not implemented for types {type(self)}"
+                + f" and {type(other)}."
+            )
 
     @property
     def elementwise(self) -> np.ndarray:
@@ -25,7 +55,7 @@ class Integral:
             self._elementwise = values
         else:
             raise ValueError(
-                f"values needs to have shape {self.shape}, not {values.shape}"
+                f"Values needs to have shape {self.shape}, not {values.shape}."
             )
 
     def sum(self) -> float:
@@ -47,7 +77,7 @@ class BaseScheme(abc.ABC):
     Now we only need to adjust for length/area/volume of :math:`K`. By the substitution
     formula for multivariate integration, it holds
 
-    ..math::
+    .. math::
         \int_{K} f(\mathbf{v})\, d\mathbf{v} =
         \int_{\varphi(K_{ref})} f(\mathbf{v})\, d\mathbf{v} =
         \int_{K_{ref})} f(\varphi(\mathbf{u})) \left|\det(D\varphi)(\mathbf{u})\right|
@@ -61,7 +91,7 @@ class BaseScheme(abc.ABC):
 
     Thus the quadrature scheme reads
 
-    ..math::
+    .. math::
         \int_{K} f(\mathbf{v})\, d\mathbf{v} \approx \frac{|K|}{|K_{ref}|} f(\varphi(X))
         \cdot W.
 
@@ -74,10 +104,16 @@ class BaseScheme(abc.ABC):
 
     """
 
-    _weights: np.ndarray
-    """``shape=(num_points,)``"""
     _points: np.ndarray
-    """``shape=(num_points, dim)``"""
+    """``shape=(num_ref_points, num_elements, dim)``"""
+    _volumes: np.ndarray
+    """``shape=(num_elements,)``"""
+
+    _reference_volume: float
+    _reference_points: np.ndarray
+    """``shape=(num_ref_points, dim)``"""
+    _weights: np.ndarray
+    """``shape=(num_ref_points,)``"""
 
     def __init__(self, degree: int = 2) -> None:
         self.degree: int = degree
@@ -85,7 +121,7 @@ class BaseScheme(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def transform(self, elements: np.ndarray, ref_points: np.ndarray) -> np.ndarray:
+    def transform(self, elements: np.ndarray) -> np.ndarray:
         """
 
         Note: We assume ``elements`` to have shape ``(num_vertices, num_elements, dim)``
@@ -95,7 +131,7 @@ class BaseScheme(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def volume_factor(self, elements: np.ndarray) -> np.ndarray:
+    def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
         pass
 
     @property
@@ -104,10 +140,42 @@ class BaseScheme(abc.ABC):
 
     @points.setter
     def points(self, points: np.ndarray) -> None:
-        self._points_setter(points)
+        self._points = points
+
+    @property
+    def volumes(self) -> np.ndarray:
+        return self._volumes
+
+    @volumes.setter
+    def volumes(self, volumes: np.ndarray) -> None:
+        self._volumes = volumes
+
+    @property
+    def reference_volume(self) -> float:
+        return self._reference_volume
+
+    @reference_volume.setter
+    def reference_volume(self, reference_volume: float) -> None:
+        self._reference_volume_setter(reference_volume)
 
     @abc.abstractmethod
-    def _points_setter(self, points: np.ndarray) -> None:
+    def _reference_volume_setter(
+        self, reference_volume: Optional[float] = None
+    ) -> None:
+        pass
+
+    @property
+    def reference_points(self) -> np.ndarray:
+        return self._reference_points
+
+    @reference_points.setter
+    def reference_points(self, reference_points: np.ndarray) -> None:
+        self._reference_points_setter(reference_points)
+
+    @abc.abstractmethod
+    def _reference_points_setter(
+        self, reference_points: Optional[np.ndarray] = None
+    ) -> None:
         pass
 
     @property
@@ -119,102 +187,163 @@ class BaseScheme(abc.ABC):
         self._weights_setter(weights)
 
     @abc.abstractmethod
-    def _weights_setter(self, weights: np.ndarray) -> None:
+    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
         pass
 
     def integrate(
-        self, func: Callable[[np.ndarray], np.ndarray], elements: np.ndarray
+        self,
+        func: Callable[[np.ndarray], np.ndarray],
+        elements: np.ndarray,
+        recalc_points: bool = True,
+        recalc_volumes: bool = True,
     ) -> Integral:
-        """Evalue the integral of ``func`` on all ``elements``.
+        """
+        Evaluate the integral of a function on all elements.
 
-        Note: We assume ``elements`` to have shape ``(num_vertices, num_elements, dim)``
-            and the array returned by ``self.transform`` to have shape
-            ``(num_ref_points, num_elements, dim)``.
-
-        Parameters:
-            func: Function to integrate.
-            elements ``shape=(num_vertices, num_elements, dim)``:
+        Args:
+            func (Callable[[np.ndarray], np.ndarray]): Function to integrate.
+            elements (np.ndarray): Elements to integrate over.
+            recalc_points (bool): Whether to recalculate the integration points.
+            recalc_volumes (bool): Whether to recalculate the volumes.
 
         Returns:
-            _description_
-
+            Integral: Integral object containing the integrated values.
         """
-        # TODO: Add vectorization with np.vectorize or numba or whatever makes this
-        # fast.
-        # Transform from reference domain.
-        x: np.ndarray = self.transform(elements, self.points)
-        volumes: np.ndarray = self.volume_factor(elements)
+        if not hasattr(self, "_points") or recalc_points:
+            self.points = self.transform(elements)
 
-        # Evaluate function and integral.
-        y: np.ndarray = func(x)
+        if not hasattr(self, "_volumes") or recalc_volumes:
+            self.volumes = self.calc_volumes(elements)
 
-        # Calculate product over `num_vertices` for `y`; `self.weights` is
-        # one-dimensional anyways.
-        values: np.ndarray = volumes * np.tensordot(self.weights, y, axes=([0], [0]))
+        y: np.ndarray = func(self.points)
+
+        values: np.ndarray = (self.volumes / self.reference_volume) * np.tensordot(
+            self.weights, y, axes=([0], [0])
+        )
         return Integral(values)
 
 
 class TrapezoidRule(BaseScheme):
-    """Trapezoid rule for 1D-intervals."""
+    """
+    Trapezoid rule for 1D-intervals.
+    """
 
     def __init__(self, degree: int = 2) -> None:
+        """
+        Initialize the TrapezoidRule class.
+
+        Args:
+            degree (int): Degree of the integration scheme.
+        """
         super().__init__(degree)
-        self._points_setter()
+        self._reference_volume_setter()
+        self._reference_points_setter()
         self._weights_setter()
 
-    def transform(
-        self, elements: np.ndarray, ref_points: Optional[np.ndarray] = None
-    ) -> np.ndarray:
-        """Return the endpoints of the goal elements."""
+    def transform(self, elements: np.ndarray) -> np.ndarray:
+        """
+        Return the endpoints of the goal elements.
+
+        Args:
+            elements (np.ndarray): Elements to transform.
+
+        Returns:
+            np.ndarray: Transformed integration points.
+        """
         return elements
 
-    def volume_factor(self, elements: np.ndarray) -> np.ndarray:
-        """Return lengths of the goal elements."""
+    def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
+        """
+        Return lengths of the goal elements.
+
+        Args:
+            elements (np.ndarray): Elements to calculate volumes for.
+
+        Returns:
+            np.ndarray: Volumes of the elements.
+        """
         return elements[1, ...] - elements[0, ...]
 
-    def _points_setter(self) -> None:
-        # TODO: Can the signature of the abstract base method just be overriden?
-        """Endpoints of the reference interval :math:`[0,1]`."""
-        self._points = np.array([0, 1])
+    def _reference_volume_setter(
+        self, reference_volumes: Optional[float] = None
+    ) -> None:
+        """
+        Set the volume of the reference element.
 
-    def _weights_setter(self) -> None:
-        # TODO: Can the signature of the abstract base method just be overriden?
+        Args:
+            reference_volumes (Optional[float]): Volume of the reference element.
+        """
+        self._reference_volume = 1.0
+
+    def _reference_points_setter(
+        self, reference_points: Optional[np.ndarray] = None
+    ) -> None:
+        """
+        Set the points on the reference element.
+
+        Args:
+            reference_points (Optional[np.ndarray]): Points on the reference element.
+        """
+        self._reference_points = np.array([0, 1])
+
+    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+        """
+        Set the weights for the integration points.
+
+        Args:
+            weights (Optional[np.ndarray]): Weights for the integration points.
+        """
         self._weights = np.array([0.5, 0.5])
 
 
 class SimpsonsRule(BaseScheme):
-    ...
-    # TODO
+    """
+    Simpson's rule for 1D-intervals.
+    """
+
+    # TODO: Implement SimpsonsRule
 
 
 class GaussLegendreQuadrature1D(BaseScheme):
-    """Gauss-Legendre quadrature rule for 1D-intervals.
+    """
+    Gauss-Legendre quadrature rule for 1D-intervals.
 
-    The reference domain is :math:`[-1,1]`. See
-    https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature.
-
+    The reference domain is :math:`[-1,1]`.
     """
 
     def __init__(self, degree: int = 2) -> None:
+        """
+        Initialize the GaussLegendreQuadrature1D class.
+
+        Args:
+            degree (int): Degree of the integration scheme.
+        """
         super().__init__(degree)
-        self._points_setter()
+        self._reference_volume_setter()
+        self._reference_points_setter()
         self._weights_setter()
 
-    def transform(self, elements: np.ndarray, ref_points: np.ndarray) -> np.ndarray:
+    def transform(self, elements: np.ndarray) -> np.ndarray:
         """
+        Transform integration points from the reference element to the goal element.
 
-        ..math::
+        Args:
+            elements (np.ndarray): Elements to transform.
 
+        Returns:
+            np.ndarray: Transformed integration points.
         """
         self.sanity_check(elements)
-        return (elements[1, ...] - elements[0, ...]) / 2 * ref_points.reshape(
-            -1, 1, 1
-        ) + (elements[1, ...] + elements[0, ...]) / 2
+        return (
+            elements[1, ...] - elements[0, ...]
+        ) / 2 * self.reference_points.reshape(-1, 1, 1) + (
+            elements[1, ...] + elements[0, ...]
+        ) / 2
 
-    def volume_factor(self, elements: np.ndarray) -> np.ndarray:
-        """Return lengths of the goal elements divided by length of ref element."""
+    def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
+        """Return lengths of the goal elements."""
         self.sanity_check(elements)
-        return (elements[1, ...] - elements[0, ...]) / 2
+        return elements[1, ...] - elements[0, ...]
 
     def sanity_check(self, elements: np.ndarray) -> None:
         """Assert that all elements satisfy the following assumptions:
@@ -229,11 +358,18 @@ class GaussLegendreQuadrature1D(BaseScheme):
             elements[0, :, 0] <= elements[1, :, 0]
         ), "Element vertices ordered wrongly."
 
-    def _points_setter(self) -> None:
-        """Integration points on the reference interval :math:`[-1,1]`."""
-        self._points = np.polynomial.legendre.leggauss(self.degree)[0]
+    def _reference_volume_setter(
+        self, reference_volumes: Optional[float] = None
+    ) -> None:
+        self._reference_volume = 2.0
 
-    def _weights_setter(self) -> None:
+    def _reference_points_setter(
+        self, reference_points: Optional[np.ndarray] = None
+    ) -> None:
+        """Integration points on the reference interval :math:`[-1,1]`."""
+        self._reference_points = np.polynomial.legendre.leggauss(self.degree)[0]
+
+    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
         r"""Integration weights on the reference interval :math:`[-1,1]`."""
         self._weights = np.polynomial.legendre.leggauss(self.degree)[1]
 
@@ -248,14 +384,15 @@ class GaussLegendreQuadrature2D(BaseScheme):
 
     def __init__(self, degree: int = 2) -> None:
         super().__init__(degree)
-        self._points_setter()
+        self._reference_volume_setter()
+        self._reference_points_setter()
         self._weights_setter()
 
-    def transform(self, elements: np.ndarray, ref_points: np.ndarray) -> np.ndarray:
+    def transform(self, elements: np.ndarray) -> np.ndarray:
         """
-        Note:We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
-            vertices of each element to be in the order top-left, top-right, bottom-left,
-            bottom-right.
+        Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
+            vertices of each element to be in the order top-left, top-right,
+            bottom-left, bottom-right.
 
         """
         self.sanity_check(elements)
@@ -269,23 +406,21 @@ class GaussLegendreQuadrature2D(BaseScheme):
                     x * (x2 - x1) * 0.5 + (x1 + x2) * 0.5,
                     y * (y2 - y1) * 0.5 + (y1 + y2) * 0.5,
                 ]
-                for x, y in ref_points
+                for x, y in self.reference_points
             ]
         )
 
-    def volume_factor(self, elements: np.ndarray) -> np.ndarray:
+    def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
         """
 
-        Note:We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
-            vertices of each element to be in the order top-left, top-right, bottom-left,
-            bottom-right.
+        Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
+            vertices of each element to be in the order top-left, top-right,
+            bottom-left, bottom-right.
 
         """
         self.sanity_check(elements)
-        return (
-            (elements[1, :, 0] - elements[0, :, 0])
-            * (elements[3, :, 1] - elements[2, :, 1])
-            / 4
+        return (elements[1, :, 0] - elements[0, :, 0]) * (
+            elements[3, :, 1] - elements[2, :, 1]
         )
 
     def sanity_check(self, elements: np.ndarray) -> None:
@@ -318,12 +453,19 @@ class GaussLegendreQuadrature2D(BaseScheme):
             elements[0, :, 1] <= elements[2, :, 1]
         ), "Element vertices ordered wrongly."
 
-    def _points_setter(self) -> None:
+    def _reference_volume_setter(
+        self, reference_volumes: Optional[float] = None
+    ) -> None:
+        self._reference_volume = 4.0
+
+    def _reference_points_setter(
+        self, reference_points: Optional[np.ndarray] = None
+    ) -> None:
         points_1d, _ = np.polynomial.legendre.leggauss(self.degree)
         xv, yv = np.meshgrid(points_1d, points_1d)
-        self._points = np.stack((xv, yv), axis=2).reshape(self.degree**2, 2)
+        self._reference_points = np.stack((xv, yv), axis=2).reshape(self.degree**2, 2)
 
-    def _weights_setter(self) -> None:
+    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
         _, weights_1d = np.polynomial.legendre.leggauss(self.degree)
         self._weights = np.outer(weights_1d, weights_1d).flatten()
 
@@ -338,10 +480,11 @@ class GaussLegendreQuadrature3D(BaseScheme):
 
     def __init__(self, degree: int = 2) -> None:
         super().__init__(degree)
-        self._points_setter()
+        self._reference_volume_setter()
+        self._reference_points_setter()
         self._weights_setter()
 
-    def transform(self, elements: np.ndarray, ref_points: np.ndarray) -> np.ndarray:
+    def transform(self, elements: np.ndarray) -> np.ndarray:
         """
         Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
             vertices of each element to be in the order top-left, top-right,
@@ -362,11 +505,11 @@ class GaussLegendreQuadrature3D(BaseScheme):
                     y * (y2 - y1) * 0.5 + (y1 + y2) * 0.5,
                     z * (z2 - z1) * 0.5 + (z1 + z2) * 0.5,
                 ]
-                for x, y, z in ref_points
+                for x, y, z in self.reference_points
             ]
         )
 
-    def volume_factor(self, elements: np.ndarray) -> np.ndarray:
+    def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
         """
 
         Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
@@ -379,7 +522,6 @@ class GaussLegendreQuadrature3D(BaseScheme):
             (elements[1, :, 0] - elements[0, :, 0])
             * (elements[3, :, 1] - elements[2, :, 1])
             * (elements[4, :, 2] - elements[0, :, 2])
-            / 8
         )
 
     def sanity_check(self, elements: np.ndarray) -> None:
@@ -440,12 +582,21 @@ class GaussLegendreQuadrature3D(BaseScheme):
             elements[0, :, 2] <= elements[5, :, 2]
         ), "Element vertices ordered wrongly."
 
-    def _points_setter(self) -> None:
+    def _reference_volume_setter(
+        self, reference_volumes: Optional[float] = None
+    ) -> None:
+        self._reference_volume = 8.0
+
+    def _reference_points_setter(
+        self, reference_points: Optional[np.ndarray] = None
+    ) -> None:
         points_1d, _ = np.polynomial.legendre.leggauss(self.degree)
         xv, yv, zv = np.meshgrid(points_1d, points_1d, points_1d)
-        self._points = np.stack((xv, yv, zv), axis=2).reshape(self.degree**3, 3)
+        self._reference_points = np.stack((xv, yv, zv), axis=2).reshape(
+            self.degree**3, 3
+        )
 
-    def _weights_setter(self) -> None:
+    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
         _, weights_1d = np.polynomial.legendre.leggauss(self.degree)
         self._weights = np.outer(weights_1d, weights_1d, weights_1d).flatten()
 
@@ -456,7 +607,16 @@ class GaussJacobiQuadrature(BaseScheme):
 
 
 class TriangleQuadrature(BaseScheme):
-    """... rule for triangles."""
+    r"""... rule for triangles.
+
+    FIXME Should we even allow for different reference triangles? This would also
+    require to change the points etc!
+
+    https://mathsfromnothing.au/triangle-quadrature-rules/
+
+    The reference triangle is :math:`\{(x,y) | 0 \leq x + y \leq 1\}` with area 1/2.
+
+    """
 
     _affine_coefficients: np.ndarray
     r"""``shape=(num_elements, 6)``. Coefficients for the affine transformation from the
@@ -468,10 +628,10 @@ class TriangleQuadrature(BaseScheme):
 
     """
     _A: np.ndarray
-    r"""``shape=(num_elements, dim=2, 2)``. Matrix for the affine transformation from the
-    reference element to each goal element.
+    r"""``shape=(num_elements, dim=2, 2)``. Matrix for the affine transformation from
+     the reference element to each goal element.
 
-    ..math::
+    .. math::
         A = 
         \begin{pmatrix}
             \varphi_{1,1} & \varphi_{1,2} \\
@@ -480,10 +640,10 @@ class TriangleQuadrature(BaseScheme):
 
     """
     _b: np.ndarray
-    r"""``shape=(num_elements, dim=2, 1)``. Vector for the affine transformation from the
-    reference element to each goal element.
+    r"""``shape=(num_elements, dim=2, 1)``. Vector for the affine transformation from
+     the reference element to each goal element.
 
-    ..math::
+    .. math::
         b = 
         \begin{pmatrix}
             \varphi_{1,3} \\
@@ -496,8 +656,9 @@ class TriangleQuadrature(BaseScheme):
 
     def __init__(self, degree: int = 2) -> None:
         super().__init__(degree)
-        self._vertices = np.array([[0, 0], [0, math.sqrt(2)], [math.sqrt(2), 0]])
-        self._points_setter()
+        self._vertices = np.array([[0, 0], [0, 1], [1, 0]])
+        self._reference_volume_setter()
+        self._reference_points_setter()
         self._weights_setter()
 
     def calc_affine_coefficients(
@@ -508,7 +669,7 @@ class TriangleQuadrature(BaseScheme):
 
         Solve equation systems to find coordinates of the affine transformation for each
         goal element. We have
-        ..math::
+        .. math::
             \varphi(x, y) =
             \begin{pmatrix}
                 \varphi_{1,1} & \varphi_{1,2} \\
@@ -521,7 +682,7 @@ class TriangleQuadrature(BaseScheme):
             \end{pmatrix}.
 
         To find :math:`\varphi_{i,j},` we solve
-        ..math::
+        .. math::
             \begin{pmatrix}
                 x_1 & y_1 & 1 \\
                 x_2 & y_2 & 1 \\
@@ -531,7 +692,7 @@ class TriangleQuadrature(BaseScheme):
             (\hat{x}_1, \hat{x}_2, \hat{x}_3)^T
 
         and
-        ..math::
+        .. math::
             \begin{pmatrix}
                 x_1 & y_1 & 1 \\
                 x_2 & y_2 & 1 \\
@@ -551,29 +712,30 @@ class TriangleQuadrature(BaseScheme):
         """
         if ref_element is None:
             ref_element = self._vertices
+
         # Compute coefficients of affine transformation to new x coordinate.
-        b_x: list[np.ndarray] = list(elements[..., 0].reshape(-1, 3))
+        b_x: list[np.ndarray] = list(elements[..., 0].transpose())
         # Matrix is the same for both the transformation to the new x and y coordinate.
-        A: list[np.ndarray] = [
-            np.tile(
-                np.stack(
-                    [
-                        ref_element[:, 0],
-                        ref_element[:, 1],
-                        np.ones(
-                            3,
-                        ),
-                    ],
-                    axis=-1,
+        A: np.ndarray = np.stack(
+            [
+                ref_element[:, 0],
+                ref_element[:, 1],
+                np.ones(
+                    3,
                 ),
-                (1, 2),
-            )
-        ] * len(b_x)
-        affine_coefficients_x: np.ndarray = np.array(np.linalg.solve(A, b_x))
+            ],
+            axis=-1,
+        )
+        # NOTE This is inefficient. We would ideally want to use a parallelized version.
+        affine_coefficients_x: np.ndarray = np.array(
+            [np.linalg.solve(A, b) for b in b_x]
+        )
 
         # Compute coefficients of affine transformation to new y coordinate.
-        b_y: list[np.ndarray] = list(elements[..., 1].reshape(-1, 3))
-        affine_coefficients_y: np.ndarray = np.array(np.linalg.solve(A, b_y))
+        b_y: list[np.ndarray] = list(elements[..., 1].transpose())
+        affine_coefficients_y: np.ndarray = np.array(
+            [np.linalg.solve(A, b) for b in b_y]
+        )
 
         self._affine_coefficients = np.concatenate(
             [affine_coefficients_x, affine_coefficients_y], axis=-1
@@ -586,39 +748,38 @@ class TriangleQuadrature(BaseScheme):
             ],
             axis=-2,
         )
-        self._b = np.expand_dims(self._affine_coefficients[..., [2, 5]], axis=-1)
+        self._b = self._affine_coefficients[..., [2, 5]][..., None]
 
-    def transform(
-        self, elements: np.ndarray, ref_points: Optional[np.ndarray] = None
-    ) -> np.ndarray:
+    def transform(self, elements: np.ndarray) -> np.ndarray:
         """Return integration points on the goal elements.
 
         Parameters:
             elements ``shape=(num_vertices=3,  num_elements, dim=2)``:
                 Vertices of goal elements.
-            ref_points ``shape=(num_ref_points, dim=2)``:
-                Integration points on reference element.
 
         Returns:
             transformed_points ``shape=(num_elements, num_ref_points, 2)
 
         """
-        if ref_points is None:
-            ref_points = self._points
-        if not self._affine_coefficients:
+        if not hasattr(self, "_affine_coefficients"):
             self.calc_affine_coefficients(elements)
+        # FIXME Make ``self._A`` and ``self._b`` be stored in the correct shape by
+        # default.
         transformed_points: np.ndarray = (
-            np.matmul(self._A, np.expand_dims(ref_points, axis=-1)).squeeze() + self._b
+            np.matmul(
+                self._A[None, ...], self.reference_points[:, None, :, None]
+            ).squeeze()
+            + self._b.squeeze()[None, ...]
         )
         return transformed_points
 
-    def volume_factor(self, elements: np.ndarray) -> np.ndarray:
+    def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
         r"""Return area of the goal elements.
 
         The area of a triangle with vertices :math:`(x_1, y_1), (x_2, y_2), (x_3, y_3)`
         is given by
 
-        ..math::
+        .. math::
             \frac{1}{2} \left[x_1(y_2 - y_3), + x_2(y_3 - y_1) + x_3(y_1 - y_2)\right]
 
         Parameters:
@@ -629,20 +790,118 @@ class TriangleQuadrature(BaseScheme):
 
         """
         return (
-            elements[0, :, 0] * (elements[1, :, 1] - elements[2, :, 1])
-            + elements[1, :, 0] * (elements[2, :, 1] - elements[0, :, 1])
-            + elements[2, :, 0] * (elements[0, :, 1] - elements[1, :, 1])
-        ) / 2
+            np.abs(
+                elements[0, :, 0] * (elements[1, :, 1] - elements[2, :, 1])
+                + elements[1, :, 0] * (elements[2, :, 1] - elements[0, :, 1])
+                + elements[2, :, 0] * (elements[0, :, 1] - elements[1, :, 1])
+            )
+            / 2
+        )
 
-    def _points_setter(self) -> None:
-        r"""Integration points on the reference triangle :math:`\{(x,y) | 0 \leq x,
-        x + y \leq \sqrt{2}\}` of area 1."""
-        self._points = np.array([0, 1])
+    def _reference_volume_setter(
+        self, reference_volumes: Optional[float] = None
+    ) -> None:
+        self._reference_volume = 0.5
 
-    def _weights_setter(self) -> None:
-        self._weights = np.array([0.5, 0.5])
+    def _reference_points_setter(
+        self, reference_points: Optional[np.ndarray] = None
+    ) -> None:
+        r"""Integration points on the reference triangle :math:`\{(x,y) | 0 \leq x + y
+        \leq 1\}` of area 1/2."""
+        if self.degree == 1:
+            self._reference_points = np.array([[1 / 3, 1 / 3]])
+        elif self.degree == 2:
+            self._reference_points = np.array(
+                [[1 / 6, 2 / 3], [1 / 6, 1 / 6], [1 / 6, 2 / 3]]
+            )
+        elif self.degree == 3:
+            self._reference_points = np.array(
+                [[1 / 3, 1 / 3], [0.2, 0.6], [0.2, 0.2], [0.6, 0.2]]
+            )
+        elif self.degree == 4:
+            self._reference_points = np.array(
+                [
+                    [0.445948490915965, 0.108103018168070],
+                    [0.445948490915965, 0.445948490915965],
+                    [0.108103018168070, 0.445948490915965],
+                    [0.091576213509771, 0.816847572980459],
+                    [0.091576213509771, 0.091576213509771],
+                    [0.816847572980459, 0.091576213509771],
+                ]
+            )
+
+    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+        if self.degree == 1:
+            self._weights = np.array([1 / 2])
+        elif self.degree == 2:
+            self._weights = np.array([1 / 6, 1 / 6, 1 / 6])
+        elif self.degree == 3:
+            self._weights = np.array([-9 / 32, 25 / 96, 25 / 96, 25 / 96])
+        elif self.degree == 4:
+            self._weights = np.array(
+                [
+                    0.1116907948390055,
+                    0.1116907948390055,
+                    0.1116907948390055,
+                    0.054975871827661,
+                    0.054975871827661,
+                    0.054975871827661,
+                ]
+            )
 
 
 class MonteCarloQuadrature(BaseScheme):
     ...
     # TODO
+
+
+def get_quadpy_elements(
+    sd: pp.Grid, grid_type: Literal["triangle", "cart"] = "triangle"
+) -> np.ndarray:
+    """
+    Assembles the elements of a given grid in quadpy format: https://pypi.org/project/quadpy/.
+
+    Parameters
+    ----------
+        sd (pp.Grid): PorePy grid.
+
+    Returns
+    --------
+    quadpy_elements (np.ndarray): Elements in QuadPy format.
+
+    Example
+    --------
+    >>> # shape (3, 5, 2), i.e., (corners, num_triangles, xy_coords)
+    >>> triangles = np.stack([
+            [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            [[1.2, 0.6], [1.3, 0.7], [1.4, 0.8]],
+            [[26.0, 31.0], [24.0, 27.0], [33.0, 28]],
+            [[0.1, 0.3], [0.4, 0.4], [0.7, 0.1]],
+            [[8.6, 6.0], [9.4, 5.6], [7.5, 7.4]]
+            ], axis=-2)
+    """
+    nodes_per_cell: int = sd.dim + 1 if grid_type == "triangle" else sd.dim * 2
+    # Renaming variables
+    nc = sd.num_cells
+
+    # Getting node coordinates for each cell
+    nodes_of_cell = sps.find(sd.cell_nodes().T)[1].reshape(nc, nodes_per_cell)
+    nodes_coor_cell = sd.nodes[:, nodes_of_cell]
+
+    # Stacking node coordinates
+    cnc_stckd = np.empty([nc, nodes_per_cell * sd.dim])
+    col = 0
+    for vertex in range(nodes_per_cell):
+        for dim in range(sd.dim):
+            cnc_stckd[:, col] = nodes_coor_cell[dim][:, vertex]
+            col += 1
+        element_coord = np.reshape(cnc_stckd, np.array([nc, nodes_per_cell, sd.dim]))
+
+    # Reshaping to please quadpy format i.e., (corners, num_elements, coords)
+    elements = np.stack(element_coord, axis=-2)  # type:ignore
+
+    # For some reason, quadpy needs a different formatting for line segments
+    if sd.dim == 1:
+        elements = elements.reshape(sd.dim + 1, sd.num_cells)
+
+    return elements

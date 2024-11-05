@@ -15,17 +15,17 @@ import warnings
 import numpy as np
 import porepy as pp
 from numba import config
+from tpf_lab.models.flow_and_transport import (
+    BoundaryConditionsTPF,
+    EquationsTPF,
+    TwoPhaseFlow,
+)
 from tpf_lab.models.phase import Phase, PhaseConstants
 from tpf_lab.models.reconstructions import (
     EquilibratedFluxMixin,
     PressureMixin,
     PressureReconstructionMixin,
-    ReconstructionSolutionStrategy,
-)
-from tpf_lab.models.two_phase_flow import (
-    BoundaryConditionsTPF,
-    EquationsTPF,
-    TwoPhaseFlow,
+    SolutionStrategyReconstructions,
 )
 
 # Disable numba JIT for debugging.
@@ -126,7 +126,7 @@ class ModifiedBoundaryConditions(BoundaryConditionsTPF):
 
 
 # class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): ...  # type: ignore
-class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, EquilibratedFluxMixin, PressureMixin, PressureReconstructionMixin, ReconstructionSolutionStrategy, TwoPhaseFlow): ...  # type: ignore
+class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, ModifiedBoundaryConditions, EquilibratedFluxMixin, PressureMixin, PressureReconstructionMixin, SolutionStrategyReconstructions, TwoPhaseFlow): ...  # type: ignore
 
 
 # Set up folder and files for logging/plots/saved time steps.

@@ -40,7 +40,7 @@ Thus, we need to always multiply the residual by -1.
 import numpy as np
 import porepy as pp
 import pytest
-from tpf_lab.models.two_phase_flow import (
+from tpf_lab.models.flow_and_transport import (
     BoundaryConditionsTPF,
     EquationsTPF,
     SolutionStrategyTPF,
