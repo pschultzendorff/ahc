@@ -236,44 +236,44 @@ class PressureMixin:
 
     def set_boundary_pressures(self) -> None:
         """Set boundary pressures for the global and complimentary pressure fields."""
-        for sd, _ in self.mdg.subdomains(return_data=True):
-            # TODO: This is a bit of a mess. Ideally, bc_dirichlet_pressure_values gets
-            # called with a boundary grid instead of a subdomain grid. Then we can loop
-            # through boundaries. Alternatively, we implement
-            # ``update_boundary_condition`` and ``create_boundary_operator`` in
-            # ``BoundaryConditionsTPF`` and get the pressure and saturation values from
-            # the data dictionary instead of calling the functions here.
-            p_w_bc = self.bc_dirichlet_pressure_values(sd, self.wetting)
-            s_w_bc = self.bc_dirichlet_saturation_values(sd, self.wetting)
+        sd = self.mdg.subdomains()[0]
+        # TODO: This is a bit of a mess. Ideally, bc_dirichlet_pressure_values gets
+        # called with a boundary grid instead of a subdomain grid. Then we can loop
+        # through boundaries. Alternatively, we implement
+        # ``update_boundary_condition`` and ``create_boundary_operator`` in
+        # ``BoundaryConditionsTPF`` and get the pressure and saturation values from
+        # the data dictionary instead of calling the functions here.
+        p_w_bc = self.bc_dirichlet_pressure_values(sd, self.wetting)
+        s_w_bc = self.bc_dirichlet_saturation_values(sd, self.wetting)
 
-            # Compute global and complimentary pressures on boundaries.
-            p_g_bc = self.global_pressure(p_w_bc, s_w_bc)
-            p_c_bc = self.complimentary_pressure(s_w_bc)
+        # Compute global and complimentary pressures on boundaries.
+        p_g_bc = self.global_pressure(p_w_bc, s_w_bc)
+        p_c_bc = self.complimentary_pressure(s_w_bc)
 
-            # TODO See change above. If we loop over boundaries, we do not need to do
-            # this next construction.
-            bg, bg_data = next(iter(self.mdg.boundaries(return_data=True)))
-            for pressure_key, values in zip(
-                [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE], [p_g_bc, p_c_bc]
-            ):
-                # pp.shift_solution_values(
-                #     name=pressure_key,
-                #     data=bd,
-                #     location=pp.TIME_STEP_SOLUTIONS,
-                #     max_index=len(self.time_step_indices),
-                # )
-                pp.set_solution_values(
-                    name=pressure_key,
-                    values=bg.projection() @ values,
-                    data=bg_data,
-                    time_step_index=0,
-                )
-                pp.set_solution_values(
-                    name=pressure_key,
-                    values=bg.projection() @ values,
-                    data=bg_data,
-                    iterate_index=0,
-                )
+        # TODO See change above. If we loop over boundaries, we do not need to do
+        # this next construction.
+        bg, bg_data = self.mdg.boundaries(return_data=True)[0]
+        for pressure_key, values in zip(
+            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE], [p_g_bc, p_c_bc]
+        ):
+            # pp.shift_solution_values(
+            #     name=pressure_key,
+            #     data=bd,
+            #     location=pp.TIME_STEP_SOLUTIONS,
+            #     max_index=len(self.time_step_indices),
+            # )
+            pp.set_solution_values(
+                name=pressure_key,
+                values=bg.projection() @ values,
+                data=bg_data,
+                time_step_index=0,
+            )
+            pp.set_solution_values(
+                name=pressure_key,
+                values=bg.projection() @ values,
+                data=bg_data,
+                iterate_index=0,
+            )
 
 
 class PressureReconstructionMixin:
@@ -285,7 +285,7 @@ class PressureReconstructionMixin:
     flux_key: str
     total_mobility: Callable[[pp.Grid], pp.ad.Operator]
     equation_system: pp.ad.EquationSystem
-    phases: list[Phase]
+    phases: dict[str, Phase]
     wetting: Phase
     nonwetting: Phase
 
@@ -303,287 +303,278 @@ class PressureReconstructionMixin:
     def reconstruct_pressure_vohralik(
         self,
         pressure_key: Literal[GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-        # flux_name: Literal[
-        #     "inverse_mobility_times_total", "inverse_mobility_times_complimentary"
-        # ],
+        flux_specifier: str = "",
     ) -> None:
         """Reconstruct pressure as elementwise P2 polynomials.
 
         Parameters:
+            flux_specifier: Specify the name of the flux field used to post-process the
+                pressure. Used, e.g., in homotopy continuation, where the fluxes used
+                are ``f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs"`` instead of
+                ``f"{flux_name}_flux_RT0_coeffs"``.
+                Gets appended between ``f"{flux_name}_flux"`` and ``"_RT0_coeffs"``,
+                i.e., the values ``f"{flux_name}_flux{flux_specifier}_RT0_coeffs"`` in
+                the data dir are accessed.
 
         Returns:
             None
 
         """
         logger.info(f"Reconstrucing {pressure_key} pressure.")
-        # FIXME Does it make sense to combine subdomains and boundaries like this?
-        for sd, sd_data, bg, bg_data in zip(
-            *zip(*self.mdg.subdomains(return_data=True)),
-            *zip(*self.mdg.boundaries(return_data=True)),
-        ):
-            # Retrieve finite volume cell-centered pressures.
-            p_cc = pp.get_solution_values(pressure_key, sd_data, iterate_index=0)
-            assert p_cc.size == sd.num_cells
 
-            # Retrieve RT0 flux coefficients.
-            # coeffs_flux = pp.get_solution_values(
-            #     f"{flux_name}_flux_RT0_coeffs", sd_data, iterate_index=0
-            # )
-            phase_mobilities: dict[str, np.ndarray] = {
+        sd, sd_data = self.mdg.subdomains(return_data=True)[0]
+        bg, bg_data = self.mdg.boundaries(return_data=True)[0]
+
+        # Retrieve finite volume cell-centered pressures.
+        p_cc = pp.get_solution_values(pressure_key, sd_data, iterate_index=0)
+        assert p_cc.size == sd.num_cells
+
+        # Retrieve RT0 flux coefficients.
+        phase_mobilities: dict[str, np.ndarray] = {
+            phase.name: pp.get_solution_values(
+                f"{phase.name}_mobility", sd_data, iterate_index=0
+            )
+            for phase in self.phases.values()
+        }
+        if pressure_key == GLOBAL_PRESSURE:
+            coeffs_flux = pp.get_solution_values(
+                f"total_flux{flux_specifier}_RT0_coeffs", sd_data, iterate_index=0
+            )
+        elif pressure_key == COMPLIMENTARY_PRESSURE:
+            coeffs_phase_fluxes: dict[str, np.ndarray] = {
                 phase.name: pp.get_solution_values(
-                    f"{phase.name}_mobility", sd_data, iterate_index=0
+                    f"{phase.name}_flux{flux_specifier}_RT0_coeffs",
+                    sd_data,
+                    iterate_index=0,
                 )
-                for phase in self.phases
+                for phase in self.phases.values()
             }
-            if pressure_key == GLOBAL_PRESSURE:
-                coeffs_flux = pp.get_solution_values(
-                    f"total_flux_RT0_coeffs", sd_data, iterate_index=0
-                )
-            elif pressure_key == COMPLIMENTARY_PRESSURE:
-                coeffs_phase_fluxes: dict[str, np.ndarray] = {
-                    phase.name: pp.get_solution_values(
-                        f"{phase.name}_flux_RT0_coeffs", sd_data, iterate_index=0
-                    )
-                    for phase in self.phases
-                }
-                coeffs_flux = sum(
-                    [
-                        coeffs_phase_fluxes[phase_1.name]
-                        * phase_mobilities[phase_2.name][..., None]
-                        for phase_1, phase_2 in zip(self.phases, self.phases[::-1])
-                    ]
-                )
-
-            # Only multiply by inverse of the permeability if we are using the total
-            # flux.
-            # if flux_name == "inverse_mobility_times_total":
-            #     perm = sd_data[pp.PARAMETERS][self.flux_key][
-            #         "second_order_tensor"
-            #     ].values
-            # elif flux_name == "inverse_mobility_times_complimentary":
-            #     perm = np.repeat(np.eye(3)[..., None], sd.num_cells, axis=-1)
-            total_mobility: np.ndarray = sum(phase_mobilities.values())
-            if pressure_key == GLOBAL_PRESSURE:
-                perm = sd_data[pp.PARAMETERS][self.flux_key][
-                    "second_order_tensor"
-                ].values
-            elif pressure_key == COMPLIMENTARY_PRESSURE:
-                perm = np.repeat(np.eye(3)[..., None], sd.num_cells, axis=-1)
-
-            # Loop through all cells and compute the vector r.
-            s = np.zeros((sd.num_cells, 6))
-            for ci in range(sd.num_cells):
-                # Local permeability tensor
-                K = perm[: sd.dim, : sd.dim, ci] * total_mobility[ci]
-                Kxx = K[0][0]
-                Kxy = K[0][1]
-                Kyy = K[1][1]
-
-                # Retrieve components of the RT0 local flux field.
-                a = coeffs_flux[ci][0]
-                b = coeffs_flux[ci][1]
-                c = coeffs_flux[ci][2]
-
-                # Compute components of vector post-processed pressure.
-                s[ci][0] = (a * Kyy) / (2 * (Kxy**2 - Kxx * Kyy))  # x^2
-                # NOTE If K is a scalar, the following term will vanish.
-                s[ci][1] = (a * Kxy) / (Kxx * Kyy - Kxy**2)  # xy
-                s[ci][2] = (Kxy * c - Kyy * b) / (Kxx * Kyy - Kxy**2)  # x
-                s[ci][3] = (a * Kxx) / (2 * (Kxy**2 - Kxx * Kyy))  # y^2
-                s[ci][4] = (Kxx * c - Kxy * b) / (Kxy**2 - Kxx * Kyy)  # y
-
-            # To obtain the constant c_5, we solve  c_5 = p_h - 1/|K| (gamma(x, y), 1)_K,
-            # where s(x, y) = gamma(x, y) + c_5.
-            def integrand(x):
-                # FIXME Not sure if this is correct. In the original code, ``x`` seems
-                # to be an array of shape ``(2,)`` while ``r2c(s[:, 0])`` has shape
-                # ``(num_cells,1)``. Does one integrate a ``num_cells``-dimensional
-                # vector over each cell? Is this some hidden quadpy behavior?
-                # **Or was ``x`` of shape ``(2, num_cells)``?** This would not make
-                # sense with how I understand squadpy to work. Also,
-                # ``r2c(s[:, 0]) * x[0] ** 2`` would then have shape
-                # ``(num_cells, num_cells)``
-                # int_0 = r2c(s[:, 0]) * x[0] ** 2
-                # int_1 = r2c(s[:, 1]) * x[0] * x[1]
-                # int_2 = r2c(s[:, 2]) * x[0]
-                # int_3 = r2c(s[:, 3]) * x[1] ** 2
-                # int_4 = r2c(s[:, 4]) * x[1]
-                int_0 = s[:, 0][None, ...] * x[..., 0] ** 2
-                int_1 = s[:, 1][None, ...] * x[..., 0] * x[..., 1]
-                int_2 = s[:, 2][None, ...] * x[..., 0]
-                int_3 = s[:, 3][None, ...] * x[..., 1] ** 2
-                int_4 = s[:, 4][None, ...] * x[..., 1]
-                return int_0 + int_1 + int_2 + int_3 + int_4
-
-            integral: Integral = self.quadrature_simplex.integrate(
-                integrand,
-                self.quadpy_elements,
-                recalc_points=False,
-                recalc_volumes=False,
+            coeffs_flux = (
+                phase_mobilities[self.nonwetting.name][..., None]
+                * coeffs_phase_fluxes[self.wetting.name]
+                - phase_mobilities[self.wetting.name][..., None]
+                * coeffs_phase_fluxes[self.nonwetting.name]
             )
 
-            # Now, we can compute the constant C, one per cell.
-            s[:, 5] = p_cc - integral.elementwise / sd.cell_volumes
+        # Multiply by inverse of the permeability and total mobility to obtain
+        # pressure potential.
+        total_mobility: np.ndarray = sum(phase_mobilities.values())
+        perm = sd_data[pp.PARAMETERS][self.flux_key]["second_order_tensor"].values
 
-            # Store post-processed but not equilibrated pressure at the nodes.
+        # Loop through all cells and compute the vector r.
+        s = np.zeros((sd.num_cells, 6))
+        for ci in range(sd.num_cells):
+            # Local permeability tensor
+            K = perm[: sd.dim, : sd.dim, ci] * total_mobility[ci]
+            Kxx = K[0][0]
+            Kxy = K[0][1]
+            Kyy = K[1][1]
+
+            # Retrieve components of the RT0 local flux field.
+            a = coeffs_flux[ci][0]
+            b = coeffs_flux[ci][1]
+            c = coeffs_flux[ci][2]
+
+            # Compute components of vector post-processed pressure.
+            s[ci][0] = (a * Kyy) / (2 * (Kxy**2 - Kxx * Kyy))  # x^2
+            # NOTE If K is a scalar, the following term will vanish.
+            s[ci][1] = (a * Kxy) / (Kxx * Kyy - Kxy**2)  # xy
+            s[ci][2] = (Kxy * c - Kyy * b) / (Kxx * Kyy - Kxy**2)  # x
+            s[ci][3] = (a * Kxx) / (2 * (Kxy**2 - Kxx * Kyy))  # y^2
+            s[ci][4] = (Kxx * c - Kxy * b) / (Kxy**2 - Kxx * Kyy)  # y
+
+        # To obtain the constant c_5, we solve  c_5 = p_h - 1/|K| (gamma(x, y), 1)_K,
+        # where s(x, y) = gamma(x, y) + c_5.
+        def integrand(x):
+            # FIXME Not sure if this is correct. In the original code, ``x`` seems
+            # to be an array of shape ``(2,)`` while ``r2c(s[:, 0])`` has shape
+            # ``(num_cells,1)``. Does one integrate a ``num_cells``-dimensional
+            # vector over each cell? Is this some hidden quadpy behavior?
+            # **Or was ``x`` of shape ``(2, num_cells)``?** This would not make
+            # sense with how I understand squadpy to work. Also,
+            # ``r2c(s[:, 0]) * x[0] ** 2`` would then have shape
+            # ``(num_cells, num_cells)``
+            # int_0 = r2c(s[:, 0]) * x[0] ** 2
+            # int_1 = r2c(s[:, 1]) * x[0] * x[1]
+            # int_2 = r2c(s[:, 2]) * x[0]
+            # int_3 = r2c(s[:, 3]) * x[1] ** 2
+            # int_4 = r2c(s[:, 4]) * x[1]
+            int_0 = s[:, 0][None, ...] * x[..., 0] ** 2
+            int_1 = s[:, 1][None, ...] * x[..., 0] * x[..., 1]
+            int_2 = s[:, 2][None, ...] * x[..., 0]
+            int_3 = s[:, 3][None, ...] * x[..., 1] ** 2
+            int_4 = s[:, 4][None, ...] * x[..., 1]
+            return int_0 + int_1 + int_2 + int_3 + int_4
+
+        integral: Integral = self.quadrature_simplex.integrate(
+            integrand,
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+
+        # Now, we can compute the constant C, one per cell.
+        s[:, 5] = p_cc - integral.elementwise / sd.cell_volumes
+
+        # Store post-processed but not equilibrated pressure at the nodes.
+        pp.shift_solution_values(
+            f"{pressure_key}_postprocessed_coeffs",
+            sd_data,
+            pp.ITERATE_SOLUTIONS,
+            max_index=len(self.iterate_indices),
+        )
+        pp.set_solution_values(
+            f"{pressure_key}_postprocessed_coeffs",
+            s,
+            sd_data,
+            iterate_index=0,
+        )
+
+        # The following step is now to apply the Oswald interpolator
+
+        # Sanity check
+        if not s.shape == (sd.num_cells, 6):
+            raise ValueError("Wrong shape of P2 polynomial.")
+
+        # Abbreviations
+        dim = sd.dim
+        nn = sd.num_nodes
+        nf = sd.num_faces
+        nc = sd.num_cells
+
+        # Mappings
+        cell_faces_map = sps.find(sd.cell_faces.T)[1]
+        cell_nodes_map = sps.find(sd.cell_nodes().T)[1]
+        faces_of_cell = cell_faces_map.reshape(nc, dim + 1)
+        nodes_of_cell = cell_nodes_map.reshape(nc, dim + 1)
+
+        # Treatment of the nodes
+        # Evaluate post-processed pressure at the nodes
+        nodes_p = np.zeros([nc, 3])
+        nx = sd.nodes[0][nodes_of_cell]  # local node x-coordinates
+        ny = sd.nodes[1][nodes_of_cell]  # local node y-coordinates
+
+        # Compute node pressures
+        for col in range(dim + 1):
+            nodes_p[:, col] = (
+                s[:, 0] * nx[:, col] ** 2  # c0x^2
+                + s[:, 1] * nx[:, col] * ny[:, col]  # c1xy
+                + s[:, 2] * nx[:, col]  # c2x
+                + s[:, 3] * ny[:, col] ** 2  # c3y^2
+                + s[:, 4] * ny[:, col]  # c4y
+                + s[:, 5]  # c5
+            )
+
+        # Average nodal pressure
+        node_cardinality = np.bincount(cell_nodes_map)
+        node_pressure = np.zeros(nn)
+        for col in range(dim + 1):
+            node_pressure += np.bincount(
+                nodes_of_cell[:, col], weights=nodes_p[:, col], minlength=nn
+            )
+        node_pressure /= node_cardinality
+
+        # Treatment of the faces
+        # Evaluate post-processed pressure at the face-centers
+        faces_p = np.zeros([nc, 3])
+        fx = sd.face_centers[0][faces_of_cell]  # local face-center x-coordinates
+        fy = sd.face_centers[1][faces_of_cell]  # local face-center y-coordinates
+
+        for col in range(3):
+            faces_p[:, col] = (
+                s[:, 0] * fx[:, col] ** 2  # c0x^2
+                + s[:, 1] * fx[:, col] * fy[:, col]  # c1xy
+                + s[:, 2] * fx[:, col]  # c2x
+                + s[:, 3] * fy[:, col] ** 2  # c3y^2
+                + s[:, 4] * fy[:, col]  # c4x
+                + s[:, 5]  # c5
+            )
+
+        # Average face pressure
+        face_cardinality = np.bincount(cell_faces_map)
+        face_pressure = np.zeros(nf)
+        for col in range(3):
+            face_pressure += np.bincount(
+                faces_of_cell[:, col], weights=faces_p[:, col], minlength=nf
+            )
+        face_pressure /= face_cardinality
+
+        # Treatment of the boundary points
+        bc = sd_data[pp.PARAMETERS][self.flux_key]["bc"]
+
+        bc_dir_values = np.zeros(nf)
+        # TODO Not needed because we have only one grid!
+        external_dirichlet_boundary = np.logical_and(
+            bc.is_dir, sd.tags["domain_boundary_faces"]
+        )
+        bc_pressure = bg_data[pp.ITERATE_SOLUTIONS][pressure_key][0]
+        # Is this wrong?
+        bg_dir_filter: np.ndarray = (bg.projection() @ self.bc_type(sd).is_dir) == 1
+        # bg_dir_filter = (
+        #     bg_data[pp.ITERATE_SOLUTIONS]["bc_values_darcy_filter_dir"][0] == 1
+        # )
+        bc_dir_values[external_dirichlet_boundary] = bc_pressure[bg_dir_filter]
+        face_pressure[external_dirichlet_boundary] = bc_dir_values[
+            external_dirichlet_boundary
+        ]
+
+        # Boundary values at the nodes
+        face_vec = np.zeros(nf)
+        face_vec[external_dirichlet_boundary] = 1
+        num_dir_face_of_node = sd.face_nodes * face_vec
+        is_dir_node = num_dir_face_of_node > 0
+        face_vec *= 0
+        face_vec[external_dirichlet_boundary] = bc_dir_values[
+            external_dirichlet_boundary
+        ]
+        node_val_dir = sd.face_nodes * face_vec
+        node_val_dir[is_dir_node] /= num_dir_face_of_node[is_dir_node]
+        node_pressure[is_dir_node] = node_val_dir[is_dir_node]
+
+        # Prepare for exporting
+        point_val = np.column_stack(
+            [node_pressure[nodes_of_cell], face_pressure[faces_of_cell]]
+        )
+        point_coo = np.empty([dim, nc, 6])
+        point_coo[0] = np.column_stack([nx, fx])
+        point_coo[1] = np.column_stack([ny, fy])
+
+        # Solve local systems of equation to obtain the coefficients of the
+        # reconstructed pressure from the points coordinates and values.
+        # TODO Is there an easier way to do this WHILE reconstructing the pressure?
+        # TODO Store these at the end of each time step.
+        A_elements: np.ndarray = np.stack(
+            [
+                point_coo[0] ** 2,  # x^2
+                point_coo[0] * point_coo[1],  # xy
+                point_coo[0],  # x
+                point_coo[1] ** 2,  # y^2
+                point_coo[1],  # y
+                np.ones_like(point_coo[0]),  # constant
+            ],
+            -1,
+        )
+        coeffs_reconstructed_pressure = np.array(
+            [np.linalg.solve(A, b) for A, b in zip(A_elements, point_val)]
+        )
+
+        # Store in data dictionary
+        for value, name in zip(
+            [point_val, point_coo, coeffs_reconstructed_pressure],
+            ["point_val", "point_coo", "coeffs"],
+        ):
             pp.shift_solution_values(
-                f"{pressure_key}_postprocessed_coeffs",
+                f"{pressure_key}_reconstructed_{name}",
                 sd_data,
                 pp.ITERATE_SOLUTIONS,
                 max_index=len(self.iterate_indices),
             )
             pp.set_solution_values(
-                f"{pressure_key}_postprocessed_coeffs",
-                s,
+                f"{pressure_key}_reconstructed_{name}",
+                value,
                 sd_data,
                 iterate_index=0,
             )
-
-            # The following step is now to apply the Oswald interpolator
-
-            # Sanity check
-            if not s.shape == (sd.num_cells, 6):
-                raise ValueError("Wrong shape of P2 polynomial.")
-
-            # Abbreviations
-            dim = sd.dim
-            nn = sd.num_nodes
-            nf = sd.num_faces
-            nc = sd.num_cells
-
-            # Mappings
-            cell_faces_map = sps.find(sd.cell_faces.T)[1]
-            cell_nodes_map = sps.find(sd.cell_nodes().T)[1]
-            faces_of_cell = cell_faces_map.reshape(nc, dim + 1)
-            nodes_of_cell = cell_nodes_map.reshape(nc, dim + 1)
-
-            # Treatment of the nodes
-            # Evaluate post-processed pressure at the nodes
-            nodes_p = np.zeros([nc, 3])
-            nx = sd.nodes[0][nodes_of_cell]  # local node x-coordinates
-            ny = sd.nodes[1][nodes_of_cell]  # local node y-coordinates
-
-            # Compute node pressures
-            for col in range(dim + 1):
-                nodes_p[:, col] = (
-                    s[:, 0] * nx[:, col] ** 2  # c0x^2
-                    + s[:, 1] * nx[:, col] * ny[:, col]  # c1xy
-                    + s[:, 2] * nx[:, col]  # c2x
-                    + s[:, 3] * ny[:, col] ** 2  # c3y^2
-                    + s[:, 4] * ny[:, col]  # c4y
-                    + s[:, 5]  # c5
-                )
-
-            # Average nodal pressure
-            node_cardinality = np.bincount(cell_nodes_map)
-            node_pressure = np.zeros(nn)
-            for col in range(dim + 1):
-                node_pressure += np.bincount(
-                    nodes_of_cell[:, col], weights=nodes_p[:, col], minlength=nn
-                )
-            node_pressure /= node_cardinality
-
-            # Treatment of the faces
-            # Evaluate post-processed pressure at the face-centers
-            faces_p = np.zeros([nc, 3])
-            fx = sd.face_centers[0][faces_of_cell]  # local face-center x-coordinates
-            fy = sd.face_centers[1][faces_of_cell]  # local face-center y-coordinates
-
-            for col in range(3):
-                faces_p[:, col] = (
-                    s[:, 0] * fx[:, col] ** 2  # c0x^2
-                    + s[:, 1] * fx[:, col] * fy[:, col]  # c1xy
-                    + s[:, 2] * fx[:, col]  # c2x
-                    + s[:, 3] * fy[:, col] ** 2  # c3y^2
-                    + s[:, 4] * fy[:, col]  # c4x
-                    + s[:, 5]  # c5
-                )
-
-            # Average face pressure
-            face_cardinality = np.bincount(cell_faces_map)
-            face_pressure = np.zeros(nf)
-            for col in range(3):
-                face_pressure += np.bincount(
-                    faces_of_cell[:, col], weights=faces_p[:, col], minlength=nf
-                )
-            face_pressure /= face_cardinality
-
-            # Treatment of the boundary points
-            bc = sd_data[pp.PARAMETERS][self.flux_key]["bc"]
-
-            bc_dir_values = np.zeros(nf)
-            # TODO Not needed because we have only one grid!
-            external_dirichlet_boundary = np.logical_and(
-                bc.is_dir, sd.tags["domain_boundary_faces"]
-            )
-            bc_pressure = bg_data[pp.ITERATE_SOLUTIONS][pressure_key][0]
-            # Is this wrong?
-            bg_dir_filter: np.ndarray = (bg.projection() @ self.bc_type(sd).is_dir) == 1
-            # bg_dir_filter = (
-            #     bg_data[pp.ITERATE_SOLUTIONS]["bc_values_darcy_filter_dir"][0] == 1
-            # )
-            bc_dir_values[external_dirichlet_boundary] = bc_pressure[bg_dir_filter]
-            face_pressure[external_dirichlet_boundary] = bc_dir_values[
-                external_dirichlet_boundary
-            ]
-
-            # Boundary values at the nodes
-            face_vec = np.zeros(nf)
-            face_vec[external_dirichlet_boundary] = 1
-            num_dir_face_of_node = sd.face_nodes * face_vec
-            is_dir_node = num_dir_face_of_node > 0
-            face_vec *= 0
-            face_vec[external_dirichlet_boundary] = bc_dir_values[
-                external_dirichlet_boundary
-            ]
-            node_val_dir = sd.face_nodes * face_vec
-            node_val_dir[is_dir_node] /= num_dir_face_of_node[is_dir_node]
-            node_pressure[is_dir_node] = node_val_dir[is_dir_node]
-
-            # Prepare for exporting
-            point_val = np.column_stack(
-                [node_pressure[nodes_of_cell], face_pressure[faces_of_cell]]
-            )
-            point_coo = np.empty([dim, nc, 6])
-            point_coo[0] = np.column_stack([nx, fx])
-            point_coo[1] = np.column_stack([ny, fy])
-
-            # Solve local systems of equation to obtain the coefficients of the
-            # reconstructed pressure from the points coordinates and values.
-            # TODO Is there an easier way to do this WHILE reconstructing the pressure?
-            # TODO Store these at the end of each time step.
-            A_elements: np.ndarray = np.stack(
-                [
-                    point_coo[0] ** 2,  # x^2
-                    point_coo[0] * point_coo[1],  # xy
-                    point_coo[0],  # x
-                    point_coo[1] ** 2,  # y^2
-                    point_coo[1],  # y
-                    np.ones_like(point_coo[0]),  # constant
-                ],
-                -1,
-            )
-            coeffs_reconstructed_pressure = np.array(
-                [np.linalg.solve(A, b) for A, b in zip(A_elements, point_val)]
-            )
-
-            # Store in data dictionary
-            for value, name in zip(
-                [point_val, point_coo, coeffs_reconstructed_pressure],
-                ["point_val", "point_coo", "coeffs"],
-            ):
-                pp.shift_solution_values(
-                    f"{pressure_key}_reconstructed_{name}",
-                    sd_data,
-                    pp.ITERATE_SOLUTIONS,
-                    max_index=len(self.iterate_indices),
-                )
-                pp.set_solution_values(
-                    f"{pressure_key}_reconstructed_{name}",
-                    value,
-                    sd_data,
-                    iterate_index=0,
-                )
 
     def reconstruct_pressure_valera(
         self,
@@ -639,7 +630,7 @@ class PressureReconstructionMixin:
 
             # Retrieve reconstructed velocities
             coeff = pp.get_solution_values(
-                f"{flux_name}_equilibrated_flux_RT0_coeffs", sd_data, iterate_index=0
+                f"{flux_name}_flux_equilibrated_RT0_coeffs", sd_data, iterate_index=0
             )
             if sd.dim == 3:
                 proj_flux = np.array(
@@ -805,14 +796,21 @@ class EquilibratedFluxMixin:
     ) -> None:
         """Equilibrates an approximate flux solution at a given Newton iteration.
 
+        We assume the following sub-dictionaries to be present in the data dictionary:
+            iterate_dictionary, storing all parameters.
+                Stored in ``data[pp.ITERATE_SOLUTIONS]``.
+
+        The following entries in iterate_dictionary will be shifted and updated:
+            - {flux_name}_flux_equilibrated, storing the equilibrated flux.
+
         Parameters:
             flux_field: Name flux field to be equilibrated.
             nonlinear_increment: Nonlinear increment of the primary valuables. If
-            already constructed during Newton, we can save some time instead of
-            computing it again. Default is ``None``.
+                already constructed during Newton, we can save some time instead of
+                computing it again. Default is ``None``.
 
         Returns:
-            equilibrated_flux: The equilibrated flux field.
+            None
 
         """
         # The functions ``DarcyFluxes.total_flux`` and ``DarcyFluxes.phase_flux``
@@ -820,54 +818,50 @@ class EquilibratedFluxMixin:
         # values when set by ``eval_additional_vars`` and hence we do not need to care
         # about bc values here.
         logger.info(f"Equilibrating {flux_name} flux.")
-        for _, d in self.mdg.subdomains(return_data=True):
-            val: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_flux", d, iterate_index=1
-            )
-            jac: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_flux_jacobian", d, iterate_index=1
-            )
+        _, d = self.mdg.subdomains(return_data=True)[0]
+        val: np.ndarray = pp.get_solution_values(
+            f"{flux_name}_flux", d, iterate_index=1
+        )
+        jac: np.ndarray = pp.get_solution_values(
+            f"{flux_name}_flux_jacobian", d, iterate_index=1
+        )
 
-            if nonlinear_increment is None:
-                var_val: np.ndarray = self.equation_system.get_variable_values(
-                    [self.primary_pressure_var, self.primary_saturation_var],
-                    iterate_index=1,
-                )
-                var_val_new: np.ndarray = self.equation_system.get_variable_values(
-                    [self.primary_pressure_var, self.primary_saturation_var],
-                    iterate_index=0,
-                )
-                nonlinear_increment = var_val_new - var_val
-
-            equilibrated_flux = val + jac @ nonlinear_increment
-            pp.shift_solution_values(
-                "equilibrated_flux",
-                d,
-                pp.ITERATE_SOLUTIONS,
-                max_index=len(self.iterate_indices),
+        if nonlinear_increment is None:
+            var_val: np.ndarray = self.equation_system.get_variable_values(
+                [self.primary_pressure_var, self.primary_saturation_var],
+                iterate_index=1,
             )
-            pp.set_solution_values(
-                f"{flux_name}_equilibrated_flux",
-                equilibrated_flux,
-                d,
+            var_val_new: np.ndarray = self.equation_system.get_variable_values(
+                [self.primary_pressure_var, self.primary_saturation_var],
                 iterate_index=0,
             )
+            nonlinear_increment = var_val_new - var_val
+
+        equilibrated_flux = val + jac @ nonlinear_increment
+        pp.shift_solution_values(
+            f"{flux_name}_flux_equilibrated",
+            d,
+            pp.ITERATE_SOLUTIONS,
+            max_index=len(self.iterate_indices),
+        )
+        pp.set_solution_values(
+            f"{flux_name}_flux_equilibrated",
+            equilibrated_flux,
+            d,
+            iterate_index=0,
+        )
 
     def extend_fv_fluxes(
         self,
-        flux_name: Literal[
-            "total",
-            "inverse_mobility_times_total",
-            "inverse_mobility_times_complimentary",
-            PHASENAME,
-        ],
-        equilibrated: bool = False,
+        flux_name: Literal["total", PHASENAME],
+        flux_specifier: str = "",
     ) -> None:
         """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions.
 
         Parameters:
             mdg: pp.MixedDimensionalGrid
                 Mixed-dimensional grid for the problem.
+                flux_specifier: E.g., "_equilibrated" or "_wrt_goal_rel_perm".
 
         Note:
             The data dictionary of each node of the grid bucket will be updated with the
@@ -902,12 +896,7 @@ class EquilibratedFluxMixin:
             signs of the local and global normals are the same, and -1 otherwise.
 
         """
-        if equilibrated:
-            equilibrated_str: str = "equilibrated_"
-        else:
-            equilibrated_str: str = ""
-
-        logger.info(f"Extending {equilibrated_str}{flux_name} flux to RT0 functions.")
+        logger.info(f"Extending {flux_name}{flux_specifier} flux to RT0 functions.")
 
         # Only one domain is considered here.
         sd, d = self.mdg.subdomains(return_data=True)[0]
@@ -916,8 +905,8 @@ class EquilibratedFluxMixin:
         # TODO: is this necessary?
         # FIXME Should be done for sub dir pp.ITERATE_SOLUTIONS or
         # pp.TIME_STEP_SOLUTIONS!
-        if not f"{flux_name}_{equilibrated_str}flux_RT0_coeffs" in d:
-            d[f"{flux_name}_{equilibrated_str}flux_RT0_coeffs"] = {}
+        if not f"{flux_name}_flux{flux_specifier}_RT0_coeffs" in d:
+            d[f"{flux_name}_flux{flux_specifier}_RT0_coeffs"] = {}
 
         # Cell-basis arrays
         cell_faces_map = sps.find(sd.cell_faces.T)[1]
@@ -931,7 +920,7 @@ class EquilibratedFluxMixin:
 
         # Retrieve finite volume fluxes
         flux = pp.get_solution_values(
-            f"{flux_name}_{equilibrated_str}flux", d, iterate_index=0
+            f"{flux_name}_flux{flux_specifier}", d, iterate_index=0
         )
 
         # Perform actual reconstruction and obtain coefficients
@@ -946,13 +935,13 @@ class EquilibratedFluxMixin:
 
         # Store coefficients in the data dictionary.
         pp.shift_solution_values(
-            f"{flux_name}_{equilibrated_str}flux_RT0_coeffs",
+            f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
             d,
             pp.ITERATE_SOLUTIONS,
             max_index=len(self.iterate_indices),
         )
         pp.set_solution_values(
-            f"{flux_name}_{equilibrated_str}flux_RT0_coeffs",
+            f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
             coeffs,
             d,
             iterate_index=0,
@@ -1017,11 +1006,11 @@ class EquilibratedFluxMixin:
         if self.formulation == "fractional_flow":
             # Note, that for ``flux_t``, the total mobility is already included.
             flux_t = pp.ad.DenseArray(
-                pp.get_solution_values("total_equilibrated_flux", data, iterate_index=0)
+                pp.get_solution_values("total_flux_equilibrated", data, iterate_index=0)
             )
             flux_w = pp.ad.DenseArray(
                 pp.get_solution_values(
-                    "wetting_equilibrated_flux", data, iterate_index=0
+                    "wetting_flux_equilibrated", data, iterate_index=0
                 )
             )
             fractional_flow_w = mobility_w / mobility_t
@@ -1056,17 +1045,17 @@ class EquilibratedFluxMixin:
         )
         transport_equation_wf.set_name("Transport reconstruction wetting flow mismatch")
         logger.info(
-            f"Flow equation mismatch {np.sum(flow_equation.value(self.equation_system))}"
+            f"Flow equation mismatch {np.sum(np.abs(flow_equation.value(self.equation_system)))}"
         )
         logger.info(
-            f"Transport equation mismatch fractional flow {np.sum(transport_equation_ff.value(self.equation_system))}"
+            f"Transport equation mismatch fractional flow {np.sum(np.abs(transport_equation_ff.value(self.equation_system)))}"
         )
         logger.info(
-            f"Transport equation mismatch wetting flow {np.sum(transport_equation_wf.value(self.equation_system))}"
+            f"Transport equation mismatch wetting flow {np.sum(np.abs(transport_equation_wf.value(self.equation_system)))}"
         )
 
 
-class SolutionStrategyReconstructions(SolutionStrategyTPF):
+class SolutionStrategyReconstructionsMixin:
 
     global_pressure: Callable[[pp.Grid], pp.ad.Operator]
     eval_global_pressure: Callable[[], None]
@@ -1082,13 +1071,12 @@ class SolutionStrategyReconstructions(SolutionStrategyTPF):
 
     wetting: Phase
     nonwetting: Phase
-    phases: list[Phase]
+    phases: dict[str, Phase]
 
     time_manager: pp.TimeManager
 
     setup_pressure_reconstruction: Callable[[], None]
     reconstruct_pressure_vohralik: Callable[[Literal], None]
-    # reconstruct_pressure_vohralik: Callable[[Literal, Literal], None]
 
     equilibrate_flux_during_Newton: Callable[[Literal["total", PHASENAME]], None]
     extend_fv_fluxes: Callable[[Literal["total", "complimentary", PHASENAME]], None]
@@ -1116,12 +1104,12 @@ class SolutionStrategyReconstructions(SolutionStrategyTPF):
         super().after_nonlinear_iteration(nonlinear_increment)
         # Only do this for values that make sense.
         # FIXME Think about how this should be.
-        if (
-            self.time_manager.time_index > 1
-            or self.nonlinear_solver_statistics.num_iteration > 1
-        ):
-            self.eval_additional_vars()
-            self.postprocess_solution()
+        # if (
+        #     self.time_manager.time_index > 1
+        #     or self.nonlinear_solver_statistics.num_iteration > 1
+        # ):
+        self.eval_additional_vars()
+        self.postprocess_solution()
 
     # TODO Once HC is fully implemented, this has to be done by
     # ``after_continuation_convergence``.
@@ -1151,23 +1139,23 @@ class SolutionStrategyReconstructions(SolutionStrategyTPF):
             pp.set_solution_values(
                 f"{pressure_key}_{key}", values, sd_data, time_step_index=0
             )
-        for flux_name, equilibrated_str in itertools.product(
+        for flux_name, flux_specifier in itertools.product(
             ["total", "wetting"],
-            ["", "equilibrated_"],
+            ["", "_equilibrated"],
         ):
             pp.shift_solution_values(
-                f"{flux_name}_{equilibrated_str}flux_RT0_coeffs",
+                f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
                 sd_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{equilibrated_str}flux_RT0_coeffs",
+                f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
                 sd_data,
                 iterate_index=0,
             )
             pp.set_solution_values(
-                f"{flux_name}_{equilibrated_str}flux_RT0_coeffs",
+                f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
                 values,
                 sd_data,
                 time_step_index=0,
@@ -1185,178 +1173,111 @@ class SolutionStrategyReconstructions(SolutionStrategyTPF):
         Jacobian.
 
         """
-        for sd, d in self.mdg.subdomains(return_data=True):
-            # TODO Ideally, we use ``equation_system.set_solution_values()`` and
-            # ``equation_system.shift_solution_values()``.
+        sd, d = self.mdg.subdomains(return_data=True)[0]
 
-            # Save FV P0 pressures.
-            self.eval_global_pressure()
-            self.eval_complimentary_pressure()
+        # Save FV P0 pressures.
+        self.eval_global_pressure()
+        self.eval_complimentary_pressure()
 
-            # Multiply Jacobians with the the following matrix, s.t., the Jacobian is
-            # only w.r.t. the primary variables.
-            # FIXME It would be more efficient to NOT assemble the full Jacobian.
-            # Possibly, by not setting secondary pressure and saturation as variables,
-            # but just evaluating their values after each nonlinear iteration and
-            # storing them in the data dict?
-            column_projection = self.equation_system.projection_to(
-                [self.primary_pressure_var, self.primary_saturation_var]
-            ).transpose()
+        # Multiply Jacobians with the the following matrix, s.t., the Jacobian is
+        # only w.r.t. the primary variables.
+        # FIXME It would be more efficient to NOT assemble the full Jacobian.
+        # Possibly, by not setting secondary pressure and saturation as variables,
+        # but just evaluating their values after each nonlinear iteration and
+        # storing them in the data dict?
+        column_projection = self.equation_system.projection_to(
+            [self.primary_pressure_var, self.primary_saturation_var]
+        ).transpose()
 
-            # Save FV P0 normal fluxes and Jacobians.
-            t_flux: pp.ad.AdArray = self.total_flux(sd).value_and_jacobian(
+        # Save FV P0 normal fluxes and Jacobians.
+        t_flux: pp.ad.AdArray = self.total_flux(sd).value_and_jacobian(
+            self.equation_system
+        )
+        pp.shift_solution_values(
+            "total_flux",
+            d,
+            pp.ITERATE_SOLUTIONS,
+            max_index=len(self.iterate_indices),
+        )
+        pp.set_solution_values("total_flux", t_flux.val, d, iterate_index=0)
+        pp.shift_solution_values(
+            "total_flux_jacobian",
+            d,
+            pp.ITERATE_SOLUTIONS,
+            max_index=len(self.iterate_indices),
+        )
+        pp.set_solution_values(
+            "total_flux_jacobian",
+            t_flux.jac * column_projection,
+            d,
+            iterate_index=0,
+        )
+
+        for phase in self.phases.values():
+            p_flux: pp.ad.AdArray = self.phase_flux(sd, phase).value_and_jacobian(
                 self.equation_system
             )
             pp.shift_solution_values(
-                "total_flux",
+                f"{phase.name}_flux",
                 d,
                 pp.ITERATE_SOLUTIONS,
                 max_index=len(self.iterate_indices),
             )
-            pp.set_solution_values("total_flux", t_flux.val, d, iterate_index=0)
+            pp.set_solution_values(f"{phase.name}_flux", p_flux.val, d, iterate_index=0)
             pp.shift_solution_values(
-                "total_flux_jacobian",
+                f"{phase.name}_flux_jacobian",
                 d,
                 pp.ITERATE_SOLUTIONS,
                 max_index=len(self.iterate_indices),
             )
             pp.set_solution_values(
-                "total_flux_jacobian",
-                t_flux.jac * column_projection,
+                f"{phase.name}_flux_jacobian",
+                p_flux.jac * column_projection,
                 d,
                 iterate_index=0,
             )
 
-            for phase in self.phases:
-                p_flux: pp.ad.AdArray = self.phase_flux(sd, phase).value_and_jacobian(
-                    self.equation_system
-                )
-                pp.shift_solution_values(
-                    f"{phase.name}_flux",
-                    d,
-                    pp.ITERATE_SOLUTIONS,
-                    max_index=len(self.iterate_indices),
-                )
-                pp.set_solution_values(
-                    f"{phase.name}_flux", p_flux.val, d, iterate_index=0
-                )
-                pp.shift_solution_values(
-                    f"{phase.name}_flux_jacobian",
-                    d,
-                    pp.ITERATE_SOLUTIONS,
-                    max_index=len(self.iterate_indices),
-                )
-                pp.set_solution_values(
-                    f"{phase.name}_flux_jacobian",
-                    p_flux.jac * column_projection,
-                    d,
-                    iterate_index=0,
-                )
-
-            # TODO When we have buoyancy terms, the complimentary flux must NOT include
-            # gravity flux!!! Thus, we need to calculate it in a slightly more
-            # complicated way
-            # FIXME Does this have to be NOT upwinded mobility mapped to faces? Not sure
-            # from the Vohralik paper.
-            # Calculate non upwinded mobilities.
-            rel_perms: dict[str, np.ndarray] = {}
-            phase_mobilities: dict[str, np.ndarray] = {}
-            for phase in self.phases:
-                rel_perms[phase.name] = self.rel_perm(self.wetting.s, phase).value(
-                    self.equation_system
-                )
-                phase_mobilities[phase.name] = (
-                    rel_perms[phase.name] / phase.constants.viscosity()
-                )
-                pp.set_solution_values(
-                    f"{phase.name}_mobility",
-                    phase_mobilities[phase.name],
-                    d,
-                    iterate_index=0,
-                )
-            # TODO Kind of inefficient to do this with pp.ad.Operators.
-            # inverse_mobility_times_t_flux: pp.ad.Operator = self.total_flux(
-            #     sd
-            # ) / self.total_mobility(sd)
-            # inverse_mobility_times_c_flux: pp.ad.Operator = (
-            #     self.phase_mobility(sd, self.nonwetting)
-            #     * self.phase_flux(sd, self.wetting)
-            #     - self.phase_mobility(sd, self.wetting)
-            #     * self.phase_flux(sd, self.nonwetting)
-            # ) / self.total_mobility(sd)
-            # FIXME We do not need to shift values here!
-            # pp.shift_solution_values(
-            #     f"total_flux_times_inverse_mobility",
-            #     d,
-            #     pp.ITERATE_SOLUTIONS,
-            #     max_index=len(self.iterate_indices),
-            # )
-            # pp.set_solution_values(
-            #     f"inverse_mobility_times_total_flux",
-            #     inverse_mobility_times_t_flux.value(self.equation_system),
-            #     d,
-            #     iterate_index=0,
-            # )
-            # pp.shift_solution_values(
-            #     f"complimentary_flux_times_inverse_mobility",
-            #     d,
-            #     pp.ITERATE_SOLUTIONS,
-            #     max_index=len(self.iterate_indices),
-            # )
-            # pp.set_solution_values(
-            #     f"inverse_mobility_times_complimentary_flux",
-            #     inverse_mobility_times_c_flux.value(self.equation_system),
-            #     d,
-            #     iterate_index=0,
-            # )
-            # # Multiply by inverse of total mobility to obtain pressure differential.
-            # if flux_name in ["total", "complimentary"]:
-            #     mobility_t = self.total_mobility(sd).value(self.equation_system)
-            #     for comp in [a, b, c]:
-            #         comp /= mobility_t
-
-            # pp.shift_solution_values(
-            #     f"complimentary_flux_jacobian",
-            #     d,
-            #     pp.ITERATE_SOLUTIONS,
-            #     max_index=len(self.iterate_indices),
-            # )
-            # pp.set_solution_values(
-            #     f"complimentary_flux_jacobian",
-            #     complimentary_flux_jac * column_projection,
-            #     d,
-            #     iterate_index=0,
-            # )
+        # TODO When we have buoyancy terms, the complimentary flux must NOT include
+        # gravity flux!!! Thus, we need to calculate it in a slightly more
+        # complicated way
+        # FIXME Does this have to be NOT upwinded mobility mapped to faces? Not sure
+        # from the Vohralik paper.
+        # Calculate non upwinded mobilities.
+        rel_perms: dict[str, np.ndarray] = {}
+        phase_mobilities: dict[str, np.ndarray] = {}
+        for phase in self.phases.values():
+            rel_perms[phase.name] = self.rel_perm(self.wetting.s, phase).value(
+                self.equation_system
+            )
+            phase_mobilities[phase.name] = (
+                rel_perms[phase.name] / phase.constants.viscosity()
+            )
+            pp.set_solution_values(
+                f"{phase.name}_mobility",
+                phase_mobilities[phase.name],
+                d,
+                iterate_index=0,
+            )
 
     def postprocess_solution(self) -> None:
-        for flux_name in ["total", "wetting"]:
+        for flux_name in ["total", self.wetting.name]:
             # Calculate RT0 coefficients for the FV fluxes.
             self.extend_fv_fluxes(flux_name)
             # Calculate RT0 coefficients for the equilibrated fluxes.
             self.equilibrate_flux_during_Newton(flux_name)
-            self.extend_fv_fluxes(flux_name, equilibrated=True)
-        # NOTE The following fluxes are only used to post-process the global and
-        # complimentary pressures.
+            self.extend_fv_fluxes(flux_name, flux_specifier="_equilibrated")
+
+        # NOTE The nonwetting phase flux is only use to post-process the global and
+        # complimentary pressures and does NOT need to be equilibrated.
         for flux_name in [
-            # self.wetting.name,
             self.nonwetting.name,
         ]:
             self.extend_fv_fluxes(flux_name)
-        # for flux_name in [
-        #     "inverse_mobility_times_total",
-        #     "inverse_mobility_times_complimentary",
-        # ]:
-        #     self.extend_fv_fluxes(flux_name)
-        # for pressure_key, flux_name in zip(
-        #     [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-        #     ["inverse_mobility_times_total", "inverse_mobility_times_complimentary"],
-        # ):
-        #     self.reconstruct_pressure_vohralik(pressure_key, flux_name)
+
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             self.reconstruct_pressure_vohralik(pressure_key)
-        self.divergence_mismatch()
 
-        # self.compute_errors()
+        self.divergence_mismatch()
 
 
 def r2c(array: np.ndarray) -> np.ndarray:

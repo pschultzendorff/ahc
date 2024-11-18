@@ -251,7 +251,7 @@ class BuckleyLeverettSolutionStrategy(SolutionStrategyTPF):
         )
 
     def _export_iteration(self):
-        if hasattr(self, "exporter"):
+        try:
             primary_pressure = self.equation_system.get_variable_values(
                 [self.primary_pressure_var], iterate_index=0
             )
@@ -270,6 +270,8 @@ class BuckleyLeverettSolutionStrategy(SolutionStrategyTPF):
                 time_step=self.time_manager.time_index * 1000
                 + self._nonlinear_iteration,
             )
+        except AttributeError:
+            logger.warning("Exporter not set up.")
 
     def after_nonlinear_iteration(self, solution: np.ndarray) -> None:
         super().after_nonlinear_iteration(solution)

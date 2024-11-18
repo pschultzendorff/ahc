@@ -30,7 +30,7 @@ class Integral:
     def __mul__(self, other: Self | float) -> Self:
         if isinstance(other, float):
             return Integral(other * self.elementwise)
-        elif isinstance(other, Integral):
+        else:
             raise TypeError(
                 f"__mul__ not implemented for types {type(self)}"
                 + f" and {type(other)}."
@@ -39,9 +39,18 @@ class Integral:
     def __rmul__(self, other: Self | float) -> Self:
         if isinstance(other, float):
             return Integral(other * self.elementwise)
-        elif isinstance(other, Integral):
+        else:
             raise TypeError(
                 f"__rmul__ not implemented for types {type(self)}"
+                + f" and {type(other)}."
+            )
+
+    def __pow__(self, other: float) -> Self:
+        if isinstance(other, float) or isinstance(other, int):
+            return Integral(self.elementwise**other)
+        else:
+            raise TypeError(
+                f"__pow__ not implemented for types {type(self)}"
                 + f" and {type(other)}."
             )
 

@@ -25,7 +25,7 @@ from tpf_lab.models.reconstructions import (
     EquilibratedFluxMixin,
     PressureMixin,
     PressureReconstructionMixin,
-    SolutionStrategyReconstructions,
+    SolutionStrategyReconstructionsMixin,
 )
 
 # Disable numba JIT for debugging.
@@ -125,8 +125,16 @@ class ModifiedBoundaryConditions(BoundaryConditionsTPF):
         return pp.BoundaryCondition(g, north_faces, "dir")
 
 
-# class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): ...  # type: ignore
-class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, ModifiedBoundaryConditions, EquilibratedFluxMixin, PressureMixin, PressureReconstructionMixin, SolutionStrategyReconstructions, TwoPhaseFlow): ...  # type: ignore
+class ModifiedTwoPhaseFlow(  # type: ignore
+    ModifiedEquations,
+    ModifiedGeometry,
+    ModifiedBoundaryConditions,
+    EquilibratedFluxMixin,
+    PressureMixin,
+    PressureReconstructionMixin,
+    SolutionStrategyReconstructionsMixin,
+    TwoPhaseFlow,
+): ...
 
 
 # Set up folder and files for logging/plots/saved time steps.
