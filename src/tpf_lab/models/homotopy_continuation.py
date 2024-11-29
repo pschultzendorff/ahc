@@ -1,6 +1,8 @@
+import itertools
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
 import numpy as np
@@ -24,18 +26,48 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SolverStatisticsHCMixin:
+class SolverStatisticsHC(pp.SolverStatistics):
     hc_lambda_fl: float = 1.0
+    """Homotopy continuation lambda."""
     hc_lambda_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
+    """Homotopy continuation lambda for automatic differentiation."""
     hc_lambdas: list[float] = field(default_factory=list)
+    """List of homotopy continuation lambda values for the current time step."""
     hc_num_iteration: int = 0
+    """Number of homotopy continuation iterations performed for current time step."""
+    num_iteration: int = 0
+    """Number of non-linear iterations performed for current homotopy continuation step.
 
-    discretization_est: list[float] = field(default_factory=list)
-    """List of discretization error estimates for each non-linear iteration."""
-    hc_est: list[float] = field(default_factory=list)
-    """List of homotopy continuation error estimates for each non-linear iteration."""
-    linearization_est: list[float] = field(default_factory=list)
-    """List of linearization error estimates for each non-linear iteration."""
+    """
+    nums_iteration: list[int] = field(default_factory=list)
+    """Number of non-linear iterations performed for current homotopy continuation step.
+
+    """
+    nonlinear_increment_norms_hc: list[list[float]] = field(default_factory=list)
+    """List of list of increment magnitudes for each non-linear iteration. Outer list
+    are HC iterations, inner list are non-linear iterations.
+
+    """
+    residual_norms_hc: list[list[float]] = field(default_factory=list)
+    """List of list of residual norms. Outer list are HC iterations, inner list are
+    non-linear iterations.
+
+    """
+    discretization_est: list[list[float]] = field(default_factory=list)
+    """List of list of discretization error estimates. Outer list are HC iterations,
+    inner list are non-linear iterations.
+
+    """
+    hc_est: list[list[float]] = field(default_factory=list)
+    """List of list of homotopy continuation error estimates. Outer list are HC
+    iterations, inner list are non-linear iterations.
+
+    """
+    linearization_est: list[list[float]] = field(default_factory=list)
+    """List of list of linearization error estimates. Outer list are HC iterations,
+    inner list are non-linear iterations.
+
+    """
 
     def log_error(
         self,
@@ -44,27 +76,37 @@ class SolverStatisticsHCMixin:
         **kwargs,
     ) -> None:
         if not (nonlinear_increment_norm is None or residual_norm is None):
-            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
+            super().log_error(nonlinear_increment_norm, residual_norm)
         else:
-            self.discretization_est.append(kwargs.get("discretization_est", 0.0))
-            self.hc_est.append(kwargs.get("hc_est", 0.0))
-            self.linearization_est.append(kwargs.get("linearization_est", 0.0))
+            self.discretization_est[-1].append(kwargs.get("discretization_est", 0.0))
+            self.hc_est[-1].append(kwargs.get("hc_est", 0.0))
+            self.linearization_est[-1].append(kwargs.get("linearization_est", 0.0))
 
     def reset(self) -> None:
         """Reset the homotopy continuation statistics object at the start of a new
         Newton loop.
 
         """
+        self.nums_iteration.append(self.num_iteration)
+        self.nonlinear_increment_norms_hc.append(self.nonlinear_increment_norms)
+        self.residual_norms_hc.append(self.residual_norms)
         super().reset()
-        self.discretization_est.clear()
-        self.hc_est.clear()
-        self.linearization_est.clear()
+        self.discretization_est.append([])
+        self.hc_est.append([])
+        self.linearization_est.append([])
 
     def hc_reset(self) -> None:
         """Reset the homotopy continuation statistics object at the start of a new
         continuation loop.
 
         """
+        self.nums_iteration.clear()
+        self.nonlinear_increment_norms_hc.clear()
+        self.residual_norms_hc.clear()
+        self.discretization_est.clear()
+        self.hc_est.clear()
+        self.linearization_est.clear()
+
         self.hc_num_iteration = 0
         self.hc_lambda_fl = 1.0
         self.hc_lambda_ad.set_value(1.0)
@@ -73,42 +115,42 @@ class SolverStatisticsHCMixin:
 
     def save(self) -> None:
         """Save the estimator statistics to a JSON file."""
-        # This calls ``pp.SolverStatistics.save``, which adds a new entry to the
-        # ``data`` dictionary that is found at ``self.path``.
-        # TODO Do not call super here! Instead, at each time step create another
-        # dictionary for all the hc steps.
-        super().save()
-        # Instead of creating a new entry, we load the already created entry and append.
         if self.path is not None:
             # Check if object exists and append to it
             if self.path.exists():
                 with self.path.open("r") as file:
-                    data = json.load(file)
+                    data: dict[int, Any] = json.load(file)
             else:
                 data = {}
 
             # Append data.
-            ind = len(data)
-            # FIXME Organize the data structure s.t. it takes into account the hc
-            # iterations.
-            # Since data was stored and loaded as json, the keys have turned to strings.
-            data[str(ind)].update(
-                {
-                    "hc_lambdas": self.hc_lambdas,
-                    "hc_num_iterations": self.hc_num_iteration,
-                    "discretization_est": self.discretization_est,
-                    "hc_est": self.hc_est,
-                    "linearization_est": self.linearization_est,
+            ind: int = len(data) + 1
+            # The data is organized into dictionaries for each hc step. Each hc step
+            # contains lists with values for all Newton steps.
+            data[ind] = {
+                i: {
+                    "num_iteration": n,
+                    "nonlinear_increment_norms": nin,
+                    "residual_norms": rn,
+                    "discretization_error_estimates": de,
+                    "hc_error_estimates": hce,
+                    "linearization_error_estimates": le,
                 }
-            )
-
+                for i, (n, nin, rn, de, hce, le) in enumerate(
+                    zip(
+                        self.nums_iteration,
+                        self.nonlinear_increment_norms_hc,
+                        self.residual_norms_hc,
+                        self.discretization_est,
+                        self.hc_est,
+                        self.linearization_est,
+                    )
+                )
+            }
+            data[ind].update({"hc_num_iterations": self.hc_num_iteration})
             # Save to file
             with self.path.open("w") as file:
                 json.dump(data, file, indent=4)
-
-
-@dataclass
-class SolverStatisticsHC(SolverStatisticsHCMixin, pp.SolverStatistics): ...
 
 
 class RelativePermeabilityHC(RelativePermeability):
@@ -312,7 +354,7 @@ class EstimatesHCMixin:
         )
         return 3 * sum(estimators.values())
 
-    def global_linearization_est(self) -> None:
+    def global_linearization_est(self) -> float:
         _, sd_data = self.mdg.subdomains(return_data=True)[0]
         estimators: dict[str, float] = {}
         for flux_name in ["total", self.wetting.name]:
@@ -343,6 +385,17 @@ class EstimatesHCMixin:
             f"Global linearization error estimate: {3 * sum(estimators.values())}"
         )
         return 3 * sum(estimators.values())
+
+    def total_est(self) -> float:
+        """Return total error estimate, consisting of discretization, homotopy
+        continuation, and linearization components.
+
+        """
+        return (
+            self.global_discretization_est()
+            + self.global_hc_est()
+            + self.global_linearization_est()
+        )
 
 
 # TODO Subclass of SolutionStrategyEstMixin or not?
@@ -399,7 +452,6 @@ class SolutionStrategyEstHCMixin:
             pp.set_solution_values(
                 f"{flux_name}_flux_wrt_goal_rel_perm", flux, d, iterate_index=0
             )
-            self.extend_fv_fluxes(flux_name, flux_specifier="_wrt_goal_rel_perm")
         self.hc_rel_perm_toggle = True
 
     def postprocess_solution(self) -> None:
@@ -438,6 +490,11 @@ class SolutionStrategyHCMixin:
     solid: pp.SolidConstants
     permeability: Callable
 
+    wetting: Phase
+    nonwetting: Phase
+
+    mdg: pp.MixedDimensionalGrid
+
     nonlinear_solver_statistics: SolverStatisticsHC
     """Solver statistics for the homotopy continuation and nonlinear solver."""
 
@@ -449,15 +506,43 @@ class SolutionStrategyHCMixin:
     global_hc_est: Callable[[], float]
     global_linearization_est: Callable[[], float]
 
+    save_data_time_step: Callable[[], None]
+
     @property
     def hc_indices(self) -> list[int]:
         """Return the indices of the homotopy continuation variables."""
         return [0]
 
+    def prepare_simulation(self) -> None:
+        super().prepare_simulation()
+        self.setup_hc(self.params)
+
+    def initial_condition(self) -> None:
+        """Set initial values for pressure and saturation."""
+        g = self.mdg.subdomains()[0]
+        self.equation_system.set_variable_values(
+            np.full(g.num_cells * 2, 0.0),
+            [self.wetting.p, self.nonwetting.p],
+            time_step_index=0,
+            hc_index=0,
+            iterate_index=0,
+        )
+        self.equation_system.set_variable_values(
+            np.full(g.num_cells * 2, 0.5),
+            [self.wetting.s, self.nonwetting.s],
+            time_step_index=0,
+            hc_index=0,
+            iterate_index=0,
+        )
+
     # region HC LOOP
     def before_hc_loop(self) -> None:
         """Reset HC parameter and residuals."""
+        # Reset lambda and decay.
         self.nonlinear_solver_statistics.hc_reset()
+        self.hc_decay = self.hc_init_decay
+        self.hc_decay_recomp_counter = 0
+
         # Set the solution from the previous time step as a first guess.
         assembled_variables = self.equation_system.get_variable_values(
             time_step_index=0
@@ -467,21 +552,12 @@ class SolutionStrategyHCMixin:
         )
 
     def before_hc_iteration(self) -> None:
-        pass
+        self.decay_lambda()
+        self.increase_hc_index()
 
-    def after_hc_iteration(self, decay: float) -> None:
-        """Decay HC parameter and compute residuals."""
-        self.nonlinear_solver_statistics.hc_lambda_fl *= decay
-        self.nonlinear_solver_statistics.hc_lambda_ad.set_value(
-            self.nonlinear_solver_statistics.hc_lambda_fl
-        )
-        self.nonlinear_solver_statistics.hc_num_iteration += 1
-        self.nonlinear_solver_statistics.hc_lambdas.append(
-            self.nonlinear_solver_statistics.hc_lambda_fl
-        )
-        logger.info(
-            f"Decayed hc_lambda to"
-            + f" {self.nonlinear_solver_statistics.hc_lambda_fl:.2f}"
+    def after_hc_iteration(self) -> None:
+        self.compute_hc_decay(
+            nl_iterations=self.nonlinear_solver_statistics.num_iteration
         )
 
     def after_hc_convergence(self) -> None:
@@ -495,18 +571,64 @@ class SolutionStrategyHCMixin:
         )
 
         self.convergence_status = True
-        # Save data (and calculate L2 error only after the time step solution was
-        # distributed).
-        self.save_data_time_step(
-            # self.nonlinear_solver_statistics.residual_norms,
-            # self.nonlinear_solver_statistics.num_iteration,
-        )
+        self.save_data_time_step()
         # Update the time step magnitude if the dynamic scheme is used.
         # TODO Adjust this based on HC iterations?
         # if not self.time_manager.is_constant:
         #     self.time_manager.compute_time_step(
         #         iterations=self.nonlinear_solver_statistics.num_iteration
         #     )
+
+        # Shift estimates to the next time step.
+        _, sd_data = self.mdg.subdomains(return_data=True)[0]
+        for pressure_key, key in itertools.product(
+            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
+            ["NC_estimate"],
+        ):
+            pp.shift_solution_values(
+                f"{pressure_key}_{key}",
+                sd_data,
+                pp.TIME_STEP_SOLUTIONS,
+                len(self.time_step_indices),
+            )
+            values: np.ndarray = pp.get_solution_values(
+                f"{pressure_key}_{key}", sd_data, hc_index=0
+            )
+            pp.set_solution_values(
+                f"{pressure_key}_{key}", values, sd_data, time_step_index=0
+            )
+        for flux_name, key in itertools.product(
+            ["total", "wetting"],
+            ["R_estimate", "C_estimate", "L_estimate"],
+        ):
+            pp.shift_solution_values(
+                f"{flux_name}_{key}",
+                sd_data,
+                pp.TIME_STEP_SOLUTIONS,
+                len(self.time_step_indices),
+            )
+            values: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_{key}", sd_data, hc_index=0
+            )
+            pp.set_solution_values(
+                f"{flux_name}_{key}", values, sd_data, time_step_index=0
+            )
+
+    def after_hc_failure(self) -> None:
+        self.save_data_time_step()
+
+        if self.time_manager.is_constant:
+            # We cannot change the constant hc decay.
+            logger.info("Homotopy continuation did not converge.")
+        else:
+            # Update the time step magnitude if the dynamic scheme is used.
+            # Note: It will also raise a ValueError if the minimal time step is reached.
+            self.time_manager.compute_time_step(recompute_solution=True)
+
+            # Reset the iterate values. This ensures that the initial guess for an
+            # unknown time step equals the known time step.
+            prev_solution = self.equation_system.get_variable_values(time_step_index=0)
+            self.equation_system.set_variable_values(prev_solution, hc_index=0)
 
     def hc_check_convergence(
         self,
@@ -517,8 +639,8 @@ class SolutionStrategyHCMixin:
 
         """
         # Check if the HC error is smaller than the discretization error.
-        hc_est: float = self.nonlinear_solver_statistics.hc_est[-1]
-        discr_error: float = self.nonlinear_solver_statistics.discretization_est[-1]
+        hc_est: float = self.nonlinear_solver_statistics.hc_est[-1][-1]
+        discr_error: float = self.nonlinear_solver_statistics.discretization_est[-1][-1]
         if hc_est <= hc_params["hc_error_ratio"] * discr_error:
             logger.info(
                 f"HC error {hc_est} smaller than {hc_params['hc_error_ratio']}"
@@ -547,13 +669,97 @@ class SolutionStrategyHCMixin:
         else:
             return False
 
+    # TODO Write an HomotopyContinuationManager that takes care of the following
+    # methods.
+    def setup_hc(self, hc_params: dict[str, Any]) -> None:
+        self.hc_constant_decay: bool = hc_params["hc_constant_decay"]
+        self.hc_init_decay: float = hc_params["hc_lambda_decay"]
+        self.hc_decay: float = self.hc_init_decay
+        self.hc_decay_min_max: tuple[float, float] = hc_params["hc_decay_min_max"]
+        self.nl_iter_optimal_range: tuple[int, int] = hc_params["nl_iter_optimal_range"]
+        self.nl_iter_relax_factors: tuple[float, float] = hc_params[
+            "nl_iter_relax_factors"
+        ]
+        # FIXME Implement a mechanism that avoids recomputing the decay if the maximum
+        # is reached.
+        self.hc_decay_recomp_max: int = hc_params["hc_decay_recomp_max"]
+        self.hc_decay_recomp_counter: int = 0
+
+    def decay_lambda(self) -> None:
+        """Decay lambda by current decay rate."""
+        self.nonlinear_solver_statistics.hc_lambda_fl *= self.hc_decay
+        self.nonlinear_solver_statistics.hc_lambda_ad.set_value(
+            self.nonlinear_solver_statistics.hc_lambda_fl
+        )
+        self.nonlinear_solver_statistics.hc_lambdas.append(
+            self.nonlinear_solver_statistics.hc_lambda_fl
+        )
+        logger.info(
+            f"Decayed hc_lambda to"
+            + f" {self.nonlinear_solver_statistics.hc_lambda_fl:.2f}"
+        )
+
+    def increase_hc_index(self) -> None:
+        self.nonlinear_solver_statistics.hc_num_iteration += 1
+
+    def compute_hc_decay(
+        self,
+        nl_iterations: Optional[int] = None,
+        recompute_decay: bool = False,
+    ) -> None:
+        """Adjust the decay for the homotopy continuation parameter.
+
+        Parameters:
+            hc_params: Homotopy continuation parameters.
+
+        Returns:
+            float: Updated lambda.
+
+        """
+        if self.hc_constant_decay:
+            return None
+        else:
+            if nl_iterations is not None:
+                self._hc_adaptation_based_on_iterations(nl_iterations)
+            elif recompute_decay:
+                self._hc_adaptation_based_on_recomputation()
+            else:
+                raise ValueError("Cannot recompute decay.")
+
+    def _hc_adaptation_based_on_recomputation(self) -> None:
+        """Same as ``pp.TimeManager._adaptation_based_on_recomputation`` but for
+        homotopy continuation.
+
+        """
+        self.hc_decay *= self.nl_iter_relax_factors[1]
+        # TODO Stop recomputing the decay if the maximum is reached.
+        self.hc_decay = min(self.hc_decay, self.hc_decay_min_max[1])
+        self.hc_decay_recomp_counter += 1
+        logger.info(f"Slowing HC decay. Next decay = {self.hc_decay}.")
+
+    def _hc_adaptation_based_on_iterations(self, iterations: int) -> None:
+        """Same as ``pp.TimeManager._adaptation_based_on_iterations`` but for
+        homotopy continuation.
+
+        """
+        if iterations < self.nl_iter_optimal_range[0]:
+            self.hc_decay *= self.nl_iter_relax_factors[0]
+            # TODO Stop recomputing the decay if the maximum is reached.
+            self.hc_decay = max(self.hc_decay, self.hc_decay_min_max[0])
+            logger.info(f"Speeding up HC decay. Next decay = {self.hc_decay}.")
+        elif iterations >= self.nl_iter_optimal_range[1]:
+            self.hc_decay *= self.nl_iter_relax_factors[1]
+            # TODO Stop recomputing the decay if the minimum is reached.
+            self.hc_decay = min(self.hc_decay, self.hc_decay_min_max[1])
+            logger.info(f"Slowing HC decay. Next decay = {self.hc_decay}.")
+        self.hc_decay_recomp_counter = 0
+
     # endregion
 
     # region NONLINEAR LOOP
     def before_nonlinear_loop(self) -> None:
         """Set the starting estimate to the solution from the previous continuation
         step."""
-        self.time_manager._recomp_sol = False
         self.nonlinear_solver_statistics.reset()
 
         assembled_variables = self.equation_system.get_variable_values(hc_index=0)
@@ -580,7 +786,54 @@ class SolutionStrategyHCMixin:
         self.equation_system.set_variable_values(
             hc_solution, hc_index=0, additive=False
         )
-        self.nonlinear_solver_statistics.save()
+
+        # Shift estimates to the next hc step.
+        _, sd_data = self.mdg.subdomains(return_data=True)[0]
+        for pressure_key, key in itertools.product(
+            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
+            ["NC_estimate"],
+        ):
+            pp.shift_solution_values(
+                f"{pressure_key}_{key}",
+                sd_data,
+                pp.HC_ITERATE_SOLUTIONS,
+                len(self.hc_indices),
+            )
+            values: np.ndarray = pp.get_solution_values(
+                f"{pressure_key}_{key}", sd_data, iterate_index=0
+            )
+            pp.set_solution_values(f"{pressure_key}_{key}", values, sd_data, hc_index=0)
+        for flux_name, key in itertools.product(
+            ["total", "wetting"],
+            ["R_estimate", "C_estimate", "L_estimate"],
+        ):
+            pp.shift_solution_values(
+                f"{flux_name}_{key}",
+                sd_data,
+                pp.HC_ITERATE_SOLUTIONS,
+                len(self.hc_indices),
+            )
+            values: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_{key}", sd_data, iterate_index=0
+            )
+            pp.set_solution_values(f"{flux_name}_{key}", values, sd_data, hc_index=0)
+
+    def after_nonlinear_failure(self) -> None:
+        """Method to be called if the non-linear solver fails to converge."""
+        self.save_data_time_step()
+
+        if self.hc_constant_decay:
+            # We cannot change the constant HC decay.
+            raise ValueError("Nonlinear iterations did not converge.")
+        else:
+            # Reset lambda.
+            self.nonlinear_solver_statistics.hc_lambda_fl /= self.hc_decay
+            self.compute_hc_decay(recompute_decay=True)
+
+            # Reset the iterate values. This ensures that the initial guess for an
+            # unknown time step equals the known time step.
+            prev_solution = self.equation_system.get_variable_values(hc_index=0)
+            self.equation_system.set_variable_values(prev_solution, iterate_index=0)
 
     def check_convergence(
         self,
@@ -596,11 +849,6 @@ class SolutionStrategyHCMixin:
         converged, diverged = SolutionStrategyTPF.check_convergence(
             self, nonlinear_increment, residual, reference_residual, nl_params
         )
-        # TODO Remove this weird if statement.
-        # if (
-        #     self.time_manager.time_index >= 1
-        #     or self.nonlinear_solver_statistics.num_iteration > 1
-        # ):
         # Set ``converged`` to True if the linearization error is smaller than the
         # HC error.
         hc_est: float = self.global_hc_est()
@@ -625,11 +873,6 @@ class SolutionStrategyHCMixin:
 
     # endregion
 
-    def total_error(self) -> None:
-        """Calculate total error by comparing with the exact solution."""
-        # TODO: Write this function.
-        pass
-
 
 class HCSolver:
     def __init__(self, params=None) -> None:
@@ -639,7 +882,12 @@ class HCSolver:
         default_params: dict[str, Any] = {
             "hc_max_iterations": 20,
             "hc_lambda_min": 0.0,
+            # HC decay parameters.
+            "hc_constant_decay": True,
             "hc_lambda_decay": 0.9,
+            "hc_decay_min_max": (0.1, 0.9),
+            "nl_iter_optimal_range": (4, 7),
+            "nl_iter_relax_factors": (0.7, 1.3),
             # Adaptivity parameters.
             "hc_error_ratio": 0.1,
             "nl_error_ratio": 0.1,
@@ -675,9 +923,10 @@ class HCSolver:
         def hc_step() -> None:
             nonlocal hc_is_converged
             model.before_hc_iteration()
-            self.nonlinear_solver.solve(model)
-            model.after_hc_iteration(self.params["hc_lambda_decay"])
-            hc_is_converged = model.hc_check_convergence(self.params)
+            nl_is_converged: bool = self.nonlinear_solver.solve(model)
+            if nl_is_converged:
+                model.after_hc_iteration()
+                hc_is_converged = model.hc_check_convergence(self.params)
 
         # Redirect the root logger, s.t. no logger interferes with the progressbars.
         with logging_redirect_tqdm([logging.root]):
@@ -707,5 +956,10 @@ class HCSolver:
                 hc_step()
                 hc_progressbar.update(n=1)
 
+            if hc_is_converged:
+                model.after_hc_convergence()
+            else:
+                model.after_hc_failure()
         hc_progressbar.close()
+        return hc_is_converged
         return hc_is_converged

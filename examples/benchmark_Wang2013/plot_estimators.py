@@ -1,17 +1,30 @@
+import itertools
 import json
 import pathlib
 
 import matplotlib.pyplot as plt
 
-for hc_setup in ["linear to Corey", "linear to linear", "Corey to Corey"]:
-    with open(
-        pathlib.Path(__file__).parent
-        / "results"
-        / "hc_estimators_test"
-        / hc_setup
-        / "solver_statistics.json",
-        "r",
-    ) as f:
+rel_perm_constants_list = [
+    {"model": "linear"},
+    {"model": "Corey"},
+    {"model": "Brooks-Corey"},
+]
+cap_press_constants_list = [{"model": None}, {"model": "Brooks-Corey"}]
+
+for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
+    itertools.product(
+        rel_perm_constants_list, rel_perm_constants_list, cap_press_constants_list
+    )
+):
+    if i != 2:
+        continue
+    run_name: str = (
+        f"rel.perm._{rp_model_1['model']}_to_rel.perm._{rp_model_2['model']}_cap.press._{cp_model['model']}"
+    )
+    solver_statistics_file: pathlib.Path = (
+        pathlib.Path(__file__).parent / "results" / run_name / "solver_statistics.json"
+    )
+    with open(solver_statistics_file) as f:
         history = json.load(f)
 
     discretization_est: list[float] = []
@@ -37,7 +50,6 @@ for hc_setup in ["linear to Corey", "linear to linear", "Corey to Corey"]:
     fig.savefig(
         pathlib.Path(__file__).parent
         / "results"
-        / "hc_estimators_test"
-        / hc_setup
-        / "solver_convergence.png"
+        / run_name
+        / "solver_convergence_hc.png"
     )

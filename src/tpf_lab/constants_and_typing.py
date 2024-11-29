@@ -17,7 +17,7 @@ type REL_PERM_MODEL = Literal[
 type CAP_PRESS_MODEL = Literal["Brooks-Corey", "linear", "van Genuchten", None]
 OperatorType = TypeVar("OperatorType", bound=pp.ad.Operator)
 
-
+# region KEYWORDS
 # Keywords:
 GLOBAL_PRESSURE: str = "global_pressure"
 COMPLIMENTARY_PRESSURE: str = "complimentary_pressure"
@@ -30,3 +30,15 @@ NONWETTING: PHASENAME = "nonwetting"
 
 # Homotopy continuation:
 CONTINUATION_SOLUTIONS: str = "continuation_solutions"
+# endregion
+
+# region UNITS
+# Each units gives the conversion factor to SI units. E.g.,
+# >>> psi: float = 6894.76
+# Then we can convert 5.2 [psi] to [Pa] by
+# >>> 5.2 * psi
+cP: float = 1e-3  # centipoise to [Pa s]
+FEET: float = 0.3048  # [ft] to [m]
+LB: float = 0.453592  # [lb] to [kg]
+PSI: float = 6894.76  # [psi] to [Pa]
+# endregion

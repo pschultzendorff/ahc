@@ -1,21 +1,20 @@
 import logging
-import os
 import pathlib
 import zipfile
 from typing import Optional
 
 import numpy as np
+import porepy as pp
 import requests
 
 logger = logging.getLogger(__name__)
 
-data_dir: pathlib.Path = pathlib.Path(__file__).parent / "csp10_data"
-zip_filename: str = "por_perm_case2a.zip"
-zip_filepath: pathlib.Path = data_dir / zip_filename
+DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent / "data"
+ZIP_FILENAME: str = "por_perm_case2a.zip"
 URL: str = "https://www.spe.org/web/csp/datasets/por_perm_case2a.zip"
 
 
-def download_csp10_data() -> None:
+def download_spe10_data(data_dir: pathlib.Path, zip_filepath: pathlib.Path) -> None:
     """Download the SPE CSP10 porosity and permeability data, and store them locally."""
     # Ensure the destination directory exists.
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -53,7 +52,7 @@ def download_csp10_data() -> None:
     logger.info("Downloaded files cleaned up.")
 
 
-def load_csp10_data() -> tuple[np.ndarray, np.ndarray]:
+def load_spe10_data(data_dir: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
     """Load the SPE CSP10 data into :class:`~numpy.ndarray`.
 
     Returns:
@@ -74,15 +73,17 @@ def load_csp10_data() -> tuple[np.ndarray, np.ndarray]:
             poro_file = data_dir / filename
     if perm_file is None or poro_file is None:
         logger.info("Permeability and porosity data files not found. Downloading...")
-        download_csp10_data()
+        download_spe10_data(data_dir, data_dir / ZIP_FILENAME)
 
     logger.info("Loading permeability and porosity data.")
     perm_data = np.loadtxt(str(perm_file)).reshape(3, 85, 220, 60)  # unit: [mD]
+    # Convert permeability to m^2.
+    perm_data *= pp.MILLIDARCY
     poro_data = np.loadtxt(str(poro_file)).reshape(85, 220, 60)  # unit: [-]
 
     return perm_data, poro_data
 
 
 # Example usage
-permeability, porosity = load_csp10_data()
+permeability, porosity = load_spe10_data(DATA_DIR)
 print(f"Permeability shape: {permeability.shape}, Porosity shape: {porosity.shape}")

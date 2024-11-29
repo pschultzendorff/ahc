@@ -18,15 +18,9 @@ from typing import Any, Callable, Literal, Optional
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-from tpf_lab.constants_and_typing import (
-    COMPLIMENTARY_PRESSURE,
-    GLOBAL_PRESSURE,
-    OperatorType,
-)
-from tpf_lab.models.flow_and_transport import SolutionStrategyTPF
+from tpf_lab.constants_and_typing import COMPLIMENTARY_PRESSURE, GLOBAL_PRESSURE
 from tpf_lab.models.phase import PHASENAME, Phase
 from tpf_lab.numerics.quadrature import (
-    BaseScheme,
     GaussLegendreQuadrature1D,
     Integral,
     TriangleQuadrature,
@@ -1084,10 +1078,12 @@ class SolutionStrategyReconstructionsMixin:
 
     compute_errors: Callable
 
+    mdg: pp.MixedDimensionalGrid
+
     @property
     def iterate_indices(self) -> np.ndarray:
-        """Indices for storing iterate solutions. To construct the reconstructions we
-        need to store the previous iterate as well."""
+        """Indices for storing iterate solutions. To equilibrate the fluxes, the
+        previous iterate has to be stored."""
         return np.array([0, 1])
 
     def prepare_simulation(self) -> None:
@@ -1102,64 +1098,8 @@ class SolutionStrategyReconstructionsMixin:
 
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
         super().after_nonlinear_iteration(nonlinear_increment)
-        # Only do this for values that make sense.
-        # FIXME Think about how this should be.
-        # if (
-        #     self.time_manager.time_index > 1
-        #     or self.nonlinear_solver_statistics.num_iteration > 1
-        # ):
         self.eval_additional_vars()
         self.postprocess_solution()
-
-    # TODO Once HC is fully implemented, this has to be done by
-    # ``after_continuation_convergence``.
-    def after_nonlinear_convergence(self) -> None:
-        super().after_nonlinear_convergence()
-        # Shift post-processed/reconstructed pressure and equilibrated/extended flux
-        # coefficients and set new time step values.
-        _, sd_data = self.mdg.subdomains(return_data=True)[0]
-        for pressure_key, key in itertools.product(
-            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            [
-                "postprocessed_coeffs",
-                "reconstructed_point_val",
-                "reconstructed_point_coo",
-                "reconstructed_coeffs",
-            ],
-        ):
-            pp.shift_solution_values(
-                f"{pressure_key}_{key}",
-                sd_data,
-                pp.TIME_STEP_SOLUTIONS,
-                len(self.time_step_indices),
-            )
-            values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{key}", sd_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}_{key}", values, sd_data, time_step_index=0
-            )
-        for flux_name, flux_specifier in itertools.product(
-            ["total", "wetting"],
-            ["", "_equilibrated"],
-        ):
-            pp.shift_solution_values(
-                f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
-                sd_data,
-                pp.TIME_STEP_SOLUTIONS,
-                len(self.time_step_indices),
-            )
-            values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
-                sd_data,
-                iterate_index=0,
-            )
-            pp.set_solution_values(
-                f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
-                values,
-                sd_data,
-                time_step_index=0,
-            )
 
     def eval_additional_vars(self) -> None:
         """Evaluate additional pressure and flux variables and save in data dictionary

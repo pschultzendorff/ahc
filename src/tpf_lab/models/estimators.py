@@ -7,6 +7,7 @@ from typing import Any, Callable, Literal, Optional
 
 import numpy as np
 import porepy as pp
+from porepy.viz.exporter import DataInput
 from tpf_lab.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     GLOBAL_PRESSURE,
@@ -334,13 +335,25 @@ class EstimatesMixin:
                 )
                 # NOTE For now, perm is just a scalar, so we do not have to use
                 # matrix multiplication.
-                fluxes.append(
-                    perm[None, :, None]
-                    * total_mobility[None, :, None]
-                    * pressure_potential
-                    if pressure_key == GLOBAL_PRESSURE
-                    else perm[None, :, None] * pressure_potential
-                )
+                # Different treatment for scalar and tensor permeabilities.
+                if isinstance(perm, np.ndarray):
+                    fluxes.append(
+                        perm[None, :, None]
+                        * total_mobility[None, :, None]
+                        * pressure_potential
+                        if pressure_key == GLOBAL_PRESSURE
+                        else perm[None, :, None] * pressure_potential
+                    )
+                elif isinstance(perm, dict):
+                    # TODO Fix this for tensor permeabilities.
+                    # Perm has form ``{"kxx": np.ndarray, "kyy": np.ndarray, ...}``.
+                    fluxes.append(
+                        perm[None, :, None]
+                        * total_mobility[None, :, None]
+                        * pressure_potential
+                        if pressure_key == GLOBAL_PRESSURE
+                        else perm[None, :, None] * pressure_potential
+                    )
             if values == "L2_new":
                 fluxes.append(fluxes[0])
             return (
@@ -632,10 +645,6 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
         converged, diverged = super().check_convergence(
             nonlinear_increment, residual, reference_residual, nl_params
         )
-        # if (
-        #     self.time_manager.time_index > 1
-        #     or self.nonlinear_solver_statistics.num_iteration > 1
-        # ):
         residual_and_flux_est: float = self.global_res_and_flux_est()
         global_nonconformity_est, complimentary_nonconfonformity_est = (
             self.global_nonconformity_est()
@@ -650,8 +659,6 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
         return converged, diverged
 
     def after_nonlinear_convergence(self) -> None:
-        # TODO Once HC is fully implemented, delete this. The work is done by
-        # ``after_hc_convergence``.
         super().after_nonlinear_convergence()
 
         # Update time step values for local in space and time estimates.
@@ -692,39 +699,54 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
                 f"{flux_name}_{key}", values, sd_data, time_step_index=0
             )
 
-    def after_hc_convergence(self) -> None:
-        # Shift reconstructed pressure coefficients and spatial integrals of the
-        # estimators and set new time step values.
-        _, sd_data = self.mdg.subdomains(return_data=True)[0]
-        for pressure_key, key in itertools.product(
-            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["NC_integral"],
-        ):
-            pp.shift_solution_values(
-                f"{pressure_key}_{key}",
-                sd_data,
-                pp.TIME_STEP_SOLUTIONS,
-                len(self.time_step_indices),
+
+class DataSavingEstMixin:
+
+    def data_to_export(self) -> list[DataInput]:
+        """Return data to be exported.
+
+        Return type should comply with pp.exporter.DataInput.
+
+        Returns:
+            List containing all (grid, name, scaled_values) tuples.
+
+        """
+        data = []
+        variables = self.equation_system.variables
+        for var in variables:
+            scaled_values = self.equation_system.get_variable_values(
+                variables=[var], time_step_index=0
             )
-            values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{key}", sd_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}_{key}", values, sd_data, time_step_index=0
-            )
-        for flux_name, key in itertools.product(
-            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["R_integral", "F_integral"],
-        ):
-            pp.shift_solution_values(
-                f"{flux_name}_{key}",
-                sd_data,
-                pp.TIME_STEP_SOLUTIONS,
-                len(self.time_step_indices),
-            )
-            values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{key}", sd_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{flux_name}_{key}", values, sd_data, time_step_index=0
-            )
+            units = var.tags["si_units"]
+            values = self.fluid.convert_units(scaled_values, units, to_si=True)
+            data.append((var.domain, var.name, values))
+
+        # Add secondary variables/derived quantities.
+        # All models are expected to have the dimension reduction methods for aperture
+        # and specific volume. More methods may be added as needed, e.g. by overriding
+        # this method:
+        #   def data_to_export(self):
+        #       data = super().data_to_export()
+        #       data.append(
+        #           (grid, "name", self._evaluate_and_scale(sd, "name", "units"))
+        #       )
+        #       return data
+        for dim in range(self.nd + 1):
+            for sd in self.mdg.subdomains(dim=dim):
+                if dim < self.nd:
+                    data.append(
+                        (sd, "aperture", self._evaluate_and_scale(sd, "aperture", "m"))
+                    )
+                data.append(
+                    (
+                        sd,
+                        "specific_volume",
+                        self._evaluate_and_scale(
+                            sd, "specific_volume", f"m^{self.nd - sd.dim}"
+                        ),
+                    )
+                )
+
+        # We combine grids and mortar grids. This is supported by the exporter, but not
+        # by the type hints in the exporter module. Hence, we ignore the type hints.
+        return data  # type: ignore[return-value]

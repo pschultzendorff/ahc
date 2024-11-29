@@ -49,7 +49,6 @@ It follows, that the domain unit is meters and the time unit is seconds.
 
 from __future__ import annotations
 
-import abc
 import logging
 import time
 from functools import partial
@@ -65,15 +64,11 @@ from tpf_lab.constants_and_typing import (
     WETTING,
     OperatorType,
 )
-from tpf_lab.models.constitutive_laws_tpf import (
-    CapillaryPressure,
-    RelativePermeability,
-    RelPermConstants,
-)
+from tpf_lab.models.constitutive_laws_tpf import CapillaryPressure, RelativePermeability
 from tpf_lab.models.phase import Phase, PhaseConstants
 from tpf_lab.numerics.ad.functions import ad_pow as ad_pow
 from tpf_lab.numerics.ad.functions import minimum
-from tpf_lab.visualization.diagnostics import DataSavingTPF, SaveDataTPF
+from tpf_lab.visualization.diagnostics import SaveDataTPF
 
 logger = logging.getLogger(__name__)
 
@@ -530,8 +525,8 @@ class EquationsTPF(pp.BalanceEquation):
         """Volumetric phase source term. Given as volumetric flux. This
         unmodified base function assumes a zero phase source.
 
-        NOTE This is the average value per grid cell, i.e., it gets scaled with the
-        cell volume in the equation.
+        Note: This is the value for a full grid cell, i.e., it does **NOT** get
+            integrated over the cell volume in the equation.
 
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
@@ -544,8 +539,8 @@ class EquationsTPF(pp.BalanceEquation):
 
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
-        NOTE This is the average value per grid cell, i.e., it gets scaled with the
-        cell volume in the equation.
+        Note: This is the value for a full grid cell, i.e., it does **NOT** get
+            integrated over the cell volume in the equation.
 
         """
         return sum(
@@ -574,7 +569,7 @@ class EquationsTPF(pp.BalanceEquation):
 
     def _porosity(self, g: pp.Grid) -> np.ndarray:
         """Solid porosity. This unmodified base function assumes homogeneous
-        porosity. Value and unit are set by :attr:`self.solid`."""
+        porosity. Value is set by :attr:`self.solid`."""
         return np.full(g.num_cells, self.solid.porosity())
 
     def set_equations(self, equation_names: Optional[dict[str, str]] = None) -> None:
@@ -590,10 +585,10 @@ class EquationsTPF(pp.BalanceEquation):
         # Spatial discretization operators.
         div = pp.ad.Divergence([g])
         flux_mpfa = pp.ad.MpfaAd(self.flux_key, [g])
+        upwind_w = pp.ad.UpwindAd(self.wetting.mobility_key, [g])
 
         # Time derivatives.
-        dt = pp.ad.Scalar(self.time_manager.dt)
-        dt_s = pp.ad.time_derivatives.dt(self.wetting.s, dt)
+        dt_s = pp.ad.time_derivatives.dt(self.wetting.s, self.ad_time_step)
 
         # Ad source.
         source_ad_w = pp.ad.DenseArray(self.phase_fluid_source(g, self.wetting))
@@ -617,8 +612,11 @@ class EquationsTPF(pp.BalanceEquation):
             fractional_flow_w: pp.ad.Operator = mobility_w / mobility_t
             vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
             vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+            bc_neumann_flux_values_w = pp.ad.DenseArray(
+                self.bc_neumann_flux_values(g, self.wetting)
+            )
 
-            flow_equation = div @ flux_t - self.volume_integral(source_ad_t, [g], 1)
+            flow_equation = div @ flux_t - source_ad_t
             transport_equation = (
                 porosity_ad * (self.volume_integral(dt_s, [g], 1))
                 + div
@@ -634,9 +632,11 @@ class EquationsTPF(pp.BalanceEquation):
                     # NOTE ``phase_mobility(self.wetting)`` and hence
                     # ``fractional_flow_w`` are zero on Neumann boundaries. We add the
                     # wetting flux at Neumann boundaries by using an upwind
-                    # discretization.
+                    # discretization. For the total flux, this is already included,
+                    # hence it does not need to be added to the flow equation
+                    + upwind_w.bound_transport_neu() @ bc_neumann_flux_values_w
                 )
-                - self.volume_integral(source_ad_w, [g], 1)
+                - source_ad_w
             )
         flow_equation.set_name("Flow equation")
         transport_equation.set_name("Transport equation")
@@ -683,13 +683,6 @@ class VariablesTPF(pp.VariableMixin):
     :class:`~porepy.models.geometry.ModelGeometry`.
 
     """
-
-    # def __init__(self, params: Optional[dict]) -> None:
-    #     # TODO Should this be here or right after the class?
-    #     self.primary_pressure_var: str
-    #     self.primary_saturation_var: str
-    #     self.secondary_pressure_var: str
-    #     self.secondary_saturation_var: str
 
     def create_variables(self) -> None:
         """Create primary variables (wetting pressure, nonwetting pressure,
@@ -878,7 +871,7 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
 
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann)."""
-        # Dirichlet conditions for both phase.
+        # Dirichlet conditions for both phases.
         boundary_faces = self.domain_boundary_sides(g).all_bf
         return pp.BoundaryCondition(g, boundary_faces, "dir")
 
@@ -911,7 +904,7 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
                 g.num_faces
             ) - self.bc_dirichlet_saturation_values(g, self.wetting)
         neu_ind: np.ndarray = self.bc_type(g).is_neu
-        s_bc[neu_ind] = 0
+        s_bc[neu_ind] = self.wetting.constants.residual_saturation()
         return s_bc
 
     def bc_neumann_flux_values(self, g: pp.Grid, phase: Phase) -> np.ndarray:
@@ -1036,7 +1029,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
 
     """
 
-    save_data_time_step: Callable
+    save_data_time_step: Callable[[], None]
     """Normally provided by a mixin of instance :class:`~porepy.DataSavingMixing`."""
 
     def __init__(self, params: Optional[dict]) -> None:
@@ -1165,24 +1158,23 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         The initial values are exported.
 
         """
+        # Set the model parameters.
         self.set_rel_perm_constants()
         self.set_cap_press_constants()
         self.set_materials()
         self.set_geometry()
-        self.set_solver_statistics()
         # Exporter initialization must be done after grid creation,
         # but prior to data initialization.
+        self.set_solver_statistics()
         self.initialize_data_saving()
-        #
+        # Create the numerical aparatus.
         self.set_equation_system_manager()
         self.create_variables()
         self.initial_condition()
         self.set_discretization_parameters()
         self.set_equations()
-        #
         self.discretize()
-
-        # self.initialize_data_saving()
+        # Save the initial values.
         self.save_data_time_step()
 
     def set_discretization_parameters(self) -> None:
@@ -1193,8 +1185,13 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         """
         super().set_discretization_parameters()
         for sd, data in self.mdg.subdomains(return_data=True):
-            # Boundary conditions and parameters
-            diffusivity = pp.SecondOrderTensor(self._permeability(sd))
+            # Boundary conditions and parameters.
+            perm = self._permeability(sd)
+            # Different treatment for scalar and tensor permeability.
+            if isinstance(perm, np.ndarray):
+                diffusivity = pp.SecondOrderTensor(self._permeability(sd))
+            elif isinstance(perm, dict):
+                diffusivity = pp.SecondOrderTensor(**self._permeability(sd))
             # all_bf, *_ = self._domain_boundary_sides(sd)
             # Parameters that are not used for discretization.
             pp.initialize_data(
@@ -1251,13 +1248,13 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         self.equation_system.set_variable_values(
             np.full(g.num_cells * 2, 0.0),
             [self.wetting.p, self.nonwetting.p],
-            time_step_index=self.time_manager.time_index,
+            time_step_index=0,
             iterate_index=0,
         )
         self.equation_system.set_variable_values(
             np.full(g.num_cells * 2, 0.5),
             [self.wetting.s, self.nonwetting.s],
-            time_step_index=self.time_manager.time_index,
+            time_step_index=0,
             iterate_index=0,
         )
 
@@ -1293,17 +1290,18 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             linear_system is assigned.
 
         """
-        # t_0 = time.time()
+        t_0 = time.time()
         if self._use_ad:
             self.linear_system = self.equation_system.assemble(
                 variables=[self.primary_pressure_var, self.primary_saturation_var]
             )
-        # logger.debug(f"Assembled linear system in {time.time() - t_0:.2e} seconds")
+        logger.debug(f"Assembled linear system in {time.time() - t_0:.2e} seconds")
 
     # region NONLINEAR LOOP
     def before_nonlinear_loop(self) -> None:
         """Set the starting estimate to the solution from the previous timestep."""
-        self.time_manager._recomp_sol = False
+        # Update time step size and empty statistics.
+        self.ad_time_step.set_value(self.time_manager.dt)
         self.nonlinear_solver_statistics.reset()
 
         assembled_variables = self.equation_system.get_variable_values(
@@ -1450,25 +1448,27 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                 logger.debug(
                     "Saturation grew to quickly. Trying again with a smaller time step."
                 )
+                # TODO Actually try again with a smaller time step.
                 return None
 
-    # Ignore mypy complaining about uncompatible signature.
-    # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
-    def after_nonlinear_failure(self) -> None:  # type: ignore
-        # For subclasses that calculate an L2 error, the L2 error is not of interest
-        # when the model did not reach the last time step. Thus, data can be saved
-        # before the time step solution is distributed.
-        self.save_data_time_step(
-            # self.nonlinear_solver_statistics.residual_norms,
-            # self.nonlinear_solver_statistics.num_iteration,
+    def check_convergence(
+        self,
+        nonlinear_increment: np.ndarray,
+        residual: np.ndarray,
+        reference_residual: np.ndarray,
+        nl_params: dict[str, Any],
+    ) -> tuple[bool, bool]:
+        """Implement an additional divergence check that returns true if the nonlinear
+        increment is unreasonably large."""
+        converged, diverged = super().check_convergence(
+            nonlinear_increment, residual, reference_residual, nl_params
         )
-        logger.debug(f"Failed on timestep {self.time_manager.time_index}")
-        logger.debug(
-            f"Error {self.nonlinear_solver_statistics.residual_norms[-1]}"
-            + f" nonlinear iteration {self.nonlinear_solver_statistics.num_iteration}"
+        nonlinear_increment_norm: float = self.compute_nonlinear_increment_norm(
+            nonlinear_increment
         )
-        logger.debug(f'{{"converged": {"false"}}}')
-        raise ValueError("nonlinear iterations did not converge")
+        if nonlinear_increment_norm > nl_params["nl_divergence_tol"]:
+            diverged = True
+        return converged, diverged
 
     # endregion
 
@@ -1489,6 +1489,4 @@ class TwoPhaseFlow(  # type: ignore
     SolutionStrategyTPF,
     pp.ModelGeometry,
     pp.DataSavingMixin,
-    # DataSavingTwoPhaseFlow,
-    # VerificationUtils,
 ): ...

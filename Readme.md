@@ -34,3 +34,4 @@ simple neural networks and a training function.
 - Often we call ``pp.shift_solution_values`` even though this is not necessary!
 - Rename every method and attribute that contains ``continuation`` to ``hc`` to make
   things more readable!
+- Add keywords_only to all dataclasses!

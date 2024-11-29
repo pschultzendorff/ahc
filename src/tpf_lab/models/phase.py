@@ -131,6 +131,11 @@ class PhaseConstants(pp.MaterialConstants):
             "pressure": 0.0,
             "viscosity": 1.0,
             "residual_saturation": 0.0,
+            # The following are not used in the current implementation.
+            "thermal_conductivity": 1,
+            "thermal_expansion": 0,
+            "normal_thermal_conductivity": 1,
+            "specific_heat_capacity": 1,
         }
         return default_constants
 

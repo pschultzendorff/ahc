@@ -496,3 +496,9 @@ class CapillaryPressure:
         else:
             # Return cap. pressure 0.
             return pp.ad.Scalar(0) * s_normalized
+
+
+def validate_constants() -> bool:
+    """Check that the relative permeability and capillary pressure models go in hand."""
+    # FIXME (2021-09-07): Implement this function.
+    pass

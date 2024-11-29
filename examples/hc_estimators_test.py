@@ -87,9 +87,7 @@ class ModifiedEquations(EquationsTPF):
             array[0] = 0.5
             return array
         elif phase.name == "nonwetting":
-            array = super().phase_fluid_source(g, phase)
-            array[39] = 0.1
-            return array
+            return super().phase_fluid_source(g, phase)
 
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
@@ -105,6 +103,25 @@ class ModifiedConstitutiveLaws(
     RelativePermeabilityHC,
     ConstitutiveLawsTPF,
 ): ...
+
+
+class ModifiedSolutionStrategy(SolutionStrategyTPF):
+
+    def initial_condition(self) -> None:
+        """Set initial values for pressure and saturation."""
+        g = self.mdg.subdomains()[0]
+        self.equation_system.set_variable_values(
+            np.full(g.num_cells * 2, 0.0),
+            [self.wetting.p, self.nonwetting.p],
+            time_step_index=0,
+            iterate_index=0,
+        )
+        self.equation_system.set_variable_values(
+            np.concatenate([np.full(g.num_cells, 0.2), np.full(g.num_cells, 0.8)]),
+            [self.wetting.s, self.nonwetting.s],
+            time_step_index=0,
+            iterate_index=0,
+        )
 
 
 class HCTwoPhaseFlow(
@@ -126,7 +143,7 @@ class HCTwoPhaseFlow(
     PressureReconstructionMixin,
     EquilibratedFluxMixin,
     # Base solution strategy and data saving:
-    SolutionStrategyTPF,
+    ModifiedSolutionStrategy,
     pp.DataSavingMixin,
 ): ...  # type: ignore
 
@@ -134,7 +151,7 @@ class HCTwoPhaseFlow(
 solid_constants: pp.SolidConstants = pp.SolidConstants(
     {
         "porosity": 0.1,
-        "permeability": 1.0,
+        "permeability": 0.1,
     }
 )
 wetting_constants: PhaseConstants = PhaseConstants(
@@ -163,15 +180,15 @@ params = {
     "hc_max_iterations": 20,
     "hc_lambda_decay": 0.5,
     # Nonlinear params:
-    "max_iterations": 60,
+    "max_iterations": 20,
     "nl_convergence_tol": 1e-10,
     # Grid and time discretization:
     "grid_type": "simplex",
     "meshing_arguments": {"cell_size": 1.0},
     "time_manager": pp.TimeManager(
-        schedule=np.array([0, 20]),
-        dt_init=0.2,
-        constant_dt=True,
+        schedule=np.array([0, 0.1]),
+        dt_init=0.01,
+        constant_dt=False,
     ),
     # Model:
     "formulation": "fractional_flow",
@@ -181,7 +198,7 @@ params = {
         "nonwetting": nonwetting_constants,
     },
     "rel_perm_constants": {},
-    "cap_press_constants": {"model": None, "entry_pressure": 1e-2, "n_b": 2},
+    "cap_press_constants": {"model": "Brooks-Corey", "entry_pressure": 0.1, "n_b": 2},
 }
 
 rel_perm_constants_list = [
@@ -198,32 +215,14 @@ rel_perm_constants_list = [
         "linear_param_w": 1,
         "linear_param_n": 1,
     },
-    # {
-    #     "model": "van Genuchten-Mualem",
-    #     "limit": False,
-    #     "kappa_g": 1,
-    #     "n_g": 2,
-    # },
-    # {
-    #     "model": "van Genuchten-Burdine",
-    #     "limit": False,
-    #     "kappa_g": 1,
-    #     "n_g": 2,
-    # },
-    # {
-    #     "model": "Brooks-Corey",
-    #     "limit": False,
-    #     "n1": 2,
-    #     "n2": 1 + 2 / 2,
-    #     "n3": 1,
-    # },
 ]
 
 
 for model_1, model_2 in itertools.product(
     rel_perm_constants_list, rel_perm_constants_list
 ):
-    if model_1["model"] == model_2["model"]:
+    # Skip Corey->linear HC.
+    if model_1["model"] == "Corey" and model_2["model"] == "linear":
         continue
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
@@ -243,4 +242,7 @@ for model_1, model_2 in itertools.product(
     params["rel_perm_constants"]["model_2"] = model_2
     params["nonlinear_solver_statistics"] = SolverStatisticsHC
     model = HCTwoPhaseFlow(params)
-    pp.run_time_dependent_model(model=model, params=params)
+    try:
+        pp.run_time_dependent_model(model=model, params=params)
+    except Exception as error:
+        logger.error(f"Error: {error}")
