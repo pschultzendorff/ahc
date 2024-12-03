@@ -32,6 +32,7 @@ Model description:
 """
 
 import itertools
+import json
 import logging
 import pathlib
 import random
@@ -41,22 +42,30 @@ from typing import Any, Callable, Literal, Optional
 
 import numpy as np
 import porepy as pp
+from matplotlib import pyplot as plt
 from numba import config
 from tpf_lab.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     FEET,
     GLOBAL_PRESSURE,
+    PHASENAME,
     PSI,
 )
-from tpf_lab.models.estimators import EstimatesMixin, SolutionStrategyEstMixin
+from tpf_lab.models.estimators import (
+    DataSavingMixinEst,
+    EstimatesMixin,
+    SolutionStrategyEstMixin,
+)
 from tpf_lab.models.flow_and_transport import (
     BoundaryConditionsTPF,
     ConstitutiveLawsTPF,
+    DataSavingTPF,
     EquationsTPF,
     SolutionStrategyTPF,
     VariablesTPF,
 )
 from tpf_lab.models.homotopy_continuation import (
+    DataSavingMixinHC,
     EstimatesHCMixin,
     HCSolver,
     RelativePermeabilityHC,
@@ -64,14 +73,14 @@ from tpf_lab.models.homotopy_continuation import (
     SolutionStrategyHCMixin,
     SolverStatisticsHC,
 )
-from tpf_lab.models.phase import Phase, PhaseConstants
+from tpf_lab.models.phase import FluidPhase
 from tpf_lab.models.reconstructions import (
+    DataSavingMixinRec,
     EquilibratedFluxMixin,
     PressureMixin,
     PressureReconstructionMixin,
 )
-from tpf_lab.spe10.fluid_values import oil
-from tpf_lab.spe10.geometry import load_spe10_data
+from tpf_lab.spe10.mixin import SPE10Mixin
 
 # Disable numba JIT for debugging.
 config.DISABLE_JIT = True
@@ -89,6 +98,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
+# region MODEL
 class ModifiedGeometry(pp.ModelGeometry):
 
     def set_domain(self) -> None:
@@ -105,27 +115,10 @@ class ModifiedGeometry(pp.ModelGeometry):
         }
         self._domain = pp.Domain(bounding_box)
 
-    def meshing_arguments(self) -> dict[str, float]:
-        r"""The grid for the 3D SPE10 model is a cartesian grid with
-        :math:`60 \times 220 \times 85` cells. A single layer has
-        :math:`60 \times 220` cells. Since we take only a quarter of the domain, a
-        single 2D layer has :math:`30 \times 110` Cartesian cells.
-        For the error estimates, we require a simplex grid. A cell size of 20 ft will
-        give similar number of cells as the SPE10 Cartesian grind.
-
-        Returns:
-            Meshing arguments compatible with
-            :meth:`~porepy.grids.mdg_generation.create_mdg`.
-
-        """
-        cell_size = self.params["cell_size"]
-        default_meshing_args: dict[str, float] = {"cell_size": cell_size}
-        return self.params.get("meshing_arguments", default_meshing_args)
-
 
 class ModifiedEquations(EquationsTPF):
 
-    def phase_fluid_source(self, g: pp.Grid, phase: Phase) -> np.ndarray:
+    def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         r"""Volumetric phase source term. Given as volumetric flux.
 
         Five-spot setup. Water (wetting) injection in the center, oil (nonwetting)
@@ -137,40 +130,20 @@ class ModifiedEquations(EquationsTPF):
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
-        if phase.name == "wetting":
+        if phase.name == self.wetting.name:
             array: np.ndarray = super().phase_fluid_source(g, phase)
-            array[1307] = 87.5 / pp.DAY  # 87.5 m^3/day in [m^3/s]
+            if np.isclose(
+                self.params["meshing_arguments"]["cell_size"], 600 * FEET / 30
+            ):
+                array[1358] = 87.5 / pp.DAY  # 87.5 m^3/day in [m^3/s]
             return array
-        elif phase.name == "nonwetting":
+        elif phase.name == self.nonwetting.name:
             return super().phase_fluid_source(g, phase)
-
-    # TODO Change the names to ``permeability`` and ``porosity``. Make the base
-    # functions return ``_permeability`` and ``_porosity``. Should these be properties?
-    def _permeability(self, g: pp.Grid) -> np.ndarray | dict[str, np.ndarray]:
-        """Solid permeability. Chosen layer of the SPE10 model. Unit are set by
-        :attr:`self.solid`."""
-        # For now, we consider only isotropic permeability.
-        return self._perm_data[0, 0, ...]  # , self._perm_data[1, 1, ...]
-
-    def _porosity(self, g: pp.Grid) -> np.ndarray:
-        """Solid permeability. Chosen layer of the SPE10 model."""
-        return self._poro_data
-
-    def load_spe10_model(self, g: pp.Grid) -> None:
-        perm, poro = load_spe10_data(pathlib.Path(__file__).parent / "data")
-        self._perm_data: np.ndarray = np.zeros((2, 2, g.num_cells))
-        self._poro_data: np.ndarray = np.zeros((g.num_cells,))
-        for i in range(g.num_cells):
-            coors: np.ndarray = g.cell_centers[:, i]
-            x_ind: int = int(coors[0] // 60)
-            y_ind: int = int(coors[1] // 220)
-            self._perm_data[0, 0, i] = perm[0, self.params["spe10_layer"], y_ind, x_ind]
-            self._perm_data[1, 1, i] = perm[1, self.params["spe10_layer"], y_ind, x_ind]
-            self._poro_data[i] = poro[0, y_ind, x_ind]
 
     def corner_cell_ids(self, g: pp.Grid) -> list[int]:
         """Get the corner cell ids."""
-        return [3616, 3618, 3622, 3624]
+        if np.isclose(self.params["meshing_arguments"]["cell_size"], 600 * FEET / 30):
+            return [3616, 3618, 3622, 3624]
 
     def corner_masks(self, g: pp.Grid) -> tuple[pp.ad.DenseArray, pp.ad.DenseArray]:
         """Create masks that hide and single out the corner cells."""
@@ -212,8 +185,7 @@ class ModifiedEquations(EquationsTPF):
             self.nonwetting.p - pp.ad.Scalar(4000 * PSI)
         )
         explicit_saturation: pp.ad.Operator = corner_mask * (
-            self.wetting.s
-            - pp.ad.Scalar(1 - self.wetting.constants.residual_saturation())
+            self.wetting.s - pp.ad.Scalar(1 - self.wetting.residual_saturation())
         )
         explicit_pressure.set_name("Explicit pressure")
         explicit_saturation.set_name("Explicit saturation")
@@ -250,8 +222,9 @@ class ModifiedConstitutiveLaws(
 
 
 class ModifiedEstimates(EstimatesHCMixin):
+    """Null the estimates in the corner (well) cells."""
 
-    def local_residual_est(self, flux_name: Literal["total", "wetting"]) -> None:
+    def local_residual_est(self, flux_name: Literal["total", PHASENAME]) -> None:
         super().local_residual_est(flux_name)
 
         sd, sd_data = self.mdg.subdomains(return_data=True)[0]
@@ -345,35 +318,13 @@ class ModifiedEstimates(EstimatesHCMixin):
         )
 
 
-class ModifiedSolutionStrategy(SolutionStrategyTPF):
+class ModifiedSolutionStrategyMixin:
 
-    load_spe10_model: Callable[[pp.Grid], None]
     mdg: pp.MixedDimensionalGrid
-
-    def prepare_simulation(self) -> None:
-        # Set the model parameters.
-        self.set_rel_perm_constants()
-        self.set_cap_press_constants()
-        self.set_materials()
-        self.set_geometry()
-        # Initialize permeability and porosity now. Must be done after setting the
-        # geometry but before setting equations.
-        self.load_spe10_model(self.mdg.subdomains()[0])
-        # Exporter initialization must be done after grid creation,
-        # but prior to data initialization.
-        self.set_solver_statistics()
-        self.initialize_data_saving()
-        # Create the numerical aparatus.
-        self.set_equation_system_manager()
-        self.create_variables()
-        # The mixin ``SolutionStrategyHCMixin`` provides an ``initial_condition`` method
-        # as well. To ensure, the method below is called, we specify the class name.
-        ModifiedSolutionStrategy.initial_condition(self)
-        self.set_discretization_parameters()
-        self.set_equations()
-        self.discretize()
-        # Save the initial values.
-        self.save_data_time_step()
+    wetting: FluidPhase
+    nonwetting: FluidPhase
+    corner_cell_ids: Callable[[pp.Grid], list[int]]
+    equation_system: pp.EquationSystem
 
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation.
@@ -389,9 +340,7 @@ class ModifiedSolutionStrategy(SolutionStrategyTPF):
         initial_pressure = np.full(g.num_cells, 6000 * PSI)
         initial_pressure[corner_cell_ids] = 4000 * PSI
         initial_saturation = np.full(g.num_cells, 0.4)
-        initial_saturation[corner_cell_ids] = (
-            1 - self.wetting.constants.residual_saturation()
-        )
+        initial_saturation[corner_cell_ids] = 1 - self.wetting.residual_saturation()
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),
             [self.wetting.p, self.nonwetting.p],
@@ -408,39 +357,39 @@ class ModifiedSolutionStrategy(SolutionStrategyTPF):
         )
 
 
-class HCTwoPhaseFlow(
+class ModifiedTPF(
+    # SPE10:
+    SPE10Mixin,
     # Model mixins:
     ModifiedEquations,
     VariablesTPF,
     ModifiedConstitutiveLaws,
     ModifiedGeometry,
     ModifiedBoundaryConditions,
+    ModifiedSolutionStrategyMixin,
     # Homotopy continuation mixins:
     EstimatesHCMixin,
     SolutionStrategyHCMixin,
     SolutionStrategyEstHCMixin,
+    DataSavingMixinHC,
     # Estimator mixins:
     EstimatesMixin,
     SolutionStrategyEstMixin,
+    DataSavingMixinEst,
     # Reconstruction mixins:
     PressureMixin,
     PressureReconstructionMixin,
     EquilibratedFluxMixin,
-    # Base solution strategy and data saving:
-    ModifiedSolutionStrategy,
-    pp.DataSavingMixin,
+    DataSavingMixinRec,
+    # Base data saving:
+    SolutionStrategyTPF,
+    DataSavingTPF,
 ): ...  # type: ignore
 
 
-solid_constants: pp.SolidConstants = pp.SolidConstants({})
-extended_water: dict[str, Any] = pp.fluid_values.water.copy()
-extended_water.update({"residual_saturation": 0.2})
-extended_oil: dict[str, Any] = oil.copy()
-extended_oil.update({"residual_saturation": 0.2})
+# endregion
 
-wetting_constants: PhaseConstants = PhaseConstants(extended_water)
-nonwetting_constants: PhaseConstants = PhaseConstants(extended_oil)
-
+# region RUN
 spe10_layer: int = 80
 cell_size: float = 600 * FEET / 30
 
@@ -451,6 +400,7 @@ params = {
     "progressbars": True,
     "nonlinear_solver_statistics": SolverStatisticsHC,
     "spe10_layer": spe10_layer - 1,
+    "spe10_isotropic_perm": True,
     # HC params:
     "nonlinear_solver": HCSolver,
     "hc_max_iterations": 20,
@@ -458,7 +408,7 @@ params = {
     # HC decay parameters.
     "hc_constant_decay": False,
     "hc_lambda_decay": 0.8,
-    "hc_decay_min_max": (0.1, 0.9),
+    "hc_decay_min_max": (0.1, 0.95),
     "nl_iter_optimal_range": (4, 7),
     "nl_iter_relax_factors": (0.7, 1.3),
     "hc_decay_recomp_max": 5,
@@ -466,47 +416,25 @@ params = {
     "hc_error_ratio": 0.1,
     "nl_error_ratio": 0.1,
     # Nonlinear params:
-    "max_iterations": 60,
-    "nl_convergence_tol": 1e-10
-    * 10000
-    * PSI,  # Scale the nonlinear tolerance by pressure values.
+    "max_iterations": 20,
+    "nl_convergence_tol": 1e-5,
     "nl_divergence_tol": 1e15,
     # Grid and time discretization:
     "grid_type": "simplex",
-    "cell_size": cell_size,
-    "time_manager": pp.TimeManager(
-        schedule=np.array([0, 30 * pp.DAY]),  # 10 days
-        dt_init=10 * pp.DAY,  # time step size in days
-        dt_min_max=(1e-3 * pp.DAY, 10 * pp.DAY),
-        constant_dt=False,
-        recomp_factor=0.1,
-        recomp_max=5,
-    ),
     # Model:
     "formulation": "fractional_flow",
-    "material_constants": {
-        "solid": solid_constants,
-        "wetting": wetting_constants,
-        "nonwetting": nonwetting_constants,
-    },
     "rel_perm_constants": {},
     "cap_press_constants": {},
 }
-
-rel_perm_constants_list = [
+rel_perm_constants_list_1: list[dict[str, Any]] = [
     {
         "model": "linear",
         "limit": False,
         "linear_param_w": 1,
         "linear_param_n": 1,
     },
-    {
-        "model": "Corey",
-        "limit": False,
-        "power": 2,
-        "linear_param_w": 1,
-        "linear_param_n": 1,
-    },
+]
+rel_perm_constants_list_2: list[dict[str, Any]] = [
     {
         "model": "Brooks-Corey",
         "limit": False,
@@ -515,13 +443,12 @@ rel_perm_constants_list = [
         "n3": 1,
     },
 ]
-cap_press_constants_list = [
-    {
-        "model": None,
-    },
+
+cap_press_constants_list: list[dict[str, Any]] = [
+    # {"model": None}
     {
         "model": "Brooks-Corey",
-        "entry_pressure": 20 * PSI,
+        "entry_pressure": 5 * PSI,
         "n_b": 2,
     },
 ]
@@ -529,29 +456,107 @@ cap_press_constants_list = [
 
 for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
     itertools.product(
-        rel_perm_constants_list, rel_perm_constants_list, cap_press_constants_list
+        rel_perm_constants_list_1, rel_perm_constants_list_2, cap_press_constants_list
     )
 ):
-    if i != 2:
-        continue
+    logger.info(
+        f"Run {i + 1} of {len(rel_perm_constants_list_1) *  len(rel_perm_constants_list_2)* len(cap_press_constants_list)}"
+    )
+    logger.info(
+        f"Cell size: {cell_size:.2f}, RP model 1: {rp_model_1['model']}, RP model 2: {rp_model_2['model']}, CP model: {cp_model['model']}"
+    )
+
+    continue
+    # We have the file name both in the folder name and the filename to make
+    # distinguishing different runs in ParaView easier.
+    filename: str = (
+        f"rp1_{rp_model_1['model']} rp2_{rp_model_2['model']}_cp_{cp_model['model']}"
+    )
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / f"results_layer_{spe10_layer}_cell_size_{cell_size:.2f}"
-        / f"rel.perm._{rp_model_1['model']}_to_rel.perm._{rp_model_2['model']}_cap.press._{cp_model['model']}"
+        / "homotopy continuation"
+        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
+        / filename
     )
+
     try:
         shutil.rmtree(foldername)
-        foldername.mkdir(parents=True)
     except Exception:
         pass
+    foldername.mkdir(parents=True)
 
-    params["folder_name"] = foldername
-    params["solver_statistics_file_name"] = foldername / "solver_statistics.json"
-    params["rel_perm_constants"]["model_1"] = rp_model_1
-    params["rel_perm_constants"]["model_2"] = rp_model_2
-    params["cap_press_constants"] = cp_model
-    model = HCTwoPhaseFlow(params)
+    params.update(
+        {
+            # Reinitialize the time manager for each run
+            "time_manager": pp.TimeManager(
+                schedule=np.array([0, 0.2 * pp.DAY]),  # 5 days
+                dt_init=0.2 * pp.DAY,  # time step size in days
+                dt_min_max=(1e-6 * pp.DAY, 0.2 * pp.DAY),
+                constant_dt=False,
+                recomp_factor=0.2,
+                recomp_max=5,
+            ),
+            "folder_name": foldername,
+            "file_name": filename,
+            "solver_statistics_file_name": foldername / "solver_statistics.json",
+            "meshing_arguments": {"cell_size": cell_size},
+            "rel_perm_constants": {"model_1": rp_model_1, "model_2": rp_model_2},
+            "cap_press_constants": cp_model,
+        }
+    )
+
+    model = ModifiedTPF(params)
     try:
         pp.run_time_dependent_model(model=model, params=params)
     except Exception as error:
         logger.error(f"Model {model} failed with error: {error}")
+        raise error
+
+# endregion
+
+# region PLOTTING
+for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
+    itertools.product(
+        rel_perm_constants_list_1, rel_perm_constants_list_2, cap_press_constants_list
+    )
+):
+    if i != 0:
+        continue
+    filename: str = (
+        f"rp1_{rp_model_1['model']} rp2_{rp_model_2['model']}_cp_{cp_model['model']}"
+    )
+    foldername: pathlib.Path = (
+        pathlib.Path(__file__).parent
+        / "homotopy continuation"
+        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
+        / filename
+    )
+    solver_statistics_file: pathlib.Path = foldername / "solver_statistics.json"
+    with open(solver_statistics_file) as f:
+        history: dict[str, Any] = json.load(f)
+        history_list: list[Any] = list(history.values())[1:]
+
+    discretization_est: list[float] = []
+    hc_est: list[float] = []
+    linearization_est: list[float] = []
+    for time_step in history_list:
+        for nl_step in list(time_step.values()):
+            if isinstance(nl_step, int) or isinstance(nl_step, float):
+                continue
+            discretization_est.extend(nl_step["discretization_error_estimates"])
+            hc_est.extend(nl_step["hc_error_estimates"])
+            linearization_est.extend(nl_step["linearization_error_estimates"])
+
+    fig, ax = plt.subplots()
+    ax.semilogy(discretization_est[:100], label="Discretization estimator")
+    ax.semilogy(hc_est[:100], label="HC estimator")
+    ax.semilogy(linearization_est[:100], label="Linearization estimator")
+    ax.set_ylim([5e-5, 1e5])
+    ax.set_xlabel("Nonlinear iteration")
+    ax.set_ylabel("Estimator")
+    ax.set_title(f"Estimator values")
+    ax.legend()
+    plt.show()
+    fig.savefig(foldername / "solver_convergence.png")
+
+# endregion

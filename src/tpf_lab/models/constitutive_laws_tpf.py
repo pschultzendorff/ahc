@@ -2,14 +2,8 @@ from functools import partial
 from typing import Any, Callable, Literal, NamedTuple, Optional
 
 import porepy as pp
-from tpf_lab.constants_and_typing import (
-    CAP_PRESS_MODEL,
-    NONWETTING,
-    REL_PERM_MODEL,
-    WETTING,
-    OperatorType,
-)
-from tpf_lab.models.phase import Phase
+from tpf_lab.constants_and_typing import CAP_PRESS_MODEL, REL_PERM_MODEL, OperatorType
+from tpf_lab.models.phase import FluidPhase
 from tpf_lab.numerics.ad.functions import minimum
 
 
@@ -116,7 +110,9 @@ class RelativePermeability:
     """
     params: dict[str, Any]
     """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-    wetting: Phase
+    wetting: FluidPhase
+    """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
+    nonwetting: FluidPhase
     """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
 
     _rel_perm_constants: RelPermConstants
@@ -127,14 +123,14 @@ class RelativePermeability:
         )
 
     def _rel_perm_linear_param(
-        self, phase: Phase, rel_perm_constants: Optional[RelPermConstants] = None
+        self, phase: FluidPhase, rel_perm_constants: Optional[RelPermConstants] = None
     ) -> pp.ad.Scalar:
         if rel_perm_constants is None:
             rel_perm_constants = self._rel_perm_constants
         return pp.ad.Scalar(
             (
                 rel_perm_constants.linear_param_w
-                if phase.name == WETTING
+                if phase.name == self.wetting.name
                 else rel_perm_constants.linear_param_n
             ),
             name=f"{phase.name} rel. perm. linear_param",
@@ -142,7 +138,7 @@ class RelativePermeability:
 
     def _rel_perm_limit(
         self,
-        phase: Phase,
+        phase: FluidPhase,
         limit: Literal["min", "max"],
         rel_perm_constants: Optional[RelPermConstants] = None,
     ) -> float:
@@ -151,20 +147,20 @@ class RelativePermeability:
         if limit == "min":
             return (
                 rel_perm_constants.min_w
-                if phase.name == WETTING
+                if phase.name == self.wetting.name
                 else rel_perm_constants.min_n
             )
         elif limit == "max":
             return (
                 rel_perm_constants.max_w
-                if phase.name == WETTING
+                if phase.name == self.wetting.name
                 else rel_perm_constants.max_n
             )
 
     def rel_perm(
         self,
         saturation_w: OperatorType,
-        phase: Phase,
+        phase: FluidPhase,
         rel_perm_constants: Optional[RelPermConstants] = None,
     ) -> OperatorType:
         r"""Phase relative permeability.
@@ -210,9 +206,9 @@ class RelativePermeability:
 
         # Normalize saturation and compute both phase saturations.
         s_w_normalized = self.normalize_saturation(saturation_w, phase=self.wetting)
-        if phase.name == WETTING:
+        if phase.name == self.wetting.name:
             s_phase: pp.ad.Operator = s_w_normalized
-        elif phase.name == NONWETTING:
+        elif phase.name == self.nonwetting.name:
             s_phase = pp.ad.Scalar(1) - s_w_normalized
 
         # Compute relative permeability based on chosen model.
@@ -229,12 +225,12 @@ class RelativePermeability:
             )
 
         elif rel_perm_constants.model == "Brooks-Corey":
-            if phase.name == WETTING:
+            if phase.name == self.wetting.name:
                 rel_perm = s_phase ** pp.ad.Scalar(
                     rel_perm_constants.n1
                     + rel_perm_constants.n2 * rel_perm_constants.n3
                 )
-            elif phase.name == NONWETTING:
+            elif phase.name == self.nonwetting.name:
                 rel_perm = (s_phase ** pp.ad.Scalar(rel_perm_constants.n1)) * (
                     (
                         pp.ad.Scalar(1)
@@ -244,7 +240,7 @@ class RelativePermeability:
                 )
 
         elif rel_perm_constants.model == "van Genuchten-Mualem":
-            if phase.name == WETTING:
+            if phase.name == self.wetting.name:
                 rel_perm = s_phase ** pp.ad.Scalar(rel_perm_constants.kappa_g) * (
                     pp.ad.Scalar(1)
                     - (
@@ -253,14 +249,14 @@ class RelativePermeability:
                     )
                     ** pp.ad.Scalar(rel_perm_constants.m_g)
                 ) ** pp.ad.Scalar(2)
-            elif phase.name == NONWETTING:
+            elif phase.name == self.nonwetting.name:
                 rel_perm = s_phase ** pp.ad.Scalar(rel_perm_constants.kappa_g) * (
                     pp.ad.Scalar(1)
                     - s_w_normalized ** pp.ad.Scalar(1 / rel_perm_constants.m_g)
                 ) ** pp.ad.Scalar(rel_perm_constants.m_g * 2)
 
         elif rel_perm_constants.model == "van Genuchten-Burdine":
-            if phase.name == WETTING:
+            if phase.name == self.wetting.name:
                 rel_perm = s_phase ** pp.ad.Scalar(2) * (
                     pp.ad.Scalar(1)
                     - (
@@ -269,7 +265,7 @@ class RelativePermeability:
                     )
                     ** pp.ad.Scalar(rel_perm_constants.m_g)
                 )
-            elif phase.name == NONWETTING:
+            elif phase.name == self.nonwetting.name:
                 rel_perm = s_phase ** pp.ad.Scalar(2) * (
                     pp.ad.Scalar(1)
                     - s_w_normalized ** pp.ad.Scalar(1 / rel_perm_constants.m_g)
@@ -360,9 +356,9 @@ class CapillaryPressure:
 
     normalize_saturation: Callable[[pp.ad.Operator], pp.ad.Operator]
     """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-    normalize_saturation_deriv: Callable[[Phase], pp.ad.Scalar]
+    normalize_saturation_deriv: Callable[[Optional[FluidPhase]], pp.ad.Operator]
     """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-    wetting: Phase
+    wetting: FluidPhase
     """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""
     params: dict[str, Any]
     """Normallly provided by a mixin of instance :class:`SolutionStrategyTPF`."""

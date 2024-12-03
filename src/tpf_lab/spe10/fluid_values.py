@@ -20,6 +20,9 @@ of Upscaling Techniques,” SPE Reservoir Evaluation & Engineering, vol. 4, no. 
 
 """
 
+from typing import Any
+
+from porepy.applications.material_values.fluid_values import water as _water
 from tpf_lab.constants_and_typing import FEET, LB, cP
 
 # The values in the paper are given in [cP] and [lb ft^-3]. We convert them to [Pa s]
@@ -28,8 +31,12 @@ from tpf_lab.constants_and_typing import FEET, LB, cP
 oil_surface_density: float = 53 * LB / (FEET**3)
 oil_volume_factor: float = 1.01
 
-oil = {
+oil: dict[str, Any] = {
+    "name": "oil",
     "density": oil_surface_density
     / oil_volume_factor,  # [kg m^-3], density at reservoir conditions.
     "viscosity": 3 * cP,  # [Pa s], absolute viscosity.
 }
+
+water: dict[str, Any] = _water.copy()
+water.update({"name": "water"})

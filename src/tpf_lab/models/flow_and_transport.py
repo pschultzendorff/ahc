@@ -15,21 +15,11 @@ relative permeability are implemented.
 
 TODO
     - Change bc_values to ``ad.BoundaryCondition``
-    - Right now alot of the things in this model are typed as multi-grid objects. For
-      example, the variables are of type ``MultiGridVariable``. To simplify things, change
-      to ``Variable``. Does this make sense? ``EquationSystem`` does not have a function to
-      initialize single grid variables.
-    - Implement new PorePy functionalities that allow for easier model setup, e.g.,
-      everything set by ``set_material`` can be passed as parameters and does not have to
-      be hardcoded. Also, make use of ``Units``.
     - Remove or fix the unit documentation. The units can depend on the instance of
       ``porepy.Units`` passed to the simulation.
+    - Make sure that pressure gets scaled with units and any other physical quantities
+      as well.
     - Make use of TypeVars for typing of some functions and in general type everything.
-    - Negative phase sources give the wrong results (i.e., no fluid gets pulled). Fix
-      this!!!
-    - Right now, we assume that the phases are called ``WETTING`` and ``NONWETTING``,
-      with the constants having string values "wetting" and "nonwetting". Make
-      everything work for different phase names, e.g., "brine" and "co2".
 
 Units:
     Collection of the SI units for all parameters.
@@ -43,29 +33,25 @@ Units:
     mass flux: kg/(m^2*s) -> As we assume incompressibility, the fluxes and the source
     terms are measured in volumetric flux.
 
-It follows, that the domain unit is meters and the time unit is seconds.
+It follows, that the length unit for the domain is meters and the time unit is seconds.
 
 """
 
 from __future__ import annotations
 
+import itertools
+import json
 import logging
 import time
 from functools import partial
-from typing import Any, Callable, Literal, NamedTuple, Optional, TypeVar
+from typing import Any, Callable, Literal, Optional
 
 import numpy as np
 import porepy as pp
-from porepy.utils.examples_utils import VerificationUtils
-from tpf_lab.constants_and_typing import (
-    NONWETTING,
-    PHASENAME,
-    REL_PERM_MODEL,
-    WETTING,
-    OperatorType,
-)
+from porepy.viz.exporter import DataInput
+from tpf_lab.constants_and_typing import NONWETTING, WETTING, OperatorType
 from tpf_lab.models.constitutive_laws_tpf import CapillaryPressure, RelativePermeability
-from tpf_lab.models.phase import Phase, PhaseConstants
+from tpf_lab.models.phase import FluidPhase, PhaseConstants
 from tpf_lab.numerics.ad.functions import ad_pow as ad_pow
 from tpf_lab.numerics.ad.functions import minimum
 from tpf_lab.visualization.diagnostics import SaveDataTPF
@@ -73,12 +59,72 @@ from tpf_lab.visualization.diagnostics import SaveDataTPF
 logger = logging.getLogger(__name__)
 
 
+class SolverStatisticsTPF(pp.SolverStatistics):
+
+    time_step_index: int = 0
+    """Time step count."""
+    time: float = 0.0
+    """Current simulation time."""
+    time_step_size: float = 0.0
+    """Time step size."""
+
+    def log_error(
+        self,
+        nonlinear_increment_norm: Optional[float] = None,
+        residual_norm: Optional[float] = None,
+        **kwargs,
+    ) -> None:
+        """Log errors produced from convergence criteria.
+
+        Parameters:
+            nonlinear_increment_norm (float): Error in the increment.
+            residual_norm (float): Error in the residual.
+            **kwargs: Additional keyword arguments, for potential extension.
+
+        """
+        if (
+            "time_step_index" in kwargs
+            and "time" in kwargs
+            and "time_step_size" in kwargs
+        ):
+            self.time_step_index = kwargs["time_step_index"]
+            self.time = kwargs["time"]
+            self.time_step_size = kwargs["time_step_size"]
+        else:
+            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
+
+    def save(self) -> None:
+        """Save the statistics object to a JSON file."""
+        if self.path is not None:
+            # Check if object exists and append to it
+            if self.path.exists():
+                with self.path.open("r") as file:
+                    data = json.load(file)
+            else:
+                data = {}
+
+            # Append data - assume the index corresponds to time step
+            ind = len(data) + 1
+            data[ind] = {
+                "time step index": self.time_step_index,
+                "current time": self.time,
+                "time step size": self.time_step_size,
+                "num_iteration": self.num_iteration,
+                "nonlinear_increment_norms": self.nonlinear_increment_norms,
+                "residual_norms": self.residual_norms,
+            }
+
+            # Save to file
+            with self.path.open("w") as file:
+                json.dump(data, file, indent=4)
+
+
 # region CONSTITUTIVE LAWS
 
 
 class DarcyFluxes:
 
-    rel_perm: Callable[[pp.ad.Operator, Phase], pp.ad.Operator]
+    rel_perm: Callable[[pp.ad.Operator, FluidPhase], pp.ad.Operator]
     """Phase relative permeability. Normally provided by a mixin of instance
     :class:`RelativePermeability`.
 
@@ -88,24 +134,24 @@ class DarcyFluxes:
     :class:`CapillaryPressure`.
 
     """
-    vector_source: Callable[[pp.Grid, Phase], np.ndarray]
+    vector_source: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase vector sources, i.e., buyoyancy terms. Normally provided by a mixin of
     instance :class:`EquationsTPF`.
 
     """
 
-    wetting: Phase
-    """Wetting phase class, providing phase name and phase constants. Normally provided
+    wetting: FluidPhase
+    """Wetting phase class, providing phase name, constants, variables, and bc. Normally provided
     by a mixin of instance :class:`SolutionStrategyTPF`.
 
     """
-    nonwetting: Phase
-    """Nonwetting phase class, providing phase name and phase constants. Normally
+    nonwetting: FluidPhase
+    """Nonwetting phase class, providing phase name, constants, variables, and bc. Normally
     provided by a mixin of instance :class:`SolutionStrategyTPF`.
 
     """
-    phases: dict[str, Phase]
-    """List of fluid phases, providing phase names and phase constants. Normally
+    phases: dict[str, FluidPhase]
+    """List of fluid phases, providing phase names, constants, variables, and bc. Normally
     provided by a mixin of instance :class:`SolutionStrategyTPF`.
 
     """
@@ -125,17 +171,17 @@ class DarcyFluxes:
     provided by a mixin of instance :class:`BoundaryConditionsTPF`.
 
     """
-    bc_dirichlet_pressure_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_dirichlet_pressure_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase dependent pressure bc values. Normally provided by a mixin of instance
     :class:`BoundaryConditionsTPF`.
 
     """
-    bc_dirichlet_saturation_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_dirichlet_saturation_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase dependent saturation bc values. Normally provided by a mixin of instance
     :class:`BoundaryConditionsTPF`.
 
     """
-    bc_neumann_flux_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_neumann_flux_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase flux bc values. Normally provided by a mixin of instance
     :class:`BoundaryConditionsTPF`.
 
@@ -144,7 +190,7 @@ class DarcyFluxes:
     def phase_mobility(
         self,
         g: pp.Grid,
-        phase: Phase,
+        phase: FluidPhase,
     ) -> pp.ad.Operator:
         """
 
@@ -167,9 +213,7 @@ class DarcyFluxes:
             self.bc_dirichlet_saturation_values(g, self.wetting),
             name=f"{self.wetting.name}_s_bc",
         )
-        viscosity = pp.ad.Scalar(
-            phase.constants.viscosity(), name=f"{phase.name}_viscosity"
-        )
+        viscosity = pp.ad.Scalar(phase.viscosity(), name=f"{phase.name}_viscosity")
         upwind = pp.ad.UpwindAd(phase.mobility_key, [g])
 
         mobility = upwind.upwind() @ (
@@ -217,7 +261,7 @@ class DarcyFluxes:
             name="total mobility",
         ) + pp.ad.Scalar(1e-7)
 
-    def phase_flux(self, g: pp.Grid, phase: Phase) -> pp.ad.Operator:
+    def phase_flux(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
         """Phase volume flux. Combines advective and buoyancy components.
 
         SI Units: kg/s -> Depends on the units of the other parameters.
@@ -247,7 +291,7 @@ class DarcyFluxes:
         flux.set_name(f"{phase.name} volume flux")
         return flux
 
-    def phase_potential(self, g: pp.Grid, phase: Phase) -> pp.ad.Operator:
+    def phase_potential(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
         """Phase potential flux. Combines advective and buoyancy components.
 
         Note: This is zero at Neumann boundaries.
@@ -445,12 +489,12 @@ class EquationsTPF(pp.BalanceEquation):
     """
 
     # Fluid phases:
-    wetting: Phase
+    wetting: FluidPhase
     """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-    nonwetting: Phase
+    nonwetting: FluidPhase
     """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-    phases: dict[str, Phase]
-    """List of fluid phases, providing phase names and phase constants. Normally
+    phases: dict[str, FluidPhase]
+    """List of fluid phases, providing phase names, constants, variables, and bc. Normally
     provided by a mixin of instance :class:`SolutionStrategyTPF`.
 
     """
@@ -468,7 +512,7 @@ class EquationsTPF(pp.BalanceEquation):
     """
 
     # Constitutive laws:
-    rel_perm: Callable[[pp.ad.Operator, Phase], pp.ad.Operator]
+    rel_perm: Callable[[pp.ad.Operator, FluidPhase], pp.ad.Operator]
     """Phase relative permeability. Normally provided by a mixin of instance
     :class:`RelativePermeability`.
 
@@ -478,7 +522,7 @@ class EquationsTPF(pp.BalanceEquation):
     :class:`CapillaryPressure`.
 
     """
-    phase_mobility: Callable[[pp.Grid, Phase], pp.ad.Operator]
+    phase_mobility: Callable[[pp.Grid, FluidPhase], pp.ad.Operator]
     """Phase mobility. Normally provided by a mixin of instance
     :class:`DarcyFluxes`.
 
@@ -505,23 +549,23 @@ class EquationsTPF(pp.BalanceEquation):
     mdg: pp.MixedDimensionalGrid
     """Provided by a mixin of instance :class:`~porepy.models.geometry.ModelGeometry`."""
 
-    bc_dirichlet_pressure_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_dirichlet_pressure_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase dependent pressure bc values. Normally provided by a mixin of instance
     :class:`~porepy.BoundaryConditionMixin`.
 
     """
-    bc_dirichlet_saturation_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_dirichlet_saturation_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase dependent saturation bc values. Normally provided by a mixin of instance
     :class:`~porepy.BoundaryConditionMixin`.
 
     """
-    bc_neumann_flux_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_neumann_flux_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase flux bc values. Normally provided by a mixin of instance
     :class:`BoundaryConditionsTPF`.
 
     """
 
-    def phase_fluid_source(self, g: pp.Grid, phase: Phase) -> np.ndarray:
+    def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         """Volumetric phase source term. Given as volumetric flux. This
         unmodified base function assumes a zero phase source.
 
@@ -531,7 +575,6 @@ class EquationsTPF(pp.BalanceEquation):
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
-        # TODO Does this has to be a vector instead?
         return np.zeros(g.num_cells)
 
     def total_fluid_source(self, g: pp.Grid) -> np.ndarray:
@@ -547,7 +590,7 @@ class EquationsTPF(pp.BalanceEquation):
             [self.phase_fluid_source(g, phase) for phase in self.phases.values()]
         )
 
-    def vector_source(self, g: pp.Grid, phase: Phase) -> np.ndarray:
+    def vector_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         """Volumetric phase vector source. Corresponds to the phase buoyancy flux. This
         unmodified base function assumes a zero vector source.
 
@@ -562,12 +605,12 @@ class EquationsTPF(pp.BalanceEquation):
         return vals.ravel()
 
     # More matrix and phase parameters.
-    def _permeability(self, g: pp.Grid) -> np.ndarray:
+    def permeability(self, g: pp.Grid) -> np.ndarray:
         """Solid permeability. This unmodified base function assumes homogeneous
         permeability. Value and unit are set by :attr:`self.solid`."""
         return np.full(g.num_cells, self.solid.permeability())
 
-    def _porosity(self, g: pp.Grid) -> np.ndarray:
+    def porosity(self, g: pp.Grid) -> np.ndarray:
         """Solid porosity. This unmodified base function assumes homogeneous
         porosity. Value is set by :attr:`self.solid`."""
         return np.full(g.num_cells, self.solid.porosity())
@@ -595,7 +638,7 @@ class EquationsTPF(pp.BalanceEquation):
         source_ad_t = pp.ad.DenseArray(self.total_fluid_source(g))
 
         # Ad parameters.
-        porosity_ad = pp.ad.DenseArray(self._porosity(g))
+        porosity_ad = pp.ad.DenseArray(self.porosity(g))
 
         # Compute cap pressure and relative permeabilities.
         p_cap = self.cap_press(self.wetting.s)
@@ -670,11 +713,11 @@ class VariablesTPF(pp.VariableMixin):
     :class:`~porepy.models.solution_strategy.SolutionStrategy`
 
     """
-    wetting: Phase
+    wetting: FluidPhase
     """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-    nonwetting: Phase
+    nonwetting: FluidPhase
     """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-    phases: dict[str, Phase]
+    phases: dict[str, FluidPhase]
     """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
     formulation: Literal["fractional_flow"]
     """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
@@ -690,14 +733,13 @@ class VariablesTPF(pp.VariableMixin):
         subdomains = self.mdg.subdomains()
         for phase in self.phases.values():
             phase.p = self.equation_system.create_variables(
-                f"{phase.name}_p",
+                f"{phase.name} pressure",
                 {"cells": 1},
                 subdomains,
                 tags={"si_units": "Pa"},
             )
-            # TODO Check that the pressure units are correct.
             phase.s = self.equation_system.create_variables(
-                f"{phase.name}_s",
+                f"{phase.name} saturation",
                 {"cells": 1},
                 subdomains,
                 tags={"si_units": "-"},
@@ -706,15 +748,15 @@ class VariablesTPF(pp.VariableMixin):
         # NOTE The division into primary/secondary variables is internal to this model
         # only and not connected to ``pp.PRIMARY_VARIABLES``.
         if self.formulation == "fractional_flow":
-            self.primary_pressure_var = f"{self.nonwetting.name}_p"
-            self.primary_saturation_var = f"{self.wetting.name}_s"
-            self.secondary_pressure_var = f"{self.wetting.name}_p"
-            self.secondary_saturation_var = f"{self.nonwetting.name}_s"
+            self.primary_pressure_var = f"{self.nonwetting.name} pressure"
+            self.primary_saturation_var = f"{self.wetting.name} saturation"
+            self.secondary_pressure_var = f"{self.wetting.name} pressure"
+            self.secondary_saturation_var = f"{self.nonwetting.name} saturation"
 
     def normalize_saturation(
         self,
         saturation: pp.ad.Operator,
-        phase: Optional[Phase] = None,
+        phase: Optional[FluidPhase] = None,
         limit: bool = False,
         epsilon: float = 0.0,
     ) -> pp.ad.Operator:
@@ -745,15 +787,12 @@ class VariablesTPF(pp.VariableMixin):
             the phase nor ``phase`` is specified.
 
         """
-        if saturation.name.startswith(self.wetting.name) or getattr(
-            phase, "name", ""
-        ).startswith(WETTING):
-            residual_saturation_w = pp.ad.Scalar(
-                self.wetting.constants.residual_saturation()
-            )
-            residual_saturation_n = pp.ad.Scalar(
-                self.nonwetting.constants.residual_saturation()
-            )
+        if (
+            saturation.name.startswith(self.wetting.name)
+            or getattr(phase, "name", "") == self.wetting.name
+        ):
+            residual_saturation_w = pp.ad.Scalar(self.wetting.residual_saturation())
+            residual_saturation_n = pp.ad.Scalar(self.nonwetting.residual_saturation())
             s_normalized: pp.ad.Operator = (saturation - residual_saturation_w) / (
                 pp.ad.Scalar(1) - residual_saturation_n - residual_saturation_w
             )
@@ -771,9 +810,10 @@ class VariablesTPF(pp.VariableMixin):
                 )
                 s_normalized = minimum_func(maximum_func(s_normalized))
 
-        elif saturation.name.startswith(self.nonwetting.name) or getattr(
-            phase, "name", ""
-        ).startswith(NONWETTING):
+        elif (
+            saturation.name.startswith(self.nonwetting.name)
+            or getattr(phase, "name", "") == self.nonwetting.name
+        ):
             s_normalized = pp.ad.Scalar(1) - self.normalize_saturation(
                 pp.ad.Scalar(1) - saturation,
                 phase=self.wetting,
@@ -789,7 +829,7 @@ class VariablesTPF(pp.VariableMixin):
 
     def normalize_saturation_deriv(
         self,
-        phase: Phase,
+        phase: FluidPhase,
         # limit: bool = False,
         # epsilon: float = 0.0,
     ) -> OperatorType:
@@ -821,8 +861,8 @@ class VariablesTPF(pp.VariableMixin):
             phase nor ``phase`` is specified.
 
         """
-        residual_saturation_w: float = self.wetting.constants.residual_saturation()
-        residual_saturation_n: float = self.nonwetting.constants.residual_saturation()
+        residual_saturation_w: float = self.wetting.residual_saturation()
+        residual_saturation_n: float = self.nonwetting.residual_saturation()
         # FIXME This shall return exactly the same type as saturation, but set to 0
         # outside the residual saturation range. How to do this for a general
         # OperatorType?
@@ -831,9 +871,9 @@ class VariablesTPF(pp.VariableMixin):
         # ``reconstructions.GlobalPressure.complimentary_pressure`` are called. They
         # take care of limiting the saturation themselves. Thus, we do not need to care
         # about this.
-        if phase.name == WETTING:
+        if phase.name == self.wetting.name:
             return pp.ad.Scalar(1 - residual_saturation_n - residual_saturation_w)
-        elif phase.name == NONWETTING:
+        elif phase.name == self.nonwetting.name:
             return pp.ad.Scalar(residual_saturation_w + residual_saturation_n - 1)
 
 
@@ -861,7 +901,9 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
     domain_boundary_sides: Callable[[pp.Grid | pp.BoundaryGrid], pp.domain.DomainSides]
     """Normally provided by a mixin of instance :class:`ModelGeometry`."""
 
-    wetting: Phase
+    wetting: FluidPhase
+    """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
+    nonwetting: FluidPhase
     """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
     flux_key: str
     """Keyword to define parameters and discretizations for the total flux. Normally
@@ -875,7 +917,7 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
         boundary_faces = self.domain_boundary_sides(g).all_bf
         return pp.BoundaryCondition(g, boundary_faces, "dir")
 
-    def bc_dirichlet_pressure_values(self, g: pp.Grid, phase: Phase) -> np.ndarray:
+    def bc_dirichlet_pressure_values(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         """Phase dependent pressure bc values.
 
         Note: On Neumann boundaries, the pressure values MUST be 0 to not accidentally
@@ -887,7 +929,7 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
         return np.zeros(g.num_faces)
 
     # Ignore Pylance complaining. Function will always return a value.
-    def bc_dirichlet_saturation_values(self, g: pp.Grid, phase: Phase) -> np.ndarray:  # type: ignore
+    def bc_dirichlet_saturation_values(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:  # type: ignore
         """Phase dependent saturation bc values.
 
         Note: On Neumann boundaries, the saturation values SHOULD be equal to the
@@ -897,17 +939,17 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin):
 
         """
         # Homogeneous Dirichlet conditions for both phases.
-        if phase.name == WETTING:
+        if phase.name == self.wetting.name:
             s_bc: np.ndarray = np.full(g.num_faces, 0.5)
-        elif phase.name == NONWETTING:
+        elif phase.name == self.nonwetting.name:
             s_bc: np.ndarray = np.ones(
                 g.num_faces
             ) - self.bc_dirichlet_saturation_values(g, self.wetting)
         neu_ind: np.ndarray = self.bc_type(g).is_neu
-        s_bc[neu_ind] = self.wetting.constants.residual_saturation()
+        s_bc[neu_ind] = self.wetting.residual_saturation()
         return s_bc
 
-    def bc_neumann_flux_values(self, g: pp.Grid, phase: Phase) -> np.ndarray:
+    def bc_neumann_flux_values(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         """Phase flux bc values."""
         return np.zeros(g.num_faces)
 
@@ -944,7 +986,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
 
     set_rel_perm_constants: Callable
     """Normally provided by a mixin of instance :class:`RelativePermeability`."""
-    rel_perm: Callable[[pp.ad.Operator, Phase], pp.ad.Operator]
+    rel_perm: Callable[[pp.ad.Operator, FluidPhase], pp.ad.Operator]
     """Normally provided by a mixin of instance :class:`RelativePermeability`."""
 
     set_cap_press_constants: Callable
@@ -952,7 +994,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
     cap_press: Callable[[pp.ad.Operator], pp.ad.Operator]
     """Normally provided by a mixin of instance :class:`CapillaryPressure`."""
 
-    phase_potential: Callable[[pp.Grid, Phase], pp.ad.Operator]
+    phase_potential: Callable[[pp.Grid, FluidPhase], pp.ad.Operator]
     """Phase potential. Normally provided by a mixin of instance
     :class:`DarcyFluxes`.
 
@@ -964,18 +1006,18 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
     """
 
     # Matrix properties:
-    _permeability: Callable[[pp.Grid], np.ndarray]
+    permeability: Callable[[pp.Grid], dict[str, np.ndarray]]
     """Normally provided by a mixin of instance :class:`EquationsTPF`."""
-    _porosity: Callable[[pp.Grid], np.ndarray]
+    porosity: Callable[[pp.Grid], np.ndarray]
     """Normally provided by a mixin of instance :class:`EquationsTPF`."""
 
     # Source:
-    phase_fluid_source: Callable[[Phase], np.ndarray]
+    phase_fluid_source: Callable[[FluidPhase], np.ndarray]
     """Phase fluid sources. Normally provided by a mixin of instance
     :class:`EquationsTPF`.
 
     """
-    total_fluid_source: Callable[[Phase], np.ndarray]
+    total_fluid_source: Callable[[FluidPhase], np.ndarray]
     """Sum of phase fluid sources. Normally provided by a mixin of instance
     :class:`EquationsTPF`.
 
@@ -1013,17 +1055,17 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
     provided by a mixin of instance :class:`BoundaryConditionsTPF`.
 
     """
-    bc_dirichlet_pressure_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_dirichlet_pressure_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase dependent pressure bc values. Normally provided by a mixin of instance
     :class:`BoundaryConditionsTPF`.
 
     """
-    bc_dirichlet_saturation_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_dirichlet_saturation_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase dependent saturation bc values. Normally provided by a mixin of instance
     :class:`BoundaryConditionsTPF`.
 
     """
-    bc_neumann_flux_values: Callable[[pp.Grid, Phase], np.ndarray]
+    bc_neumann_flux_values: Callable[[pp.Grid, FluidPhase], np.ndarray]
     """Phase flux bc values. Normally provided by a mixin of instance
     :class:`BoundaryConditionsTPF`.
 
@@ -1069,11 +1111,8 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             setattr(phase, "mobility_key", f"{phase.name}_mobility")
             """Keyword to define parameters and discretizations for the phase mobility.
 
-            As phase potentials can have opposite signs, independent upwind
-            discretization are required to evaluate phase mobilities.
-            # TODO I do not think this is true, as this would imply negative fractional
-            flow. Check the inline comment in ``set_discretization_parameters()`` when
-            changing this.
+            As phase flows can have opposite signs, independent upwind discretization
+            are required to evaluate phase mobilities.
 
             """
 
@@ -1106,51 +1145,45 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
     def _is_nonlinear_problem(self) -> bool:
         return True
 
-    def set_phases(self) -> None:
-        # TODO Add an option to give the phases different names.
-        if self.formulation == "fractional_flow":
-            self.wetting: Phase = Phase(WETTING)
-            self.nonwetting: Phase = Phase(NONWETTING)
-            self.phases: dict[str, Phase] = {
-                self.wetting.name: self.wetting,
-                self.nonwetting.name: self.nonwetting,
-            }
+    @property
+    def uses_hc(self) -> bool:
+        return False
 
-    def set_materials(self) -> None:
-        # super().set_materials()
+    def set_phases(self) -> None:
+        """Set phase constants from parameters."""
         constants: dict[str, pp.MaterialConstants] = self.params.get(  # type: ignore
             "material_constants", {}
         )
-        # Use standard models for fluid and solid constants if not provided.
-        if "fluid" not in constants:
-            constants["fluid"] = pp.FluidConstants()
-        if "solid" not in constants:
-            constants["solid"] = pp.SolidConstants()
+        self.phases: dict[str, FluidPhase] = {}
+        for phase_name in [WETTING, NONWETTING]:
+            # Use standard values for phase constants if not provided.
+            # TODO Include some functionality that checks if a similar key was included, to
+            # account for wrong user inputs.
+            if phase_name not in constants:
+                constants[phase_name] = PhaseConstants({"name": phase_name})
+            assert isinstance(constants[phase_name], PhaseConstants)
+            phase = FluidPhase.from_PhaseConstants(constants[phase_name])
+            phase.set_units(self.units)
+            setattr(self, phase_name, phase)
+            self.phases[phase_name] = phase
 
+    def set_materials(self) -> None:
+        """Set solid constants from parameters."""
+        constants: dict[str, pp.MaterialConstants] = self.params.get(  # type: ignore
+            "material_constants", {}
+        )
+
+        # Use standard models for solid constants if not provided.
         # TODO Include some functionality that checks if a similar key was included, to
         # account for wrong user inputs.
-
-        # Loop over fluid, solid constants and set units.
-        # TODO This is quite ugly, find a nice way to combine this with the phase
-        # constants down below. Ideally, we call super().set_materials() and do nothing
-        # else or only set the phase constants.
-        for name, const in constants.items():
-            # Check that the object is of the correct type
-            assert isinstance(const, pp.models.material_constants.MaterialConstants)
-            # Impose the units passed to initialization of the model.
-            const.set_units(self.units)
-            # This is where the constants (fluid, solid) are actually set as attributes
-            if name in ["fluid", "solid"]:
-                setattr(self, name, const)
-
-        for phase in self.phases.values():
-            phase_constants: PhaseConstants = constants.get(
-                phase.name, PhaseConstants()
-            )
-            assert isinstance(phase_constants, pp.MaterialConstants)
-            # Impose the units passed to initialization of the model.
-            phase_constants.set_units(self.units)
-            setattr(phase, "constants", phase_constants)
+        if "solid" not in constants:
+            constants["solid"] = pp.SolidConstants()
+        assert isinstance(
+            constants["solid"],
+            pp.models.material_constants.SolidConstants,
+        )
+        constants["solid"].set_units(self.units)
+        setattr(self, "solid", constants["solid"])
 
     def prepare_simulation(self) -> None:
         """This setups the model, s.t. a simulation can be run.
@@ -1186,12 +1219,12 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         super().set_discretization_parameters()
         for sd, data in self.mdg.subdomains(return_data=True):
             # Boundary conditions and parameters.
-            perm = self._permeability(sd)
+            perm = self.permeability(sd)
             # Different treatment for scalar and tensor permeability.
             if isinstance(perm, np.ndarray):
-                diffusivity = pp.SecondOrderTensor(self._permeability(sd))
+                diffusivity = pp.SecondOrderTensor(self.permeability(sd))
             elif isinstance(perm, dict):
-                diffusivity = pp.SecondOrderTensor(**self._permeability(sd))
+                diffusivity = pp.SecondOrderTensor(**self.permeability(sd))
             # all_bf, *_ = self._domain_boundary_sides(sd)
             # Parameters that are not used for discretization.
             pp.initialize_data(
@@ -1211,10 +1244,6 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             )
             # Upwinding is done for both phases separately, hence we create two different
             # data dictionaries.
-            # NOTE This is not really necessary and we could just as well use the flux
-            # data, as the ``bc_type`` are identical for all discretizations. The
-            # delicaties of boundary conditions for fractional flow in PorePy are dealt
-            # with in ``DarcyFluxes.mobility()`` and ``DarcyFluxes.total_flux()``.
             for phase in self.phases.values():
                 pp.initialize_data(
                     sd,
@@ -1222,7 +1251,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
                     phase.mobility_key,
                     {
                         "bc": self.bc_type(sd),
-                        # We initialize the Darcy flux to one just s.t.
+                        # We initialize the Darcy flux to unit values just s.t.
                         # ``Upwind.discretize()`` can be called.
                         "darcy_flux": np.ones(sd.num_faces),
                     },
@@ -1325,9 +1354,6 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         # TODO Do we need to do the rediscretization of the upwinding at every
         iteration? Or only at the first one?
 
-        # TODO Is it smarter to calculate and distribute the secondary variables
-        **after** the nonlinear iterations?
-
         To evaluate the phase-mobilities separately, both the wetting, as well as the
         nonwetting flux need to be computed.
 
@@ -1380,9 +1406,10 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
             additive=True,
             iterate_index=0,
         )
+        self.eval_secondary_variables()
 
-        # Evaluate and update secondary variables.
-        # TODO Shift this to a separate method.
+    def eval_secondary_variables(self) -> None:
+        """Evaluate and update secondary variables."""
         if self.formulation == "fractional_flow":
             secondary_pressure = self.equation_system.get_variables(
                 variables=[self.primary_pressure_var]
@@ -1412,8 +1439,6 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
 
         self.nonlinear_solver_statistics.num_iteration += 1
 
-    # Ignore mypy complaining about uncompatible signature.
-    # Ignore mypy complaining about uncompatible signature for ``save_data_time_step``.
     def after_nonlinear_convergence(self) -> None:  # type: ignore
         """Export and move to the next time step.
 
@@ -1468,6 +1493,12 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
         )
         if nonlinear_increment_norm > nl_params["nl_divergence_tol"]:
             diverged = True
+        self.nonlinear_solver_statistics.log_error(
+            time_step_index=self.time_manager.time_index,
+            time=self.time_manager.time,
+            time_step_size=self.time_manager.dt,
+        )
+
         return converged, diverged
 
     # endregion
@@ -1479,6 +1510,96 @@ class SolutionStrategyTPF(pp.SolutionStrategy):
 # endregion
 
 
+class DataSavingTPF(pp.DataSavingMixin):
+
+    phases: dict[str, FluidPhase]
+    """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
+
+    def _evaluate_and_scale(
+        self,
+        grid: pp.Grid | pp.MortarGrid,
+        method_name: str,
+        units: str,
+    ) -> np.ndarray:
+        """Evaluate a method for a derived quantity and scale the result to SI units.
+
+        Parameters:
+            grid: Grid or mortar grid for which the method should be evaluated.
+            method_name: Name of the method to be evaluated.
+            units: Units of the quantity returned by the method. Should be parsable by
+                :meth:`porepy.fluid.FluidConstants.convert_units`.
+
+        Returns:
+            Array of values for the quantity, scaled to SI units.
+
+        """
+        vals_scaled = getattr(self, method_name)([grid]).value(self.equation_system)
+        vals = self.solid.convert_units(vals_scaled, units, to_si=True)
+        return vals
+
+    def data_to_export(self) -> list[DataInput]:
+        return self._data_to_export(time_step_index=0)
+
+    def data_to_export_iteration(self) -> list[DataInput]:
+        return self._data_to_export(iterate_index=0)
+
+    def _data_to_export(
+        self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
+    ) -> list[DataInput]:
+        """Return data to be exported.
+
+        Return type should comply with :class:`~porepy.exporter.DataInput`.
+
+        Returns:
+            List containing all (grid, name, scaled_values) tuples.
+
+        """
+        if time_step_index is None and iterate_index is None:
+            msg: str = "Either time_step_index or iterate_index must be provided."
+            raise ValueError(msg)
+        data = []
+        for phase, var_name in itertools.product(self.phases.values(), ["p", "s"]):
+            var = getattr(phase, var_name)
+            scaled_values = self.equation_system.get_variable_values(
+                variables=[var],
+                time_step_index=time_step_index,
+                iterate_index=iterate_index,
+            )
+            units = var.tags["si_units"]
+            values = phase.convert_units(scaled_values, units, to_si=True)
+            data.append((var.domain[0], var.name, values))
+
+        # Add secondary variables/derived quantities.
+        # All models are expected to have the dimension reduction methods for aperture
+        # and specific volume. More methods may be added as needed, e.g. by overriding
+        # this method:
+        #   def data_to_export(self):
+        #       data = super().data_to_export()
+        #       data.append(
+        #           (grid, "name", self._evaluate_and_scale(sd, "name", "units"))
+        #       )
+        #       return data
+        for dim in range(self.nd + 1):
+            for sd in self.mdg.subdomains(dim=dim):
+                if dim < self.nd:
+                    data.append(
+                        (sd, "aperture", self._evaluate_and_scale(sd, "aperture", "m"))
+                    )
+                data.append(
+                    (
+                        sd,
+                        "specific_volume",
+                        self._evaluate_and_scale(
+                            sd, "specific_volume", f"m^{self.nd - sd.dim}"
+                        ),
+                    )
+                )
+
+        # We combine grids and mortar grids. This is supported by the exporter, but not
+        # by the type hints in the exporter module. Hence, we ignore the type hints.
+        return data  # type: ignore[return-value]
+
+
 # Ignore mypy complaining about uncompatible signature between
 # ``SolutionStrategyTPF`` and ``pp.DataSavingMixin``.
 class TwoPhaseFlow(  # type: ignore
@@ -1488,5 +1609,5 @@ class TwoPhaseFlow(  # type: ignore
     BoundaryConditionsTPF,
     SolutionStrategyTPF,
     pp.ModelGeometry,
-    pp.DataSavingMixin,
+    DataSavingTPF,
 ): ...

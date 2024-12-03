@@ -67,7 +67,7 @@ class ModifiedEquations(EquationsTPF):
 
     """
 
-    def _permeability(self, g: pp.Grid) -> np.ndarray:
+    def permeability(self, g: pp.Grid) -> np.ndarray:
         # Function for base-10 log. of permeability along x-axis.
         def function_x(x: float) -> float:
             return 3 * x * (x - 0.7) * (x - 2.3)

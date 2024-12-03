@@ -11,23 +11,18 @@ from porepy.viz.exporter import DataInput
 from tpf_lab.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     GLOBAL_PRESSURE,
-    OperatorType,
+    PHASENAME,
 )
-from tpf_lab.models.flow_and_transport import SolutionStrategyTPF
-from tpf_lab.models.phase import Phase
+from tpf_lab.models.flow_and_transport import SolverStatisticsTPF
+from tpf_lab.models.phase import FluidPhase
 from tpf_lab.models.reconstructions import SolutionStrategyReconstructionsMixin
-from tpf_lab.numerics.quadrature import (
-    GaussLegendreQuadrature1D,
-    Integral,
-    TriangleQuadrature,
-    get_quadpy_elements,
-)
+from tpf_lab.numerics.quadrature import Integral, TriangleQuadrature
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SolverStatisticsEstMixin:
+class SolverStatisticsEst(SolverStatisticsTPF):
     residual_and_flux_est: list[float] = field(default_factory=list)
     """List of residual and flux error estimates for each non-linear iteration."""
     nonconformity_est: list[dict[str, float]] = field(default_factory=list)
@@ -39,16 +34,13 @@ class SolverStatisticsEstMixin:
         residual_norm: Optional[float] = None,
         **kwargs,
     ) -> None:
-        if not (nonlinear_increment_norm is None or residual_norm is None):
-            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
-        else:
-            self.residual_and_flux_est.append(kwargs.get("residual_and_flux_est", 0.0))
+        if "residual_and_flux_est" in kwargs and "nonconformity_est" in kwargs:
+            self.residual_and_flux_est.append(kwargs["residual_and_flux_est"])
             self.nonconformity_est.append(
-                kwargs.get(
-                    "nonconformity_est",
-                    {GLOBAL_PRESSURE: 0.0, COMPLIMENTARY_PRESSURE: 0.0},
-                )
+                kwargs["nonconformity_est"],
             )
+        else:
+            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
 
     def reset(self) -> None:
         """Reset the estimator lists."""
@@ -85,15 +77,11 @@ class SolverStatisticsEstMixin:
                 json.dump(data, file, indent=4)
 
 
-@dataclass
-class SolverStatisticsEst(SolverStatisticsEstMixin, pp.SolverStatistics): ...
-
-
 class EstimatesMixin:
 
-    phases: dict[str, Phase]
-    wetting: Phase
-    nonwetting: Phase
+    phases: dict[str, FluidPhase]
+    wetting: FluidPhase
+    nonwetting: FluidPhase
     time_manager: pp.TimeManager
     equation_system: pp.ad.EquationSystem
 
@@ -102,13 +90,13 @@ class EstimatesMixin:
 
     mdg: pp.MixedDimensionalGrid
 
-    _porosity: Callable[[pp.Grid], np.ndarray]
-    _permeability: Callable[[pp.Grid], np.ndarray]
+    porosity: Callable[[pp.Grid], np.ndarray]
+    permeability: Callable[[pp.Grid], dict[str, np]]
 
-    phase_fluid_source: Callable[[pp.Grid, Phase], np.ndarray]
+    phase_fluid_source: Callable[[pp.Grid, FluidPhase], np.ndarray]
     total_fluid_source: Callable[[pp.Grid], np.ndarray]
 
-    rel_perm: Callable[[pp.ad.Operator, Phase], pp.ad.Operator]
+    rel_perm: Callable[[pp.ad.Operator, FluidPhase], pp.ad.Operator]
 
     quadpy_elements: np.ndarray
 
@@ -121,7 +109,7 @@ class EstimatesMixin:
     def poincare_constant(self, g: pp.Grid) -> np.ndarray:
         return g.cell_diameters() / np.pi
 
-    def local_residual_est(self, flux_name: Literal["total", "wetting"]) -> None:
+    def local_residual_est(self, flux_name: Literal["total", PHASENAME]) -> None:
         r"""Calculate and store the local residual estimate for each element.
 
 
@@ -132,7 +120,7 @@ class EstimatesMixin:
             \|\varphi \partial_t s_w - q_w+ \nabla \cdot \theta_w\|_K^2.
 
         """
-        sd, sd_data = self.mdg.subdomains(return_data=True)[0]
+        sd, g_data = self.mdg.subdomains(return_data=True)[0]
 
         # Collect terms for the estimators as ``np.ndarray``.
         poincare_constant: np.ndarray = self.poincare_constant(sd)
@@ -141,16 +129,16 @@ class EstimatesMixin:
         dt_s_ad = pp.ad.time_derivatives.dt(self.wetting.s, dt)
         dt_s: np.ndarray = (dt_s_ad).value(self.equation_system)
 
-        porosity: np.ndarray = self._porosity(sd)
+        porosity: np.ndarray = self.porosity(sd)
         source: np.ndarray = (
             self.phase_fluid_source(sd, self.wetting)
-            if flux_name == "wetting"
+            if flux_name == self.wetting.name
             else self.total_fluid_source(sd)
         )
 
         equilibrated_flux_coeffs: np.ndarray = pp.get_solution_values(
             f"{flux_name}_flux_equilibrated_RT0_coeffs",
-            sd_data,
+            g_data,
             iterate_index=0,
         )
         # Divergence of a Raviart-Thomas basis function is given by twice the linear
@@ -162,7 +150,7 @@ class EstimatesMixin:
         # NOTE The saturation term, source term, and divergence of the flux
         # reconstruction, are all elementwise constant. Therefore, we can integrate
         # explicitely by multiplying with the element volume.
-        if flux_name == "wetting":
+        if flux_name == self.wetting.name:
             integral: Integral = Integral(
                 poincare_constant
                 * (porosity * dt_s + div_equilibrated_flux - source) ** 2
@@ -174,18 +162,18 @@ class EstimatesMixin:
 
         pp.shift_solution_values(
             f"{flux_name}_R_estimate",
-            sd_data,
+            g_data,
             pp.ITERATE_SOLUTIONS,
             len(self.iterate_indices),
         )
         pp.set_solution_values(
             f"{flux_name}_R_estimate",
             integral.elementwise,
-            sd_data,
+            g_data,
             iterate_index=0,
         )
 
-    def local_flux_est(self, flux_name: Literal["total", "wetting"]) -> None:
+    def local_flux_est(self, flux_name: Literal["total", PHASENAME]) -> None:
         r"""Calculate and store the local flux estimate for each element.
 
 
@@ -201,16 +189,16 @@ class EstimatesMixin:
         :math:`\textbf{RTN}_0(\mathca{T}_h)` and locally mass conservative.
 
         """
-        _, sd_data = self.mdg.subdomains(return_data=True)[0]
+        _, g_data = self.mdg.subdomains(return_data=True)[0]
         # First, we calculate the spatial integral of the difference between FV and
         # reconstructed flux elementwise at the current time step.
 
         # Retrieve FV and equilibrated flux coefficients.
         fv_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs", sd_data, iterate_index=0
+            f"{flux_name}_flux_RT0_coeffs", g_data, iterate_index=0
         )
         equilibrated_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_equilibrated_RT0_coeffs", sd_data, iterate_index=0
+            f"{flux_name}_flux_equilibrated_RT0_coeffs", g_data, iterate_index=0
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
@@ -231,14 +219,14 @@ class EstimatesMixin:
         )
         pp.shift_solution_values(
             f"{flux_name}_F_estimate",
-            sd_data,
+            g_data,
             pp.ITERATE_SOLUTIONS,
             len(self.iterate_indices),
         )
         pp.set_solution_values(
             f"{flux_name}_F_estimate",
             integral.elementwise,
-            sd_data,
+            g_data,
             iterate_index=0,
         )
 
@@ -255,13 +243,13 @@ class EstimatesMixin:
             \|\mathbf{u}_\alpha - \theta_\alpha\|_K^2,
 
         """
-        sd, sd_data = self.mdg.subdomains(return_data=True)[0]
+        sd, g_data = self.mdg.subdomains(return_data=True)[0]
 
         # First, calculate the three different spatial integrals (norm at current time
         # step, inner product current-previous time step, norm at previous time step) of
         # the difference between post-processed and reconstructed pressure potential.
         # The latter was stored at the previous time step and is not recalculated.
-        perm: np.ndarray = self._permeability(sd)
+        perm: dict[str, np.ndarray] = self.permeability(sd)
         # Calculate a not upwinded total mobility.
         if pressure_key == GLOBAL_PRESSURE:
             rel_perms: dict[str, np.ndarray] = {}
@@ -270,9 +258,8 @@ class EstimatesMixin:
                     self.equation_system
                 )
             total_mobility: np.ndarray = (
-                rel_perms[self.wetting.name] / self.wetting.constants.viscosity()
-                + rel_perms[self.nonwetting.name]
-                / self.nonwetting.constants.viscosity()
+                rel_perms[self.wetting.name] / self.wetting.viscosity()
+                + rel_perms[self.nonwetting.name] / self.nonwetting.viscosity()
             )
 
         # Get postprocessed pressure coefficients and reconstructed pressure points
@@ -280,17 +267,17 @@ class EstimatesMixin:
         # NOTE If ``self._permeability`` is a scalar, ``postprocessed_coeffs[...,1]``
         # and ``reconstructed_coeffs[...,1]`` are zero.
         postprocessed_coeffs: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_postprocessed_coeffs", sd_data, iterate_index=0
+            f"{pressure_key}_postprocessed_coeffs", g_data, iterate_index=0
         )
         reconstructed_coeffs: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_reconstructed_coeffs", sd_data, iterate_index=0
+            f"{pressure_key}_reconstructed_coeffs", g_data, iterate_index=0
         )
 
         postprocessed_coeffs_old: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_postprocessed_coeffs", sd_data, time_step_index=0
+            f"{pressure_key}_postprocessed_coeffs", g_data, time_step_index=0
         )
         reconstructed_coeffs_old: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_reconstructed_coeffs", sd_data, time_step_index=0
+            f"{pressure_key}_reconstructed_coeffs", g_data, time_step_index=0
         )
 
         def integrand(
@@ -336,15 +323,15 @@ class EstimatesMixin:
                 # NOTE For now, perm is just a scalar, so we do not have to use
                 # matrix multiplication.
                 # Different treatment for scalar and tensor permeabilities.
-                if isinstance(perm, np.ndarray):
+                if len(perm) == 1:
                     fluxes.append(
-                        perm[None, :, None]
+                        perm["kxx"][None, :, None]
                         * total_mobility[None, :, None]
                         * pressure_potential
                         if pressure_key == GLOBAL_PRESSURE
-                        else perm[None, :, None] * pressure_potential
+                        else perm["kxx"][None, :, None] * pressure_potential
                     )
-                elif isinstance(perm, dict):
+                elif len(perm) == 2:
                     # TODO Fix this for tensor permeabilities.
                     # Perm has form ``{"kxx": np.ndarray, "kyy": np.ndarray, ...}``.
                     fluxes.append(
@@ -371,14 +358,14 @@ class EstimatesMixin:
         )
         pp.shift_solution_values(
             f"{pressure_key}_NC_estimate",
-            sd_data,
+            g_data,
             pp.ITERATE_SOLUTIONS,
             len(self.iterate_indices),
         )
         pp.set_solution_values(
             f"{pressure_key}_NC_estimate",
             integral_L2_new.elementwise,
-            sd_data,
+            g_data,
             iterate_index=0,
         )
         # Integrate :math:`\kappa \nabla (\tilde{\mathfrac{q}}^n - \mathfrac{q}^n)
@@ -393,7 +380,7 @@ class EstimatesMixin:
         pp.set_solution_values(
             f"{pressure_key}_NC_estimate_inner_product_new_old",
             integral_inner_product_new_old.elementwise,
-            sd_data,
+            g_data,
             iterate_index=0,
         )
 
@@ -414,7 +401,7 @@ class EstimatesMixin:
         The time integrals are approximated by the trapezoidal rule.
 
         """
-        _, sd_data = self.mdg.subdomains(return_data=True)[0]
+        _, g_data = self.mdg.subdomains(return_data=True)[0]
 
         estimators: dict[str, float] = {}
         for flux_name in ["total", self.wetting.name]:
@@ -424,23 +411,23 @@ class EstimatesMixin:
             # Load spatial integrals from current time step.
             integral_R_new: Integral = Integral(
                 pp.get_solution_values(
-                    f"{flux_name}_R_estimate", sd_data, iterate_index=0
+                    f"{flux_name}_R_estimate", g_data, iterate_index=0
                 )
             )
             integral_F_new: Integral = Integral(
                 pp.get_solution_values(
-                    f"{flux_name}_F_estimate", sd_data, iterate_index=0
+                    f"{flux_name}_F_estimate", g_data, iterate_index=0
                 )
             )
             # Load spatial integrals from previous time step.
             integral_R_old: Integral = Integral(
                 pp.get_solution_values(
-                    f"{flux_name}_R_estimate", sd_data, time_step_index=0
+                    f"{flux_name}_R_estimate", g_data, time_step_index=0
                 )
             )
             integral_F_old: Integral = Integral(
                 pp.get_solution_values(
-                    f"{flux_name}_F_estimate", sd_data, time_step_index=0
+                    f"{flux_name}_F_estimate", g_data, time_step_index=0
                 )
             )
             # Calculate global values at current and previous time step.
@@ -494,7 +481,7 @@ class EstimatesMixin:
             \right]
 
         """
-        _, sd_data = self.mdg.subdomains(return_data=True)[0]
+        _, g_data = self.mdg.subdomains(return_data=True)[0]
 
         estimators: dict[str, float] = {}
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
@@ -503,20 +490,20 @@ class EstimatesMixin:
             # Load spatial integrals from current time step.
             integral_NC_new: Integral = Integral(
                 pp.get_solution_values(
-                    f"{pressure_key}_NC_estimate", sd_data, iterate_index=0
+                    f"{pressure_key}_NC_estimate", g_data, iterate_index=0
                 )
             )
             integral_NC_inner_product_new_old: Integral = Integral(
                 pp.get_solution_values(
                     f"{pressure_key}_NC_estimate_inner_product_new_old",
-                    sd_data,
+                    g_data,
                     iterate_index=0,
                 )
             )
             # Load spatial integrals from previous time step.
             integral_NC_old: Integral = Integral(
                 pp.get_solution_values(
-                    f"{pressure_key}_NC_estimate", sd_data, time_step_index=0
+                    f"{pressure_key}_NC_estimate", g_data, time_step_index=0
                 )
             )
             # Calculate global values at current and previous time step.
@@ -553,8 +540,8 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
     global_nonconformity_est: Callable[[], tuple[float, float]]
 
     mdg: pp.MixedDimensionalGrid
-    wetting: Phase
-    nonwetting: Phase
+    wetting: FluidPhase
+    nonwetting: FluidPhase
     extend_fv_fluxes: Callable[[str], None]
     reconstruct_pressure_vohralik: Callable[[str], None]
     postprocess_solution: Callable[[], None]
@@ -563,11 +550,41 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
     time_step_indices: list[int]
 
     def prepare_simulation(self) -> None:
-        super().prepare_simulation()
-        self.setup_estimates()
-        self.initialize_estimators()
+        # TODO Integrate a call to ``super().prepare_simulation()`` here.
+        # Set the model parameters.
+        self.set_rel_perm_constants()
+        self.set_cap_press_constants()
+        self.set_materials()
+        self.set_geometry()
 
-    def initialize_estimators(self) -> None:
+        # Exporter initialization must be done after grid creation,
+        # but prior to data initialization.
+        self.set_solver_statistics()
+        self.initialize_data_saving()
+
+        # Create the numerical aparatus.
+        self.set_equation_system_manager()
+        self.create_variables()
+        self.initial_condition()
+        self.set_discretization_parameters()
+        self.set_equations()
+        self.discretize()
+
+        # Setup reconstructions
+        self.setup_glob_compl_pressure()
+        self.setup_pressure_reconstruction()
+        # Initialize fluxes, global, and complimentary pressure from the initial data of
+        # the problem.
+        self.eval_additional_vars(prepare_simulation=True)
+        self.set_boundary_pressures()
+
+        # Setup estimators.
+        self.setup_estimates()
+        self.initialize_estimate_vals()
+
+        self.save_data_time_step()
+
+    def initialize_estimate_vals(self) -> None:
         """Initialize time step values for reconstructed pressures and equilibrated
         fluxes.
 
@@ -580,7 +597,7 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
         ``after_hc_convergence``, but not everything.
 
         """
-        sd, sd_data = self.mdg.subdomains(return_data=True)[0]
+        sd, g_data = self.mdg.subdomains(return_data=True)[0]
 
         # Extend and equilibrate fluxes. Reconstruct pressures.
         # self.postprocess_solution()
@@ -606,33 +623,36 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
             ],
         ):
             values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{coeffs_key}", sd_data, iterate_index=0
+                f"{pressure_key}_{coeffs_key}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{coeffs_key}", values, sd_data, time_step_index=0
+                f"{pressure_key}_{coeffs_key}", values, g_data, time_step_index=0
             )
 
-        # Initialize time step values for local estimators.
-        for flux_name in ["total", "wetting"]:
+        # Initialize time step and iterate values for local estimators.
+        for flux_name in ["total", self.wetting.name]:
             pp.set_solution_values(
                 f"{flux_name}_R_estimate",
                 np.zeros(sd.num_cells),
-                sd_data,
+                g_data,
                 time_step_index=0,
+                iterate_index=0,
             )
             pp.set_solution_values(
                 f"{flux_name}_F_estimate",
                 np.zeros(sd.num_cells),
-                sd_data,
+                g_data,
                 time_step_index=0,
+                iterate_index=0,
             )
         # FIXME This should not be zero!
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             pp.set_solution_values(
                 f"{pressure_key}_NC_estimate",
                 np.zeros(sd.num_cells),
-                sd_data,
+                g_data,
                 time_step_index=0,
+                iterate_index=0,
             )
 
     def check_convergence(
@@ -665,88 +685,85 @@ class SolutionStrategyEstMixin(SolutionStrategyReconstructionsMixin):
         # NOTE In theory, we do not need the shifts! However, for completeness, it does
         # not hurt leaving them in here in case someone wants to store multiple time
         # step values for whatever reason.
-        _, sd_data = self.mdg.subdomains(return_data=True)[0]
+        g_data = self.mdg.subdomains(return_data=True)[0][1]
         for pressure_key, key in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
             ["NC_estimate"],
         ):
             pp.shift_solution_values(
                 f"{pressure_key}_{key}",
-                sd_data,
+                g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{key}", sd_data, iterate_index=0
+                f"{pressure_key}_{key}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{key}", values, sd_data, time_step_index=0
+                f"{pressure_key}_{key}", values, g_data, time_step_index=0
             )
         for flux_name, key in itertools.product(
-            ["total", "wetting"],
+            ["total", self.wetting.name],
             ["R_estimate", "F_estimate"],
         ):
             pp.shift_solution_values(
                 f"{flux_name}_{key}",
-                sd_data,
+                g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{key}", sd_data, iterate_index=0
+                f"{flux_name}_{key}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{flux_name}_{key}", values, sd_data, time_step_index=0
+                f"{flux_name}_{key}", values, g_data, time_step_index=0
             )
 
 
-class DataSavingEstMixin:
+class DataSavingMixinEst:
 
-    def data_to_export(self) -> list[DataInput]:
-        """Return data to be exported.
+    wetting: FluidPhase
+    """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
 
-        Return type should comply with pp.exporter.DataInput.
+    mdg: pp.MixedDimensionalGrid
+    """Normally provided by a mixin of instance :class:`~porepy.ModelGeometry`."""
 
-        Returns:
-            List containing all (grid, name, scaled_values) tuples.
-
-        """
-        data = []
-        variables = self.equation_system.variables
-        for var in variables:
-            scaled_values = self.equation_system.get_variable_values(
-                variables=[var], time_step_index=0
-            )
-            units = var.tags["si_units"]
-            values = self.fluid.convert_units(scaled_values, units, to_si=True)
-            data.append((var.domain, var.name, values))
-
-        # Add secondary variables/derived quantities.
-        # All models are expected to have the dimension reduction methods for aperture
-        # and specific volume. More methods may be added as needed, e.g. by overriding
-        # this method:
-        #   def data_to_export(self):
-        #       data = super().data_to_export()
-        #       data.append(
-        #           (grid, "name", self._evaluate_and_scale(sd, "name", "units"))
-        #       )
-        #       return data
-        for dim in range(self.nd + 1):
-            for sd in self.mdg.subdomains(dim=dim):
-                if dim < self.nd:
-                    data.append(
-                        (sd, "aperture", self._evaluate_and_scale(sd, "aperture", "m"))
-                    )
-                data.append(
-                    (
-                        sd,
-                        "specific_volume",
-                        self._evaluate_and_scale(
-                            sd, "specific_volume", f"m^{self.nd - sd.dim}"
-                        ),
-                    )
+    def _data_to_export(
+        self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
+    ) -> list[DataInput]:
+        """Append porosity and permeability to the exported data."""
+        # Get data from ``super()`` and append porosity and permeability.
+        data: list[DataInput] = super()._data_to_export(
+            time_step_index=time_step_index,
+            iterate_index=iterate_index,
+        )
+        g, g_data = self.mdg.subdomains(return_data=True)[0]
+        for flux_name, est_name in itertools.product(
+            ["total", self.wetting.name], ["R_estimate", "F_estimate"]
+        ):
+            data.append(
+                (
+                    g,
+                    f"{flux_name}_{est_name}",
+                    pp.get_solution_values(
+                        f"{flux_name}_{est_name}",
+                        g_data,
+                        time_step_index=time_step_index,
+                        iterate_index=iterate_index,
+                    ),
                 )
-
-        # We combine grids and mortar grids. This is supported by the exporter, but not
-        # by the type hints in the exporter module. Hence, we ignore the type hints.
-        return data  # type: ignore[return-value]
+            )
+        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+            data.append(
+                (
+                    g,
+                    f"{pressure_key}_NC_estimate",
+                    pp.get_solution_values(
+                        f"{pressure_key}_NC_estimate",
+                        g_data,
+                        time_step_index=time_step_index,
+                        iterate_index=iterate_index,
+                    ),
+                )
+            )
+        return data

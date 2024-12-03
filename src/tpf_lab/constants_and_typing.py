@@ -5,7 +5,7 @@ import porepy as pp
 # Type aliases and type variables:
 # TODO Phase names should be variable, e.g., "wetting", "nonwetting", "oil", "water",
 # etc.
-type PHASENAME = Literal["wetting", "nonwetting"]
+type PHASENAME = Literal["wetting", "nonwetting", "oil", "water", "gas", "co2"]
 type REL_PERM_MODEL = Literal[
     "Brooks-Corey",
     "Corey",

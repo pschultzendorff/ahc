@@ -17,8 +17,6 @@ pp.ad.Function implies that upon parsing, the argument passed to f will be an Ad
 
 from __future__ import annotations
 
-from typing import Callable, Union
-
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps

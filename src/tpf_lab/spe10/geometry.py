@@ -82,8 +82,3 @@ def load_spe10_data(data_dir: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
     poro_data = np.loadtxt(str(poro_file)).reshape(85, 220, 60)  # unit: [-]
 
     return perm_data, poro_data
-
-
-# Example usage
-permeability, porosity = load_spe10_data(DATA_DIR)
-print(f"Permeability shape: {permeability.shape}, Porosity shape: {porosity.shape}")

@@ -10,11 +10,10 @@ import numpy as np
 # ``tqdm`` is not a dependency. Up to the user to install it.
 try:
     # Avoid some mypy trouble.
-    from tqdm.autonotebook import trange  # type: ignore
-
     from porepy.utils.ui_and_logging import (
         logging_redirect_tqdm_with_level as logging_redirect_tqdm,
     )
+    from tqdm.autonotebook import trange  # type: ignore
 
 except ImportError:
     _IS_TQDM_AVAILABLE: bool = False

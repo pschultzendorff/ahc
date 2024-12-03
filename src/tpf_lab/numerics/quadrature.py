@@ -313,6 +313,8 @@ class SimpsonsRule(BaseScheme):
     # TODO: Implement SimpsonsRule
 
 
+# TODO Unify GaussLegendreQuadrature1D, GaussLegendreQuadrature2D, and
+# GaussLegendreQuadrature3D into one class with a dimension parameter.
 class GaussLegendreQuadrature1D(BaseScheme):
     """
     Gauss-Legendre quadrature rule for 1D-intervals.
@@ -470,12 +472,12 @@ class GaussLegendreQuadrature2D(BaseScheme):
     def _reference_points_setter(
         self, reference_points: Optional[np.ndarray] = None
     ) -> None:
-        points_1d, _ = np.polynomial.legendre.leggauss(self.degree)
+        points_1d = np.polynomial.legendre.leggauss(self.degree)[0]
         xv, yv = np.meshgrid(points_1d, points_1d)
         self._reference_points = np.stack((xv, yv), axis=2).reshape(self.degree**2, 2)
 
     def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
-        _, weights_1d = np.polynomial.legendre.leggauss(self.degree)
+        weights_1d = np.polynomial.legendre.leggauss(self.degree)[1]
         self._weights = np.outer(weights_1d, weights_1d).flatten()
 
 
@@ -599,14 +601,14 @@ class GaussLegendreQuadrature3D(BaseScheme):
     def _reference_points_setter(
         self, reference_points: Optional[np.ndarray] = None
     ) -> None:
-        points_1d, _ = np.polynomial.legendre.leggauss(self.degree)
+        points_1d = np.polynomial.legendre.leggauss(self.degree)[0]
         xv, yv, zv = np.meshgrid(points_1d, points_1d, points_1d)
         self._reference_points = np.stack((xv, yv, zv), axis=2).reshape(
             self.degree**3, 3
         )
 
     def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
-        _, weights_1d = np.polynomial.legendre.leggauss(self.degree)
+        weights_1d = np.polynomial.legendre.leggauss(self.degree)[1]
         self._weights = np.outer(weights_1d, weights_1d, weights_1d).flatten()
 
 
