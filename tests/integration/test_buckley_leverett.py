@@ -9,11 +9,11 @@ to denote its residual. ``PorePy`` provides them in the form :math:`A=J` and
 Thus, we need to always multiply the residual by -1.
 
 """
+
 import numpy as np
 import porepy as pp
 import pytest
-
-from tpf_lab.models.buckley_leverett import BuckleyLeverettSetup
+from tpf.models.buckley_leverett import BuckleyLeverettSetup
 
 
 @pytest.fixture(scope="module")

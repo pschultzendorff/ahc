@@ -10,15 +10,15 @@ import warnings
 import numpy as np
 import porepy as pp
 from numba import config
-from tpf_lab.models.estimators import EstimatesMixin, SolutionStrategyEstMixin
-from tpf_lab.models.flow_and_transport import (
+from tpf.models.error_estimate import ErrorEstimateMixin, SolutionStrategyEst
+from tpf.models.flow_and_transport import (
     BoundaryConditionsTPF,
     ConstitutiveLawsTPF,
     EquationsTPF,
     SolutionStrategyTPF,
     VariablesTPF,
 )
-from tpf_lab.models.homotopy_continuation import (
+from tpf.models.homotopy_continuation import (
     EstimatesHCMixin,
     HCSolver,
     RelativePermeabilityHC,
@@ -26,10 +26,10 @@ from tpf_lab.models.homotopy_continuation import (
     SolutionStrategyHCMixin,
     SolverStatisticsHC,
 )
-from tpf_lab.models.phase import Phase, PhaseConstants
-from tpf_lab.models.reconstructions import (
+from tpf.models.phase import Phase, PhaseConstants
+from tpf.models.reconstruction import (
     EquilibratedFluxMixin,
-    PressureMixin,
+    GlobalPressureMixin,
     PressureReconstructionMixin,
 )
 
@@ -121,10 +121,10 @@ class HCTwoPhaseFlow(
     SolutionStrategyHCMixin,
     SolutionStrategyEstHCMixin,
     # Estimator mixins:
-    EstimatesMixin,
-    SolutionStrategyEstMixin,
+    ErrorEstimateMixin,
+    SolutionStrategyEst,
     # Reconstruction mixins:
-    PressureMixin,
+    GlobalPressureMixin,
     PressureReconstructionMixin,
     EquilibratedFluxMixin,
     # Base solution strategy and data saving:

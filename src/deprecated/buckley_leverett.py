@@ -12,14 +12,14 @@ import sympy
 from buckley_leverett import analytical_solution, functions
 from porepy.utils.examples_utils import VerificationUtils
 from scipy import interpolate
-from tpf_lab.models.flow_and_transport import (
+from tpf.models.flow_and_transport import (
     BoundaryConditionsTPF,
     EquationsTPF,
     SolutionStrategyTPF,
     VariablesTPF,
 )
-from tpf_lab.numerics.ad.functions import ad_pow
-from tpf_lab.visualization.diagnostics import (
+from tpf.numerics.ad.functions import ad_pow
+from tpf.visualization.diagnostics import (
     DataSavingBL,
     DiagnosticsMixinExtended,
     SaveDataBL,

@@ -16,17 +16,17 @@ import warnings
 import numpy as np
 import porepy as pp
 from numba import config
-from tpf_lab.models.flow_and_transport import (
+from tpf.models.flow_and_transport import (
     BoundaryConditionsTPF,
     EquationsTPF,
     TwoPhaseFlow,
 )
-from tpf_lab.models.homotopy_continuation import (
+from tpf.models.homotopy_continuation import (
     HCSolver,
     RelativePermeabilityHC,
     SolutionStrategyHC,
 )
-from tpf_lab.models.phase import Phase, PhaseConstants
+from tpf.models.phase import Phase, PhaseConstants
 
 # Disable numba JIT for debugging.
 config.DISABLE_JIT = True

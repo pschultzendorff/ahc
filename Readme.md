@@ -35,3 +35,4 @@ simple neural networks and a training function.
 - Rename every method and attribute that contains ``continuation`` to ``hc`` to make
   things more readable!
 - Add keywords_only to all dataclasses!
+- Make use of protocols and ``@typing.override`` everywhere.

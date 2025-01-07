@@ -12,22 +12,22 @@ import sympy
 import torch
 from buckley_leverett import analytical_solution, functions
 from porepy.utils.examples_utils import VerificationUtils
-from tpf_lab.ml.nn import BaseNN
-from tpf_lab.ml.nn_ad import nn_wrapper
-from tpf_lab.models.buckley_leverett import (
+from tpf.ml.nn import BaseNN
+from tpf.ml.nn_ad import nn_wrapper
+from tpf.models.buckley_leverett import (
     BuckleyLeverettBoundaryConditions,
     BuckleyLeverettDefaultGeometry,
     BuckleyLeverettSemiAnalyticalSolution,
     BuckleyLeverettSolutionStrategy,
 )
-from tpf_lab.models.flow_and_transport import (
+from tpf.models.flow_and_transport import (
     EquationsTPF,
     SolutionStrategyTPF,
     VariablesTPF,
 )
-from tpf_lab.numerics.ad.functions import ad_pow
-from tpf_lab.numerics.ad.functions import minimum as minimum_ad
-from tpf_lab.visualization.diagnostics import DataSavingBL, DiagnosticsMixinExtended
+from tpf.numerics.ad.functions import ad_pow
+from tpf.numerics.ad.functions import minimum as minimum_ad
+from tpf.visualization.diagnostics import DataSavingBL, DiagnosticsMixinExtended
 
 # Setup logging.
 logger = logging.getLogger(__name__)

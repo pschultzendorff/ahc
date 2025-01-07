@@ -15,20 +15,20 @@ import warnings
 import numpy as np
 import porepy as pp
 from numba import config
-from tpf_lab.models.estimators import (
-    EstimatesMixin,
-    SolutionStrategyEstMixin,
+from tpf.models.error_estimate import (
+    ErrorEstimateMixin,
+    SolutionStrategyEst,
     SolverStatisticsEst,
 )
-from tpf_lab.models.flow_and_transport import (
+from tpf.models.flow_and_transport import (
     BoundaryConditionsTPF,
     EquationsTPF,
     TwoPhaseFlow,
 )
-from tpf_lab.models.phase import Phase, PhaseConstants
-from tpf_lab.models.reconstructions import (
+from tpf.models.phase import Phase, PhaseConstants
+from tpf.models.reconstruction import (
     EquilibratedFluxMixin,
-    PressureMixin,
+    GlobalPressureMixin,
     PressureReconstructionMixin,
 )
 
@@ -134,10 +134,10 @@ class ModifiedTwoPhaseFlow(
     ModifiedGeometry,
     ModifiedBoundaryConditions,
     EquilibratedFluxMixin,
-    PressureMixin,
+    GlobalPressureMixin,
     PressureReconstructionMixin,
-    EstimatesMixin,
-    SolutionStrategyEstMixin,
+    ErrorEstimateMixin,
+    SolutionStrategyEst,
     TwoPhaseFlow,
 ): ...  # type: ignore
 

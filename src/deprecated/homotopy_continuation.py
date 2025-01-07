@@ -9,11 +9,11 @@ from typing import Any, Callable, Optional
 import numpy as np
 import porepy as pp
 import torch
-from tpf_lab.ml.nn import BaseNN
-from tpf_lab.ml.nn_ad import nn_wrapper
-from tpf_lab.models.flow_and_transport import EquationsTPF, SolutionStrategyTPF
-from tpf_lab.numerics.ad.functions import ad_pow
-from tpf_lab.numerics.ad.functions import minimum as minimum_ad
+from tpf.ml.nn import BaseNN
+from tpf.ml.nn_ad import nn_wrapper
+from tpf.models.flow_and_transport import EquationsTPF, SolutionStrategyTPF
+from tpf.numerics.ad.functions import ad_pow
+from tpf.numerics.ad.functions import minimum as minimum_ad
 
 logger = logging.getLogger(__name__)
 
