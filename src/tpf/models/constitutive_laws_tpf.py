@@ -1,21 +1,20 @@
 import logging
 import typing
-import warnings
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Literal, NamedTuple, Optional, TypeGuard
+from typing import Literal, Optional, TypeGuard
 
 import numpy as np
 import porepy as pp
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.ad.functions import minimum
-from tpf.utils.constants_and_typing import CAP_PRESS_MODEL, REL_PERM_MODEL, OperatorType
+from tpf.utils.constants_and_typing import CAP_PRESS_MODEL, REL_PERM_MODEL
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(kw_only=True)
+@dataclass
 class RelPermConstants:
     """:class:`RelPermConstants` is a :class:`~typing.NamedTuple` that holds the
     parameters for various relative permeability models.
@@ -28,30 +27,31 @@ class RelPermConstants:
 
     model: REL_PERM_MODEL = "linear"
     """The relative permeability model."""
-    n1: int
+
+    n1: int = 1
     """Model parameter for the Brooks-Corey model."""
-    n2: int
+    n2: int = 1
     """Model parameter for the Brooks-Corey model."""
-    n3: int
+    n3: int = 1
     """Model parameter for the Brooks-Corey model."""
-    power: int
+    power: int = 2
     """Model parameter for the Corey and linear models."""
-    linear_param_w: float
+    linear_param_w: float = 1.0
     """Model parameter for the Corey and linear models."""
-    linear_param_n: float
+    linear_param_n: float = 1.0
     """Model parameter for the Corey and linear models."""
-    kappa_g: float
+    kappa_g: float = 1.0
     """Model parameter for the van Genuchten model."""
-    n_g: int
+    n_g: float = 1.0
     """Model parameter for the van Genuchten model."""
-    m_g: float
+    m_g: float = 1.0
     """Model parameter for the van Genuchten model."""
-    limit: bool
-    """Flag to indicate if limits are applied."""
-    max_w: float
-    min_w: float
-    max_n: float
-    min_n: float
+    limit: bool = False
+    """Flag to indicate if rel. perms. are limit above and below residual saturation."""
+    max_w: float = 1.0
+    min_w: float = 0.0
+    max_n: float = 1.0
+    min_n: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.is_rel_perm_model(self.model):
@@ -118,10 +118,10 @@ class RelativePermeability(TPFProtocol):
 
     def rel_perm(
         self,
-        saturation_w: OperatorType,
+        saturation_w: pp.ad.Operator,
         phase: FluidPhase,
         rel_perm_constants: Optional[RelPermConstants] = None,
-    ) -> OperatorType:
+    ) -> pp.ad.Operator:
         r"""Phase relative permeability.
 
         The following two models are implemented:
@@ -343,12 +343,10 @@ class RelativePermeability(TPFProtocol):
 
         # Limit relative permeability above and below.
         if rel_perm_constants.limit:
-            rel_perm = np.minimum(
-                np.maximum(
-                    rel_perm,
-                    self._rel_perm_limit(
-                        phase, "min", rel_perm_constants=rel_perm_constants
-                    ),
+            rel_perm = np.clip(
+                rel_perm,
+                self._rel_perm_limit(
+                    phase, "min", rel_perm_constants=rel_perm_constants
                 ),
                 self._rel_perm_limit(
                     phase, "max", rel_perm_constants=rel_perm_constants
@@ -358,26 +356,26 @@ class RelativePermeability(TPFProtocol):
         return rel_perm
 
 
-@dataclass(kw_only=True)
+@dataclass
 class CapPressConstants:
     """:class:`CapPressConstants` is a :class:`~typing.NamedTuple` that holds constants
     for capillary pressure models.
 
     """
 
-    model: CAP_PRESS_MODEL
+    model: CAP_PRESS_MODEL = None
     """Model name."""
-    entry_pressure: float
+    entry_pressure: float = 0.0
     """Entry pressure value for the Brooks-Corey model."""
-    n_b: int
+    n_b: int = 2
     """Exponent for the Brooks-Corey model."""
-    n_g: int
+    n_g: int = 1
     """First exponent for the van Genuchten model."""
-    m_g: float
+    m_g: float = 1.0
     """Second exponent for the van Genuchten model."""
-    beta_g: float
+    beta_g: float = 1.0
     """Scaling factor for the van Genuchten model."""
-    linear_param: float
+    linear_param: float = 1.0
     """Scaling factor for the linear model."""
 
     def __post_init__(self) -> None:
@@ -407,9 +405,9 @@ class CapillaryPressure(TPFProtocol):
 
     def cap_press(
         self,
-        saturation_w: OperatorType,
+        saturation_w: pp.ad.Operator,
         cap_press_constants: Optional[CapPressConstants] = None,
-    ) -> OperatorType:
+    ) -> pp.ad.Operator:
         r"""Capillary pressure function.
 
         The following three models are implemented:
@@ -454,7 +452,7 @@ class CapillaryPressure(TPFProtocol):
             entry_pressure = pp.ad.Scalar(
                 cap_press_constants.entry_pressure, name="entry pressure"
             )
-            p_c: OperatorType = entry_pressure * s_normalized ** pp.ad.Scalar(
+            p_c: pp.ad.Operator = entry_pressure * s_normalized ** pp.ad.Scalar(
                 -1 / cap_press_constants.n_b
             )
         elif cap_press_constants.model == "linear":
@@ -479,11 +477,66 @@ class CapillaryPressure(TPFProtocol):
         p_c.set_name("cap. press.")
         return p_c
 
+    def cap_press_np(
+        self,
+        saturation_w: np.ndarray,
+        cap_press_constants: Optional[CapPressConstants] = None,
+    ) -> np.ndarray:
+        r"""Capillary pressure function for saturations of type :class:`~numpy.ndarray`.
+
+        See :meth:`cap_press` for explanation of the implemented models.
+
+        Parameters:
+            saturation_w: Wetting phase saturation. Can, e.g., be of instance
+                :class:`~porepy.ad.MixedDimensionalVariable` or
+                :class:`~porepy.ad.SparseArray` (for saturation boundary values).
+            cap_press_model: Capillary pressure constants. If set, overrides
+                ``self._cap_press_constants``. Default is ``None``.
+
+        Returns:
+            Capillary pressure.
+
+        """
+        if cap_press_constants is None:
+            cap_press_constants = self._cap_press_constants
+
+        s_normalized = self.normalize_saturation_np(
+            saturation_w, self.wetting, limit=False
+        )
+        if cap_press_constants.model == "Brooks-Corey":
+            p_c: np.ndarray = cap_press_constants.entry_pressure * np.power(
+                s_normalized,
+                -1 / cap_press_constants.n_b,
+                out=np.zeros_like(s_normalized),
+                where=s_normalized != 0,
+            )
+        elif cap_press_constants.model == "linear":
+            p_c = cap_press_constants.linear_param * s_normalized
+        elif cap_press_constants.model == "van Genuchten":
+            p_c = (
+                (
+                    (
+                        np.power(
+                            s_normalized,
+                            -1 / cap_press_constants.m_g,
+                            out=np.zeros_like(s_normalized),
+                            where=s_normalized != 0,
+                        )
+                        - 1
+                    )
+                )
+                ** (1 / cap_press_constants.n_g)
+            ) / cap_press_constants.beta_g
+        else:
+            # Return cap. pressure 0.
+            p_c = 0 * s_normalized
+        return p_c
+
     def cap_press_deriv(
         self,
-        saturation_w: OperatorType,
+        saturation_w: pp.ad.Operator,
         cap_press_constants: Optional[CapPressConstants] = None,
-    ) -> OperatorType:
+    ) -> pp.ad.Operator:
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
 
@@ -548,28 +601,46 @@ class CapillaryPressure(TPFProtocol):
         s_normalized: np.ndarray = self.normalize_saturation_np(
             saturation_w, phase=self.wetting, limit=False
         )
-        s_normalized_deriv: np.ndarray = self.normalize_saturation_deriv_np(
-            self.wetting
-        )
+        s_normalized_deriv: float = self.normalize_saturation_deriv_np(self.wetting)
         if cap_press_constants.model == "Brooks-Corey":
             return (
                 cap_press_constants.entry_pressure
                 * (-1 / cap_press_constants.n_b)
-                * s_normalized ** (-1 / cap_press_constants.n_b - 1)
+                * np.power(
+                    s_normalized,
+                    -1 / cap_press_constants.n_b - 1,
+                    out=np.zeros_like(s_normalized),
+                    where=s_normalized != 0,
+                )
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
             cap_press_linear_param = cap_press_constants.linear_param
-            return cap_press_linear_param * s_normalized_deriv
+            return np.full_like(
+                s_normalized, cap_press_linear_param * s_normalized_deriv
+            )
         elif cap_press_constants.model == "van Genuchten":
             return (
                 (1 / cap_press_constants.n_g - 1)
                 * (
-                    ((s_normalized ** (-1 / cap_press_constants.m_g)) - 1)
+                    (
+                        np.power(
+                            s_normalized,
+                            -1 / cap_press_constants.m_g,
+                            out=np.zeros_like(s_normalized),
+                            where=s_normalized != 0,
+                        )
+                        - 1
+                    )
                     ** (1 / cap_press_constants.n_g - 1)
                 )
                 / cap_press_constants.beta_g
                 * (-1 / cap_press_constants.m_g)
-                * (s_normalized ** (-1 / cap_press_constants.m_g - 1))
+                * np.power(
+                    s_normalized,
+                    -1 / cap_press_constants.m_g - 1,
+                    out=np.zeros_like(s_normalized),
+                    where=s_normalized != 0,
+                )
                 * s_normalized_deriv
             )
         else:
@@ -577,8 +648,7 @@ class CapillaryPressure(TPFProtocol):
             return np.zeros_like(s_normalized)
 
 
-def validate_constants() -> bool:
+def validate_constants() -> None:
     """Check that the relative permeability and capillary pressure models go in hand."""
     # TODO: Implement this function.
-    pass
     pass

@@ -14,12 +14,8 @@ Furthermore, multiple different models for both the capillary pressure, as well 
 relative permeability are implemented.
 
 TODO
-    - Change bc_values to ``ad.BoundaryCondition``
-    - Remove or fix the unit documentation. The units can depend on the instance of
-      ``porepy.Units`` passed to the simulation.
     - Make sure that pressure gets scaled with units and any other physical quantities
       as well.
-    - Make use of TypeVars for typing of some functions and in general type everything.
 
 Units:
     Collection of the SI units for all parameters.
@@ -40,7 +36,6 @@ It follows, that the length unit for the domain is meters and the time unit is s
 from __future__ import annotations
 
 import itertools
-import json
 import logging
 import time
 import typing
@@ -55,77 +50,10 @@ from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.ad.functions import ad_pow as ad_pow
 from tpf.numerics.ad.functions import minimum
-from tpf.utils.constants_and_typing import NONWETTING, WETTING, OperatorType
-from tpf.visualization.diagnostics import SaveDataTPF
+from tpf.utils.constants_and_typing import NONWETTING, WETTING
+from tpf.viz.diagnostics import SaveDataTPF
 
 logger = logging.getLogger(__name__)
-
-
-class SolverStatisticsTPF(pp.SolverStatistics):
-
-    time_step_index: int = 0
-    """Time step count."""
-    time: float = 0.0
-    """Current simulation time."""
-    time_step_size: float = 0.0
-    """Time step size."""
-
-    @typing.override
-    def log_error(
-        self,
-        nonlinear_increment_norm: Optional[float] = None,
-        residual_norm: Optional[float] = None,
-        **kwargs,
-    ) -> None:
-        """Log errors produced from convergence criteria.
-
-        Parameters:
-            nonlinear_increment_norm (float): Error in the increment.
-            residual_norm (float): Error in the residual.
-            **kwargs: Additional keyword arguments, for potential extension.
-
-        Raises:
-            ValueError: If neither the time step information nor the norms are provided.
-
-        """
-        if (
-            "time_step_index" in kwargs
-            and "time" in kwargs
-            and "time_step_size" in kwargs
-        ):
-            self.time_step_index = kwargs["time_step_index"]
-            self.time = kwargs["time"]
-            self.time_step_size = kwargs["time_step_size"]
-        elif nonlinear_increment_norm is not None and residual_norm is not None:
-            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
-        else:
-            raise ValueError("Either provide all time step information or norms.")
-
-    @typing.override
-    def save(self) -> None:
-        """Save the statistics object to a JSON file."""
-        if self.path is not None:
-            # Check if object exists and append to it
-            if self.path.exists():
-                with self.path.open("r") as file:
-                    data = json.load(file)
-            else:
-                data = {}
-
-            # Append data - assume the index corresponds to time step
-            ind = len(data) + 1
-            data[ind] = {
-                "time step index": self.time_step_index,
-                "current time": self.time,
-                "time step size": self.time_step_size,
-                "num_iteration": self.num_iteration,
-                "nonlinear_increment_norms": self.nonlinear_increment_norms,
-                "residual_norms": self.residual_norms,
-            }
-
-            # Save to file
-            with self.path.open("w") as file:
-                json.dump(data, file, indent=4)
 
 
 # region CONSTITUTIVE LAWS
@@ -148,9 +76,6 @@ class DarcyFluxes(TPFProtocol):
             Phase mobility.
 
         """
-        # TODO Does it make more sense to get this from the dictionary? Would need to
-        # change ``BuckleyLeverett`` then, as the mobilities are updated at iterations
-        # via ``self._bc_values_mobility_w``.
         # NOTE At Neumann boundaries, both phase fluxes are prescribed, hence no need
         # to determine any phase mobilities.
 
@@ -272,20 +197,17 @@ class DarcyFluxes(TPFProtocol):
         # Variables and bc.
         p_n_bc = pp.ad.DenseArray(self.bc_dirichlet_pressure_values(g, self.nonwetting))
 
-        # FIXME This is a little inefficient. Would be nicer if we didn't have to
-        # recreate the array.
         # We want to ensure that no diffusive flux due to capillary pressure contributes
         # to total flux at Neumann boundaries. Thus, we manually null ``p_cap_bc`` at
         # Neumann boundaries s.t. ``tpfa.bound_flux() @ p_..._bc`` is zero. This is not
         # necesarry for ``p_n_bc`` as it is already done by
         # ``self.bc_dirichlet_pressure_values``.
         neumann_ind = np.where(self.bc_type(g).is_neu)[0]
-        p_cap_bc: pp.ad.Operator = self.cap_press(
-            pp.ad.DenseArray(self.bc_dirichlet_saturation_values(g, self.wetting))
+        p_cap_bc_values: np.ndarray = self.cap_press_np(
+            (self.bc_dirichlet_saturation_values(g, self.wetting))
         )
-        p_cap_values: np.ndarray = p_cap_bc.value(self.equation_system)
-        p_cap_values[neumann_ind] = 0
-        p_cap_bc = pp.ad.DenseArray(p_cap_values)
+        p_cap_bc_values[neumann_ind] = 0.0
+        p_cap_bc = pp.ad.DenseArray(p_cap_bc_values)
 
         # Sum phase Neumann boundary fluxes to obtain total Neumann boundary flux.
         flux_t_bc_neu = pp.ad.sum_operator_list(
@@ -377,48 +299,14 @@ class ConstitutiveLawsTPF(
 
 
 # region PDEs
-class EquationsTPF(pp.BalanceEquation, TPFProtocol):
+class EquationsTPF(TPFProtocol, pp.BalanceEquation):
     """This is a model class for two-phase flow problems.
 
     This class is intended to provide a standardized setup, with all discretizations
     in place and reasonable parameter and boundary values. The intended use is to
     inherit from this class, and do the necessary modifications and specifications
     for the problem to be fully defined. The minimal adjustment needed is to
-    specify the method create_grid(). The class also serves as parent for other
-    model classes (CompressibleFlow).
-
-    Public attributes:
-    TODO Update this list!
-        primary_pressure_var: Name of the primary pressure variable. Used throughout the
-            simulations, including in ParaView export. The default variable name is
-            "wetting  pressure" or "nonwetting pressure", depending on the chosen
-            two-phase flow formulation.
-        secondary_pressure_var: Name of the secondary pressure variable. Used throughout
-            the simulations, including in ParaView export. The default variable name is
-            "nonwetting  pressure" or "wetting pressure", depending on the chosen
-            two-phase flow formulation.
-        primary_saturation_var: Name of the primary saturation variable. Used throughout
-            the simulations, including in ParaView export. The default variable name is
-            "wetting  saturation" or "nonwetting saturation", depending on the chosen
-            two-phase flow formulation.
-        secondary_saturation_var: Name of the secondary saturation variable. Used
-            throughout the simulations, including in ParaView export. The default
-            variable name is "nonwetting  saturation" or "wetting saturation", depending
-            on the chosen two-phase flow formulation.
-
-        phases: List of fluid phases, providing phase names, constants, variables, and
-            bc.
-
-        parameter_key: Keyword used to define parameters and discretizations.
-        params: Dictionary of parameters used to control the solution procedure.
-            Some frequently used entries are file and folder names for export, mesh
-            sizes...
-        mdg: Mixed-dimensional grid. Should be set by a method
-            create_grid, which should be provided by the user.
-        convergence_status: Whether the non-linear iteration has converged.
-        linear_solver: Specification of linear solver. Only known permissible
-            value is 'direct'.
-        exporter: Used for writing files for visualization.
+    specify the method create_grid().
 
     All attributes are given natural values at initialization of the class.
 
@@ -575,7 +463,7 @@ class EquationsTPF(pp.BalanceEquation, TPFProtocol):
         return yscale * exp_func(pp.ad.Scalar(-1) * xscale * square_func(s - offset))
 
 
-class VariablesTPF(pp.VariableMixin, TPFProtocol):
+class VariablesTPF(TPFProtocol, pp.VariableMixin):
 
     def create_variables(self) -> None:
         """Create primary variables (wetting pressure, nonwetting pressure,
@@ -610,7 +498,7 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
         limit: bool = False,
         epsilon: float = 0.0,
     ) -> pp.ad.Operator:
-        # TODO Replace typing with ``OperatorType``?
+        # TODO Replace typing with ``pp.ad.Operator``?
         r"""Normalize a given saturation by the residual saturations.
 
         .. math::
@@ -627,7 +515,9 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
                 :class:`~porepy.ad.SparseArray` (for saturation boundary values).
             phase: Phase object representing the phase the saturation belongs to.
             epsilon: Added/substracted from normalized saturation to avoid values of
-                ``0``, ``1``.
+                :math:`0`, :math:`1`.
+            limit: If ``True``, the normalized saturation is cut off at :math:`\epsilon`
+            and :math:`1 - \epsilon`. Default is ``False``.
 
         Returns:
             s_normalized: Normalized wetting saturation.
@@ -680,7 +570,7 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
     def normalize_saturation_np(
         self,
         saturation: np.ndarray,
-        phase: Optional[FluidPhase] = None,
+        phase: FluidPhase,
         limit: bool = False,
         epsilon: float = 0.0,
     ) -> np.ndarray:
@@ -692,8 +582,8 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
             s_normalized: Normalized wetting saturation.
 
         Raises:
-            ValueError: If neither ``saturation`` has a ``name`` attribute specifying
-            the phase nor ``phase`` is specified.
+            ValueError: If ``phase.name`` is not equal to the wetting or nonwetting
+            phase name.
 
         """
         if getattr(phase, "name", "") == self.wetting.name:
@@ -708,15 +598,7 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
             # Cut off irregular saturations and add/substract epsilon s.t. capillary
             # pressure does not grow to infinity.
             if limit:
-                maximum_func = pp.ad.Function(
-                    partial(pp.ad.functions.maximum, var_1=epsilon),
-                    "max",
-                )
-                minimum_func = pp.ad.Function(
-                    partial(minimum, var_1=1 - epsilon),
-                    "min",
-                )
-                s_normalized = minimum_func(maximum_func(s_normalized))
+                s_normalized = np.clip(s_normalized, epsilon, 1 - epsilon)
 
         elif getattr(phase, "name", "") == self.nonwetting.name:
             s_normalized = 1 - self.normalize_saturation_np(
@@ -727,8 +609,7 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
             )
         else:
             raise ValueError(
-                "``saturation`` must have either a ``name`` attribute"
-                + " specifying the phase or ``phase`` must be specified."
+                "``phase.name`` must be equal to the wetting or nonwetting phase name."
             )
         return s_normalized
 
@@ -762,24 +643,68 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
             Normalized wetting saturation.
 
         Raises:
-            ValueError: If neither ``saturation`` has a ``name`` attribute specifying the
-            phase nor ``phase`` is specified.
+            ValueError: If ``phase.name`` is not equal to the wetting or nonwetting
+            phase name.
 
         """
         residual_saturation_w: float = self.wetting.residual_saturation
         residual_saturation_n: float = self.nonwetting.residual_saturation
         # TODO This shall return exactly the same type as saturation, but set to 0
         # outside the residual saturation range. How to do this for a general
-        # OperatorType? Is it necessary to return the same type as saturation?
-        # NOTE For now, this function is only needed when
-        # ``reconstructions.GlobalPressure.global_pressure`` or
-        # ``reconstructions.GlobalPressure.complimentary_pressure`` are called. They
-        # take care of limiting the saturation themselves. Thus, we do not need to care
-        # about this.
+        # pp.ad.Operator? Is it necessary to return the same type as saturation?
+        # NOTE At the moment this function is not used. If used in the future, the limit
+        # and epsilon parameter may need to be taken care of.
         if phase.name == self.wetting.name:
             return pp.ad.Scalar(1 - residual_saturation_n - residual_saturation_w)
         elif phase.name == self.nonwetting.name:
             return pp.ad.Scalar(residual_saturation_w + residual_saturation_n - 1)
+        else:
+            raise ValueError(
+                "``saturation`` must have either a ``name`` attribute"
+                + " specifying the phase or ``phase`` must be specified."
+            )
+
+    def normalize_saturation_deriv_np(
+        self,
+        phase: FluidPhase,
+        # limit: bool = False,
+        # epsilon: float = 0.0,
+    ) -> float:
+        r"""Derivative of the normalized saturation.
+
+        For details, see :meth:`normalize_saturation_deriv`.
+
+        Noe: For now, this function is only needed when
+        ``reconstructions.GlobalPressure.global_pressure`` or
+        ``reconstructions.GlobalPressure.complimentary_pressure`` are called. They
+        take care of limiting the saturation themselves. Thus, we disregard any settings
+        regarding saturation limits.
+
+
+        Parameters:
+            saturation: Saturation to be normalized.
+            phase: Phase object representing the phase the saturation belongs to.
+
+        Returns:
+            Normalized wetting saturation.
+
+        Raises:
+            ValueError: If ``phase.name`` is not equal to the wetting or nonwetting
+            phase name.
+
+        """
+        if phase.name == self.wetting.name:
+            return (
+                1
+                - self.wetting.residual_saturation
+                - self.nonwetting.residual_saturation
+            )
+        elif phase.name == self.nonwetting.name:
+            return (
+                self.wetting.residual_saturation
+                + self.nonwetting.residual_saturation
+                - 1
+            )
         else:
             raise ValueError(
                 "``saturation`` must have either a ``name`` attribute"
@@ -792,7 +717,7 @@ class VariablesTPF(pp.VariableMixin, TPFProtocol):
 # region SOLUTION STRATEGY & BC
 
 
-class BoundaryConditionsTPF(pp.BoundaryConditionMixin, TPFProtocol):
+class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
     """This class provides boundary conditions for two-phase flow problems.
 
     - Dirichlet boundary: Phase pressure and saturation values are provided.
@@ -845,20 +770,24 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin, TPFProtocol):
             capillary pressure on Neumann faces in :meth:``total_flux``.
 
         """
-        # Homogeneous Dirichlet conditions for both phases.
-        if phase.name == self.wetting.name:
-            s_bc: np.ndarray = np.full(g.num_faces, 0.5)
-        elif phase.name == self.nonwetting.name:
-            s_bc: np.ndarray = np.ones(
-                g.num_faces
-            ) - self.bc_dirichlet_saturation_values(g, self.wetting)
+        s_bc: np.ndarray = self._bc_dirichlet_saturation_values(g, phase)
         neu_ind: np.ndarray = self.bc_type(g).is_neu
-        s_bc[neu_ind] = self.wetting.residual_saturation
+        if phase.name == self.wetting.name:
+            s_bc[neu_ind] = self.wetting.residual_saturation
+        elif phase.name == self.nonwetting.name:
+            s_bc[neu_ind] = self.nonwetting.residual_saturation
         return s_bc
 
     def _bc_dirichlet_saturation_values(
         self, g: pp.Grid, phase: FluidPhase
-    ) -> np.ndarray: ...
+    ) -> np.ndarray:
+        if phase.name == self.wetting.name:
+            s_bc: np.ndarray = np.full(g.num_faces, 0.5)
+        elif phase.name == self.nonwetting.name:
+            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
+                g, self.wetting
+            )
+        return s_bc
 
     def bc_neumann_flux_values(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         """Phase flux bc values on Neumann boundaries."""
@@ -889,7 +818,10 @@ class BoundaryConditionsTPF(pp.BoundaryConditionMixin, TPFProtocol):
         # )
 
 
-class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
+# TPF and pp.SolutionStrategy define different types for ``nonlinear_solver_statistics``
+# and cause a MyPy error. This is not a problem in practice, but
+# ``nonlinear_solver_statistics`` needs to be called with care. We ignore the error.
+class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
     @typing.override
     def __init__(self, params: Optional[dict]) -> None:
@@ -940,18 +872,21 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
         self._offset: float = self.params.get("offset", 0.5)
 
         # Solvers:
-        self._use_ad: bool = self.params.get("use_ad", True)
-        self.linear_solver: Literal["scipy_sparse", "pypardiso", "umfpack"] = (
-            self.params.get("linear_solver", "scipy_sparse")
-        )
+        self._use_ad: bool = True
 
         # Option to limit the saturation change per timestep.
-        self._limit_saturation_change: bool = False
-        """If this is set to ``True``, the Newton method fails, if the final solution
-        differs from the previous timestep by more than ``self._max_saturation_change``
-        in any grid cell. The timestep is then shortened and recalculated.
+        self._limit_delta_s_per_ts: bool = False
+        """Set maximal allowed local saturation change per time step to
+        ``self._max_delta_s_per_ts``. For larger saturation changes, Newton fails and
+        the time step is recomputed.
+
         """
-        self._max_saturation_change: float = 0.2
+        self._max_delta_s_per_ts: float = 0.2
+        self._appleyard_chopping: bool = False
+        """Chop local saturation changes per nonlinear iteration that are larger than
+        :math:`0.2`.
+
+        """
 
         # Data saving.
         self.results: list[SaveDataTPF] = []
@@ -985,7 +920,8 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
                 )
             else:
                 assert isinstance(constants[phase_name], FluidPhase)
-                phase = constants[phase_name]
+                # Ignore mypy error. We know that the phase is of type FluidPhase.s
+                phase = constants[phase_name]  # type: ignore
             phase.set_units(self.units)
             setattr(self, phase_name, phase)
             self.phases[phase_name] = phase
@@ -1036,71 +972,102 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
         self.initial_condition()
         self.set_discretization_parameters()
         self.set_equations()
+
         self.discretize()
+        self._initialize_linear_solver()
+
         # Save the initial values.
         self.save_data_time_step()
 
     @typing.override
     def set_discretization_parameters(self) -> None:
-        """Set default (unitary/zero) parameters for the flow problem.
+        """Set constant bc and darcy flux based on phase potentials.
 
         The parameter fields of the data dictionaries are updated for all
         subdomains and interfaces (of codimension 1).
+
+
+        Upwinding needs to be rediscretized at each nonlinear iteration, as the phase
+        flux changes. See the last sentence on page 686 of [Y. Brenier, J. Jaffré,
+        Upstream differencing for multiphase flow in reservoir simulation, SIAM J.
+        Numer. Anal. 28 (3) (1991) 685–696.] for details.
+
+        To evaluate the phase-mobilities separately, both the wetting, as well as the
+        nonwetting flux need to be computed.
+
         """
         super().set_discretization_parameters()
-        for sd, data in self.mdg.subdomains(return_data=True):
-            # Boundary conditions and parameters.
-            perm = self.permeability(sd)
-            # Different treatment for scalar and tensor permeability.
-            if isinstance(perm, np.ndarray):
-                diffusivity = pp.SecondOrderTensor(perm)
-            elif isinstance(perm, dict):
-                diffusivity = pp.SecondOrderTensor(**perm)
-            # all_bf, *_ = self._domain_boundary_sides(sd)
-            # Parameters that are not used for discretization.
+        g, g_data = self.mdg.subdomains(return_data=True)[0]
+        # Boundary conditions and parameters.
+        perm = self.permeability(g)
+        # Different treatment for scalar and tensor permeability.
+        if isinstance(perm, np.ndarray):
+            diffusivity = pp.SecondOrderTensor(perm)
+        elif isinstance(perm, dict):
+            diffusivity = pp.SecondOrderTensor(**perm)
+        # all_bf, *_ = self._domain_boundary_sides(sd)
+        # Parameters that are not used for discretization.
+        pp.initialize_data(
+            g,
+            g_data,
+            self.flux_key,
+            {
+                "bc": self.bc_type(g),
+                "second_order_tensor": diffusivity,
+                "ambient_dimension": g.dim,
+                # We initialize the Darcy flux to one just s.t.
+                # ``Upwind.discretize()`` can be called. This does not need to be
+                # updated, as only ``Upwind.bound_transport_neu()`` is used, which
+                # does not depend on the Darcy flux.
+                "darcy_flux": np.ones(g.num_faces),
+            },
+        )
+
+        # Compute the Darcy flux for upwinding.
+        # -> Needs to happen at each nonlinear iteration, because we are starting with a
+        # bad guess (previous timestep) and improve towards the solution. We want to use
+        # the better guess of the Darcy flux for discretization.
+        logger.info(
+            "Recalculate Darcy flux for upwind discretization."
+            + f" Iteration {self.nonlinear_solver_statistics.num_iteration}"
+        )
+        # Update Darcy fluxes for both phases.
+        for phase in self.phases.values():
+            try:
+                phase_potential: np.ndarray = self.phase_potential(g, phase).value(
+                    self.equation_system
+                )
+            except KeyError:
+                # When initializing the simulation, the phase potentials cannot be
+                # computed. Use unit values for the potential.
+                phase_potential = np.ones(g.num_faces)
             pp.initialize_data(
-                sd,
-                data,
-                self.flux_key,
+                g,
+                g_data,
+                phase.mobility_key,
                 {
-                    "bc": self.bc_type(sd),
-                    "second_order_tensor": diffusivity,
-                    "ambient_dimension": sd.dim,
-                    # We initialize the Darcy flux to one just s.t.
-                    # ``Upwind.discretize()`` can be called. This does not need to be
-                    # updated, as only ``Upwind.bound_transport_neu()`` is used, which
-                    # does not depend on the Darcy flux.
-                    "darcy_flux": np.ones(sd.num_faces),
+                    "bc": self.bc_type(g),
+                    # We initialize the Darcy flux to unit values just s.t.
+                    # ``Upwind.discretize()`` can be called.
+                    "darcy_flux": phase_potential,
                 },
             )
-            # Upwinding is done for both phases separately, hence we create two different
-            # data dictionaries.
-            for phase in self.phases.values():
-                pp.initialize_data(
-                    sd,
-                    data,
-                    phase.mobility_key,
-                    {
-                        "bc": self.bc_type(sd),
-                        # We initialize the Darcy flux to unit values just s.t.
-                        # ``Upwind.discretize()`` can be called.
-                        "darcy_flux": np.ones(sd.num_faces),
-                    },
-                )
-            # NOTE The following is only relevant when using an alternative formulation
-            # for Neumann boundaries in terms of total flux and saturation values.
-            # To correctly upwind phase mobilities at Neumann boundaries, we need
-            # another upwind discretization with full Dirichlet boundaries. Check
-            # ``DarcyFluxes.mobility()`` for more details.
-            # bc_dir = pp.BoundaryCondition(sd, sd.get_all_boundary_faces(), "dir")
-            # pp.initialize_data(
-            #     sd,
-            #     data,
-            #     self.all_bc_dir_key,
-            #     {
-            #         "bc": bc_dir,
-            #     },
-            # )
+
+        # NOTE The following is only relevant when using an alternative formulation
+        # for Neumann boundaries in terms of total flux and saturation values.
+        # To correctly upwind phase mobilities at Neumann boundaries, we need
+        # another upwind discretization with full Dirichlet boundaries. Check
+        # ``DarcyFluxes.mobility()`` for more details.
+        # bc_dir = pp.BoundaryCondition(sd, sd.get_all_boundary_faces(), "dir")
+        # pp.initialize_data(
+        #     sd,
+        #     data,
+        #     self.all_bc_dir_key,
+        #     {
+        #         "bc": bc_dir,
+        #         "darcy_flux": vals
+        #     },
+        # )
 
     @typing.override
     def initial_condition(self) -> None:
@@ -1122,25 +1089,29 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
     @typing.override
     def discretize(self) -> None:
         """Discretize all terms."""
-        # t_0 = time.time()
+        t_0 = time.time()
         self.equation_system.discretize()
         if self.formulation == "fractional_flow":
-            # Phase potential. This needs (?) to be discretized at each nonlinear iteration
-            # s.t. the Darcy flux can be computed for both phases s.t. the upwind
-            # operators for phase mobilities works correctly.
             for phase in self.phases.values():
                 phase_potential = self.phase_potential(self.mdg.subdomains()[0], phase)
                 phase_potential.discretize(self.mdg)
-        # logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
+        logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
     @typing.override
     def rediscretize(self) -> None:
-        # TODO Discretize only nonlinear discretizations. Make sure to call this in
-        # ``before_nonlinear_iteration`` instead of ``discretize``.
-        ...
+        # TODO Rediscretize only nonlinear terms.
+        t_0 = time.time()
+        self.equation_system.discretize()
+        if self.formulation == "fractional_flow":
+            # TODO Is it necessary to rediscretize phase_potential operators?
+            for phase in self.phases.values():
+                phase_potential = self.phase_potential(self.mdg.subdomains()[0], phase)
+                phase_potential.discretize(self.mdg)
+        logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
     @typing.override
     def set_nonlinear_discretizations(self) -> None:
+        """Discretize all terms."""
         # TODO Collect all nonlinear discretizations in one place. This way, linear
         # discretizations do not get called at each nonlinear iteration.
         ...
@@ -1156,6 +1127,8 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
 
         """
         t_0 = time.time()
+        if self.time_manager.time_index >= 2:
+            pass
         if self._use_ad:
             self.linear_system = self.equation_system.assemble(
                 variables=[self.primary_pressure_var, self.primary_saturation_var]
@@ -1169,6 +1142,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
         # Update time step size and empty statistics.
         self.ad_time_step.set_value(self.time_manager.dt)
         self.nonlinear_solver_statistics.reset()
+        self.convergence_status = False
 
         assembled_variables = self.equation_system.get_variable_values(
             time_step_index=0
@@ -1176,55 +1150,15 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
         self.equation_system.set_variable_values(
             assembled_variables, iterate_index=0, additive=False
         )
-        # FIXME
-        # if self._limit_saturation_change:
-        #     self._prev_saturation: np.ndarray = (
-        #         self.equation_system.get_variable_values(
-        #             variables=[self.primary_saturation_var], time_step_index=0
-        #         )
-        #     )
-
-    @typing.override
-    def before_nonlinear_iteration(self) -> None:
-        """Compute Darcy flux based on previous pressure solution to determine upstream
-        direction.
-
-        # TODO Do we need to do the rediscretization of the upwinding at every
-        iteration? Or only at the first one?
-
-        To evaluate the phase-mobilities separately, both the wetting, as well as the
-        nonwetting flux need to be computed.
-
-        """
-        # Compute the Darcy flux for upwinding.
-        # -> Needs to happen at each nonlinear iteration, because we are starting with a
-        # bad guess (previous timestep) and improve towards the solution. We want to use
-        # the better guess of the Darcy flux for discretization.
-
-        # NOTE This should only be done with care at the first iteration of the initial
-        # time step, as the upwind direction will not align with the initital guess for
-        # upwinding then.
-        # -> Might be unwanted or wanted behavior.
-        if (
-            self.time_manager.time_index >= 2
-            or self.nonlinear_solver_statistics.num_iteration >= 1
-        ):
-            logger.info(
-                "Recalculate Darcy flux for upwind discretization."
-                + f" Iteration {self.nonlinear_solver_statistics.num_iteration}"
+        if self._appleyard_chopping:
+            raise NotImplementedError(
+                "Appleyard chopping is not implemented for two-phase flow."
             )
-            for sd, data in self.mdg.subdomains(return_data=True):
-                # Update Darcy fluxes for both phases.
-                for phase in self.phases.values():
-                    vals = self.phase_potential(sd, phase).value(self.equation_system)
-                    data[pp.PARAMETERS][phase.mobility_key].update({"darcy_flux": vals})
-
-                # NOTE Only needed for the alternative formulation of Neumann bc.
-                # data[pp.PARAMETERS][self.all_bc_dir_key].update({"darcy_flux": vals})
-
-        # TODO Do I need to reset discretization parameters as is done by
-        # ``pp.solution_strategy.SolutionStrategy``?
-        self.discretize()
+            # self._prev_saturation: np.ndarray = (
+            #     self.equation_system.get_variable_values(
+            #         variables=[self.primary_saturation_var], time_step_index=0
+            #     )
+            # )
 
     @typing.override
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
@@ -1265,8 +1199,8 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
         )
         secondary_pressure_sol = secondary_pressure.value(self.equation_system)
         secondary_saturation_sol = secondary_saturation.value(self.equation_system)
-        #  As the values were computed with the additive value of the primary pressure
-        #  and saturation variable, we set ``additive=False``.
+        #  Since the values were computed with the additive value of the primary
+        #  pressure and saturation variable, we set ``additive=False``.
         self.equation_system.set_variable_values(
             np.concatenate(
                 [np.array(secondary_pressure_sol), np.array(secondary_saturation_sol)]
@@ -1282,20 +1216,17 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
     def after_nonlinear_convergence(self) -> None:  # type: ignore
         """Export and move to the next time step.
 
-        When ``self._limit_saturation_change == True``, check if the wetting saturation
-        has changed too much
+        When ``self._limit_delta_s_per_ts`` is true, check whether the wetting
+        saturation has changed too much.
 
         Parameters:
             solution: _description_
             errors: _description_
 
         """
-        # TODO At the moment this sets **all** iterate variables to the time step
-        # solution (also secondary variables). This should be changed.
-        # Secondary variables are not updated yet, so this will make things confusing.
         super().after_nonlinear_convergence()
         # If the saturation changes to much, decrease the time step and calculate again.
-        if self._limit_saturation_change:
+        if self._limit_delta_s_per_ts:
             new_saturation: np.ndarray = self.equation_system.get_variable_values(
                 variables=[self.primary_saturation_var], iterate_index=0
             )
@@ -1308,7 +1239,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
                         )[0].previous_timestep()
                     )
                 )
-                > self._max_saturation_change
+                > self._max_delta_s_per_ts
             ):
                 # This is set to false again in ``before_nonlinear_loop``.
                 # NOTE This is not a very nice solution, however, as of now I didn't
@@ -1318,9 +1249,9 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
                 self.time_manager._recomp_sol = True
                 self.convergence_status = False
                 logger.debug(
-                    "Saturation grew to quickly. Trying again with a smaller time step."
+                    "Saturation grew to quickly. Nonlinear solver is treated as diverged."
                 )
-                # TODO Actually try again with a smaller time step.
+                self.after_nonlinear_failure()
                 return None
 
     @typing.override
@@ -1342,6 +1273,8 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
         if nonlinear_increment_norm > nl_params["nl_divergence_tol"]:
             diverged = True
         self.nonlinear_solver_statistics.log_error(
+            nonlinear_increment_norm=None,
+            residual_norm=None,
             time_step_index=self.time_manager.time_index,
             time=self.time_manager.time,
             time_step_size=self.time_manager.dt,
@@ -1359,7 +1292,7 @@ class SolutionStrategyTPF(pp.SolutionStrategy, TPFProtocol):
 # endregion
 
 
-class DataSavingTPF(pp.DataSavingMixin, TPFProtocol):
+class DataSavingTPF(TPFProtocol, pp.DataSavingMixin):
 
     @typing.override
     def _evaluate_and_scale(
@@ -1456,6 +1389,6 @@ class TwoPhaseFlow(  # type: ignore
     ConstitutiveLawsTPF,
     BoundaryConditionsTPF,
     SolutionStrategyTPF,
-    pp.ModelGeometry,
     DataSavingTPF,
+    pp.ModelGeometry,
 ): ...

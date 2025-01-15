@@ -1,8 +1,9 @@
 """Example neural network classes that can be wrapped and used in PorePy."""
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
-from typing import Optional
 
 
 class BaseNN(nn.Module):

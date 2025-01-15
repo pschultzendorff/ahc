@@ -73,7 +73,7 @@ from tpf.models.reconstruction import (
     GlobalPressureMixin,
     PressureReconstructionMixin,
 )
-from tpf.spe10.mixin import SPE10Mixin
+from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     FEET,

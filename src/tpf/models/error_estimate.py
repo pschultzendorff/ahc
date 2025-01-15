@@ -1,15 +1,12 @@
 import functools
 import itertools
-import json
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Optional, cast
+import typing
+from typing import Any, Literal, Optional, cast
 
 import numpy as np
 import porepy as pp
 from porepy.viz.exporter import DataInput
-from tpf.models.flow_and_transport import SolverStatisticsTPF, TwoPhaseFlow
-from tpf.models.phase import FluidPhase
 from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFProtocol
 from tpf.models.reconstruction import (
     DataSavingReconstruction,
@@ -27,65 +24,9 @@ from tpf.utils.constants_and_typing import (
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class SolverStatisticsEst(SolverStatisticsTPF):
-    residual_and_flux_est: list[float] = field(default_factory=list)
-    """List of residual and flux error estimates for each non-linear iteration."""
-    nonconformity_est: list[dict[str, float]] = field(default_factory=list)
-    """List of nonconformity error estimates for each non-linear iteration."""
-
-    def log_error(
-        self,
-        nonlinear_increment_norm: Optional[float] = None,
-        residual_norm: Optional[float] = None,
-        **kwargs,
-    ) -> None:
-        if "residual_and_flux_est" in kwargs and "nonconformity_est" in kwargs:
-            self.residual_and_flux_est.append(kwargs["residual_and_flux_est"])
-            self.nonconformity_est.append(
-                kwargs["nonconformity_est"],
-            )
-        else:
-            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
-
-    def reset(self) -> None:
-        """Reset the estimator lists."""
-        super().reset()
-        self.residual_and_flux_est.clear()
-        self.nonconformity_est.clear()
-
-    def save(self) -> None:
-        """Save the estimator statistics to a JSON file."""
-        # This calls ``pp.SolverStatistics.save``, which adds a new entry to the
-        # ``data`` dictionary that is found at ``self.path``.
-        super().save()
-        # Instead of creating a new entry, we load the already created entry and append.
-        if self.path is not None:
-            # Check if object exists and append to it
-            if self.path.exists():
-                with self.path.open("r") as file:
-                    data = json.load(file)
-            else:
-                data = {}
-
-            # Append data.
-            ind = len(data)
-            # Since data was stored and loaded as json, the keys have turned to strings.
-            data[str(ind)].update(
-                {
-                    "residual_and_flux_est": self.residual_and_flux_est,
-                    "nonconformity_est": self.nonconformity_est,
-                }
-            )
-
-            # Save to file
-            with self.path.open("w") as file:
-                json.dump(data, file, indent=4)
-
-
 class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
-    def setup_estimates(self):
+    def setup_estimates(self) -> None:
         self.quadrature_estimate_degree: int = 4
         """Degree of quadrature rule for the error estimators."""
         self.quadrature_estimate = TriangleQuadrature(self.quadrature_estimate_degree)
@@ -111,20 +52,20 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             \|\varphi \partial_t s_w - q_w+ \nabla \cdot \theta_w\|_K^2.
 
         """
-        sd, g_data = self.mdg.subdomains(return_data=True)[0]
+        g, g_data = self.mdg.subdomains(return_data=True)[0]
 
         # Collect terms for the estimators as ``np.ndarray``.
-        poincare_constant: np.ndarray = self.poincare_constant(sd)
+        poincare_constant: np.ndarray = self.poincare_constant(g)
 
         dt = pp.ad.Scalar(self.time_manager.dt)
         dt_s_ad = pp.ad.time_derivatives.dt(self.wetting.s, dt)
         dt_s: np.ndarray = (dt_s_ad).value(self.equation_system)
 
-        porosity: np.ndarray = self.porosity(sd)
+        porosity: np.ndarray = self.porosity(g)
         source: np.ndarray = (
-            self.phase_fluid_source(sd, self.wetting)
+            self.phase_fluid_source(g, self.wetting)
             if flux_name == self.wetting.name
-            else self.total_fluid_source(sd)
+            else self.total_fluid_source(g)
         )
 
         equilibrated_flux_coeffs: np.ndarray = pp.get_solution_values(
@@ -143,12 +84,15 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # explicitely by multiplying with the element volume.
         if flux_name == self.wetting.name:
             integral: Integral = Integral(
-                poincare_constant
+                g.cell_volumes
+                * poincare_constant
                 * (porosity * dt_s + div_equilibrated_flux - source) ** 2
             )
         elif flux_name == "total":
             integral = Integral(
-                poincare_constant * (div_equilibrated_flux - source) ** 2
+                g.cell_volumes
+                * poincare_constant
+                * (div_equilibrated_flux - source) ** 2
             )
 
         pp.shift_solution_values(
@@ -240,7 +184,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # step, inner product current-previous time step, norm at previous time step) of
         # the difference between post-processed and reconstructed pressure potential.
         # The latter was stored at the previous time step and is not recalculated.
-        perm: dict[str, np.ndarray] = self.permeability(sd)
+        perm: np.ndarray | dict[str, np.ndarray] = self.permeability(sd)
         # Calculate a not upwinded total mobility.
         if pressure_key == GLOBAL_PRESSURE:
             rel_perms: dict[str, np.ndarray] = {}
@@ -285,7 +229,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 \kappa \nabla (\tilde{\mathfrac{q}}^{n-1} - \mathfrac{q}^{n-1}).
 
             """
-            nonlocal reconstructed_coeffs, reconstructed_coeffs_old, postprocessed_coeffs_old, total_mobility
+            nonlocal reconstructed_coeffs, reconstructed_coeffs_old, postprocessed_coeffs_old, total_mobility, perm
             # Calculate the pressure potential at the current time step and at the
             # previous time step (if needed).
             fluxes: list[np.ndarray] = []
@@ -315,7 +259,15 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 # NOTE For now, perm is just a scalar, so we do not have to use
                 # matrix multiplication.
                 # Different treatment for scalar and tensor permeabilities.
-                if len(perm) == 1:
+                if isinstance(perm, np.ndarray):
+                    fluxes.append(
+                        perm[None, :, None]
+                        * total_mobility[None, :, None]
+                        * pressure_potential
+                        if pressure_key == GLOBAL_PRESSURE
+                        else perm[None, :, None] * pressure_potential
+                    )
+                elif len(perm) == 1:
                     fluxes.append(
                         perm["kxx"][None, :, None]
                         * total_mobility[None, :, None]
@@ -537,7 +489,11 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
 # This could also be a mixin, but by subclassing ``SolutionStrategyReconstruction``, we
 # avoid having to pay attention to the order of the different solution strategy classes.
-class SolutionStrategyEst(
+# EstimatesProtocol and SolutionStrategyReconstruction define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class SolutionStrategyEst(  # type: ignore
     EstimatesProtocol,
     SolutionStrategyReconstruction,
 ):
@@ -577,9 +533,10 @@ class SolutionStrategyEst(
             self.wetting.name,
             self.nonwetting.name,
         ]:
+            flux_name = cast(Literal["total", PHASENAME], flux_name)
             self.extend_fv_fluxes(flux_name)
-        #     self.reconstruct_pressure_vohralik(pressure_key, flux_name)
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+            pressure_key = cast(PRESSURE_KEY, pressure_key)
             self.reconstruct_pressure_vohralik(pressure_key)
 
         # Initialize time step values. The iterate values were set by
@@ -639,6 +596,8 @@ class SolutionStrategyEst(
             self.global_nonconformity_est()
         )
         self.nonlinear_solver_statistics.log_error(
+            nonlinear_increment_norm=None,
+            residual_norm=None,
             residual_and_flux_est=residual_and_flux_est,
             nonconformity_est={
                 GLOBAL_PRESSURE: global_nonconformity_est,
@@ -665,11 +624,11 @@ class SolutionStrategyEst(
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
-            values: np.ndarray = pp.get_solution_values(
+            pressure_values: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}_{key}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{key}", values, g_data, time_step_index=0
+                f"{pressure_key}_{key}", pressure_values, g_data, time_step_index=0
             )
         for flux_name, key in itertools.product(
             ["total", self.wetting.name],
@@ -681,11 +640,11 @@ class SolutionStrategyEst(
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
-            values: np.ndarray = pp.get_solution_values(
+            flux_values: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_{key}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{flux_name}_{key}", values, g_data, time_step_index=0
+                f"{flux_name}_{key}", flux_values, g_data, time_step_index=0
             )
 
 
@@ -700,39 +659,50 @@ class DataSavingEst(DataSavingReconstruction):
             time_step_index=time_step_index,
             iterate_index=iterate_index,
         )
-        g, g_data = self.mdg.subdomains(return_data=True)[0]
-        for flux_name, est_name in itertools.product(
-            ["total", self.wetting.name], ["R_estimate", "F_estimate"]
+        # Only export for nonzero time steps or nonlinear steps. Otherwise, this causes
+        # an error, as the function is called via
+        # ``SolutionStrategyTPF.prepare_simulation`` BEFORE the initial values are set
+        # by ``SolutionStrategyEst.prepare_simulation``.
+        if (time_step_index is not None and self.time_manager.time_index > 0) or (
+            iterate_index is not None
         ):
-            data.append(
-                (
-                    g,
-                    f"{flux_name}_{est_name}",
-                    pp.get_solution_values(
+            g, g_data = self.mdg.subdomains(return_data=True)[0]
+            for flux_name, est_name in itertools.product(
+                ["total", self.wetting.name], ["R_estimate", "F_estimate"]
+            ):
+                data.append(
+                    (
+                        g,
                         f"{flux_name}_{est_name}",
-                        g_data,
-                        time_step_index=time_step_index,
-                        iterate_index=iterate_index,
-                    ),
+                        pp.get_solution_values(
+                            f"{flux_name}_{est_name}",
+                            g_data,
+                            time_step_index=time_step_index,
+                            iterate_index=iterate_index,
+                        ),
+                    )
                 )
-            )
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
-            data.append(
-                (
-                    g,
-                    f"{pressure_key}_NC_estimate",
-                    pp.get_solution_values(
+            for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+                data.append(
+                    (
+                        g,
                         f"{pressure_key}_NC_estimate",
-                        g_data,
-                        time_step_index=time_step_index,
-                        iterate_index=iterate_index,
-                    ),
+                        pp.get_solution_values(
+                            f"{pressure_key}_NC_estimate",
+                            g_data,
+                            time_step_index=time_step_index,
+                            iterate_index=iterate_index,
+                        ),
+                    )
                 )
-            )
         return data
 
 
-class TwoPhaseFlowWithErrorEstimate(
+# EstimatesProtocol and SolutionStrategyReconstruction define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class TwoPhaseFlowWithErrorEstimate(  # type: ignore
     ErrorEstimateMixin,
     SolutionStrategyEst,
     DataSavingEst,

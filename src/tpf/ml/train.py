@@ -2,7 +2,7 @@
 
 import torch.nn as nn
 import torch.optim as optim
-import tqdm
+import tqdm  # type: ignore [import-untyped]
 
 
 def train(data, model: nn.Module, trainer: optim.Optimizer, epochs: int = 5000) -> None:

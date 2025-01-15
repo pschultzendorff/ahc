@@ -1,11 +1,11 @@
-"""
+r"""
 Test the Buckley-Leverett model.
 
 NOTE: As of now, everything is tested without gravity.
 
 NOTE: In these tests we use ``A`` to denote the Jacobian of an equation system and ``b``
-to denote its residual. ``PorePy`` provides them in the form :math:`A=J` and
-:math:`b=-r`, s.t. the problem can be immediately solved by :math:`A\Delta x=b`.
+to denote its residual. ``PorePy`` provides them in the form :math:`A = J` and
+:math:`b = -r`, s.t. the problem can be immediately solved by :math:`A \Delta x = b`.
 Thus, we need to always multiply the residual by -1.
 
 """

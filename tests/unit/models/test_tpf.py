@@ -4,13 +4,14 @@ import numpy as np
 import porepy as pp
 import pytest
 from tpf.models.flow_and_transport import TwoPhaseFlow
+from tpf.models.protocol import TPFProtocol
 from tpf.models.phase import FluidPhase
 from tpf.utils.constants_and_typing import NONWETTING, WETTING
 
 # TODO Change the residual saturation of one phase and adjust the tests.
 
 
-class ModifiedGeometry(pp.ModelGeometry):
+class ModifiedGeometry(TPFProtocol):
     def set_domain(self) -> None:
         """2x2 domain."""
         size = 2 / self.units.m
@@ -22,7 +23,7 @@ class ModifiedGeometry(pp.ModelGeometry):
         return self.params.get("meshing_arguments", default_meshing_args)
 
 
-class TwoPhaseFlowEqationsSource(EquationsTPF):
+class TwoPhaseFlowEqationsSource(TPFProtocol):
     def _source_w(self, g: pp.Grid) -> np.ndarray:
         """Volumetric wetting source.
 
@@ -46,49 +47,41 @@ class TwoPhaseFlowEqationsSource(EquationsTPF):
         return vals.ravel()
 
 
-class TwoPhaseFlowEqationsSourceandGravity(EquationsTPF):
+class TwoPhaseFlowEqationsSourceandGravity(TPFProtocol):
     def _vector_source_w(self, g: pp.Grid) -> np.ndarray:
         """Vector volume source (gravity). Corresponds to the wetting buoyancy flow."""
         vals = np.zeros((self.mdg.dim_max(), g.num_cells))
-        vals[:, -1] = pp.GRAVITY_ACCELERATION * self._density_w
+        vals[:, -1] = pp.GRAVITY_ACCELERATION * self.wetting.density
         return vals.ravel()
 
     def _vector_source_n(self, g: pp.Grid) -> np.ndarray:
         """Vector volume source (gravity). Corresponds to the nonwetting buoyancy
         flow."""
         vals = np.zeros((self.mdg.dim_max(), g.num_cells))
-        vals[:, -1] = pp.GRAVITY_ACCELERATION * self._density_n
+        vals[:, -1] = pp.GRAVITY_ACCELERATION * self.nonwetting.density
         return vals.ravel()
 
 
 class TwoPhaseFlowModifiedSetup(
     TwoPhaseFlowEqationsSource,
-    VariablesTPF,
-    BoundaryConditionsTPF,
-    SolutionStrategyTPF,
-    ModifiedGeometry,
-    pp.DataSavingMixin,
+    TwoPhaseFlow
 ): ...
 
 
 class TwoPhaseFlowModifiedSetupGravity(
     TwoPhaseFlowEqationsSourceandGravity,
-    VariablesTPF,
-    BoundaryConditionsTPF,
-    SolutionStrategyTPF,
-    ModifiedGeometry,
-    pp.DataSavingMixin,
+    TwoPhaseFlow()
 ): ...
 
 
 @pytest.fixture(scope="module")
 def model() -> TwoPhaseFlowModifiedSetup:
     model = TwoPhaseFlowModifiedSetup({"formulation": "n_pressure_w_saturation"})
-    model._cap_pressure_model = "linear"
+    model.cap_press.cap_pressure_model = "linear"
     model._rel_perm_model = "Brooks-Corey"
     model._limit_rel_perm = "False"
-    model._grid_size = 2
-    model._phys_size = 2
+    model.grid_type() = 2
+    model.phys_size = 2
     model.prepare_simulation()
     model.before_nonlinear_loop()
     model.before_nonlinear_iteration()

@@ -1,7 +1,11 @@
-from typing import TYPE_CHECKING, Callable, Literal, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol
 
-from tpf.models.homotopy_continuation import SolverStatisticsHC
 from tpf.numerics.quadrature import TriangleQuadrature
+from tpf.viz.solver_statistics import (
+    SolverStatisticsEst,
+    SolverStatisticsHC,
+    SolverStatisticsTPF,
+)
 
 if not TYPE_CHECKING:
     # This branch is accessed in python runtime.
@@ -29,7 +33,7 @@ else:
     from porepy.viz.exporter import DataInput
     from tpf.models.constitutive_laws_tpf import CapPressConstants, RelPermConstants
     from tpf.models.phase import FluidPhase
-    from tpf.utils.constants_and_typing import PHASENAME, PRESSURE_KEY, OperatorType
+    from tpf.utils.constants_and_typing import PHASENAME, PRESSURE_KEY
 
     class TPFProtocol(PorePyModel):
 
@@ -76,6 +80,8 @@ else:
         params_key: str
         """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
 
+        nonlinear_solver_statistics: SolverStatisticsTPF
+
         def normalize_saturation(
             self,
             saturation: pp.ad.Operator,
@@ -89,7 +95,7 @@ else:
         def normalize_saturation_np(
             self,
             saturation: np.ndarray,
-            phase: Optional[FluidPhase] = None,
+            phase: FluidPhase,
             limit: bool = False,
             epsilon: float = 0.0,
         ) -> np.ndarray:
@@ -110,17 +116,17 @@ else:
             phase: FluidPhase,
             # limit: bool = False,
             # epsilon: float = 0.0,
-        ) -> np.ndarray:
+        ) -> float:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
             ...
 
         # Constitutive laws
         def rel_perm(
             self,
-            saturation_w: OperatorType,
+            saturation_w: pp.ad.Operator,
             phase: FluidPhase,
             rel_perm_constants: Optional[RelPermConstants] = None,
-        ) -> OperatorType:
+        ) -> pp.ad.Operator:
             """Phase relative permeability. Normally provided by a mixin of instance
             :class:`RelativePermeability`.
 
@@ -149,10 +155,22 @@ else:
 
         def cap_press(
             self,
-            saturation_w: OperatorType,
+            saturation_w: pp.ad.Operator,
             cap_press_constants: Optional[CapPressConstants] = None,
-        ) -> OperatorType:
+        ) -> pp.ad.Operator:
             """Capillary pressure. Normally provided by a mixin of instance
+            :class:`CapillaryPressure`.
+
+            """
+            ...
+
+        def cap_press_np(
+            self,
+            saturation_w: np.ndarray,
+            cap_press_constants: Optional[CapPressConstants] = None,
+        ) -> np.ndarray:
+            """Capillary pressure for saturations of type
+            :class:`~numpy.ndarray`. Normally provided by a mixin of instance
             :class:`CapillaryPressure`.
 
             """
@@ -160,9 +178,9 @@ else:
 
         def cap_press_deriv(
             self,
-            saturation_w: OperatorType,
+            saturation_w: pp.ad.Operator,
             cap_press_constants: Optional[CapPressConstants] = None,
-        ) -> OperatorType:
+        ) -> pp.ad.Operator:
             """Capillary pressure derivative. Normally provided by a mixin of instance
             :class:`CapillaryPressure`.
 
@@ -271,6 +289,25 @@ else:
 
         nonlinear_solver_statistics: SolverStatisticsHC
 
+        hc_is_converged: bool
+        """Flag to indicate if the homotopy continuation has converged."""
+        hc_is_diverged: bool
+        """Flag to indicate if the homotopy continuation has diverged."""
+        hc_constant_decay: bool
+        hc_init_decay: float
+        hc_decay: float
+        hc_decay_min_max: tuple[float, float]
+        nl_iter_optimal_range: tuple[int, int]
+        nl_iter_relax_factors: tuple[float, float]
+        hc_decay_recomp_max: int
+        hc_decay_recomp_counter: int
+
+        def rel_perm(
+            self, saturation_w: pp.ad.Operator, phase: FluidPhase
+        ) -> pp.ad.Operator:
+            """Phase relative permeability."""
+            ...
+
         @property
         def uses_hc(self) -> bool:
             """"""
@@ -291,6 +328,34 @@ else:
 
         def global_linearization_est(self) -> float:
             """Estimate for global linearization error."""
+            ...
+
+        def before_hc_loop(self) -> None:
+            """Methods to run for homotopy continuation loop."""
+            ...
+
+        def before_hc_iteration(self) -> None:
+            """Methods to run for homotopy continuation iteration."""
+            ...
+
+        def after_hc_iteration(self) -> None:
+            """Methods to run after homotopy continuation iteration."""
+            ...
+
+        def hc_check_convergence(
+            self,
+            nl_is_converged: bool,
+            hc_params: dict[str, Any],
+        ) -> tuple[bool, bool]:
+            """Check if homotopy continuation has converged."""
+            ...
+
+        def after_hc_convergence(self) -> None:
+            """Methods to run after homotopy continuation convergence."""
+            ...
+
+        def after_hc_failure(self) -> None:
+            """Methods to run after homotopy continuation failure."""
             ...
 
     class ReconstructionProtocol(Protocol):
@@ -407,6 +472,7 @@ else:
         #  EstimatesMixin attributes and methods:
         quadrature_estimate_degree: int
         quadrature_estimate: TriangleQuadrature
+        nonlinear_solver_statistics: SolverStatisticsEst
 
         def setup_estimates(self) -> None:
             """Setup error estimates."""

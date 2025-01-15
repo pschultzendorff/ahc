@@ -2,12 +2,17 @@ import pathlib
 import typing
 import warnings
 from typing import Callable, Optional, override
+from venv import logger
 
 import numpy as np
 import porepy as pp
 import tpf
 from porepy.viz.exporter import DataInput
-from tpf.models.flow_and_transport import EquationsTPF, SolutionStrategyTPF
+from tpf.models.flow_and_transport import (
+    BoundaryConditionsTPF,
+    EquationsTPF,
+    SolutionStrategyTPF,
+)
 from tpf.models.phase import FluidPhase
 from tpf.spe10.fluid_values import BHP, INITIAL_PRESSURE, INITIAL_SATURATION, oil, water
 from tpf.spe10.geometry import load_spe10_data
@@ -42,7 +47,7 @@ class EquationsSPE10(EquationsTPF):
 
     @typing.override
     def porosity(self, g: pp.Grid) -> np.ndarray:
-        """Solid permeability. Chosen layer of the SPE10 model."""
+        """Solid porosity. Chosen layer of the SPE10 model."""
         return self._porosity
 
     @typing.override
@@ -80,7 +85,8 @@ class EquationsSPE10(EquationsTPF):
             corner: Index of the center cell.
 
         """
-        cell_centers = g.cell_centers
+        # Ignore z-values of the grid.
+        cell_centers = g.cell_centers[:2, :]
         min_x, min_y = np.min(cell_centers, axis=1)
         max_x, max_y = np.max(cell_centers, axis=1)
         center = np.argmin(
@@ -106,7 +112,9 @@ class EquationsSPE10(EquationsTPF):
             corners: Indices of the corner cells.
 
         """
-        cell_centers = g.cell_centers
+        # Ignore z-values of the grid.
+        cell_centers = g.cell_centers[:2, :]
+
         min_x, min_y = np.min(cell_centers, axis=1)
         max_x, max_y = np.max(cell_centers, axis=1)
         corners = [
@@ -166,7 +174,7 @@ class EquationsSPE10(EquationsTPF):
             self.nonwetting.p - pp.ad.Scalar(BHP)
         )
         explicit_saturation: pp.ad.Operator = corner_mask * (
-            self.wetting.s - pp.ad.Scalar(1 - self.wetting.residual_saturation)
+            self.wetting.s - pp.ad.Scalar(self.wetting.residual_saturation)
         )
         explicit_pressure.set_name("Explicit pressure")
         explicit_saturation.set_name("Explicit saturation")
@@ -182,6 +190,105 @@ class EquationsSPE10(EquationsTPF):
 
         self.equation_system.equations["Flow equation"] = new_flow_equation
         self.equation_system.equations["Transport equation"] = new_transport_equation
+
+    def divergence_mismatch(self) -> None:
+        r"""Modify the check for divergence mismatch of the equilibrated fluxes
+        s.t. the mismatch is zero in the corners.
+
+        """
+        g, g_data = self.mdg.subdomains(return_data=True)[0]
+
+        corner_mask_inverse: pp.ad.DenseArray = self.corner_masks(g)[1]
+
+        # Spatial discretization operators.
+        div = pp.ad.Divergence([g])
+        flux_mpfa = pp.ad.MpfaAd(self.flux_key, [g])
+
+        # Time derivatives.
+        dt = pp.ad.Scalar(self.time_manager.dt)
+        dt_s: pp.ad.Operator = pp.ad.time_derivatives.dt(self.wetting.s, dt)
+
+        # Ad source.
+        source_ad_w = pp.ad.DenseArray(self.phase_fluid_source(g, self.wetting))
+        source_ad_t = pp.ad.DenseArray(self.total_fluid_source(g))
+
+        # Ad parameters.
+        porosity_ad = pp.ad.DenseArray(self.porosity(g))
+
+        # Compute cap pressure and relative permeabilities.
+        p_cap = self.cap_press(self.wetting.s)
+        # p_cap_bc = pp.ad.DenseArray(self._bc_values_cap_press(g))
+
+        mobility_w = self.phase_mobility(g, self.wetting)
+        mobility_n = self.phase_mobility(g, self.nonwetting)
+        mobility_t = self.total_mobility(g)
+
+        # Ad equations
+        if self.formulation == "fractional_flow":
+            # Note, that for ``flux_t``, the total mobility is already included.
+            flux_t = pp.ad.DenseArray(
+                pp.get_solution_values(
+                    "total_flux_equilibrated", g_data, iterate_index=0
+                )
+            )
+            flux_w = pp.ad.DenseArray(
+                pp.get_solution_values(
+                    f"{self.wetting.name}_flux_equilibrated", g_data, iterate_index=0
+                )
+            )
+            fractional_flow_w = mobility_w / mobility_t
+            vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
+            vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+
+            flow_equation = (div @ flux_t - source_ad_t) * corner_mask_inverse
+            transport_equation_ff = (
+                porosity_ad * (self.volume_integral(dt_s, [g], 1))
+                + div
+                @ (
+                    fractional_flow_w * flux_t
+                    + fractional_flow_w
+                    * mobility_n
+                    * (
+                        flux_mpfa.flux() @ p_cap
+                        # TODO: Plus boundary values here or are they included in the total flux?
+                        + flux_mpfa.vector_source() @ vector_source_w
+                        - flux_mpfa.vector_source() @ vector_source_n
+                    )
+                )
+                - source_ad_w
+            ) * corner_mask_inverse
+            transport_equation_wf = (
+                porosity_ad * (self.volume_integral(dt_s, [g], 1))
+                + div @ flux_w
+                - source_ad_w
+            ) * corner_mask_inverse
+
+        flow_equation.set_name("Equilibration flow equation mismatch")
+        transport_equation_ff.set_name(
+            "Equilibration transport fractional flow mismatch"
+        )
+        transport_equation_wf.set_name("Equilibration transport wetting flow mismatch")
+        logger.info(
+            f"Equilibration flow equation mismatch {np.sum(np.abs(flow_equation.value(self.equation_system)))}"
+        )
+        logger.info(
+            f"Equilibration transport equation mismatch fractional flow {np.sum(np.abs(transport_equation_ff.value(self.equation_system)))}"
+        )
+        logger.info(
+            f"Equilibration transport equation mismatch wetting flow {np.sum(np.abs(transport_equation_wf.value(self.equation_system)))}"
+        )
+
+
+class ModifiedBoundarySPE10(BoundaryConditionsTPF):
+
+    def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
+        """BC type (Dirichlet or Neumann).
+
+        We assign Neumann conditions for all faces. The four corner cells get prescribed
+        a pressure explicitely, which acts as a Dirichlet condition.
+
+        """
+        return pp.BoundaryCondition(g)
 
 
 class SolutionStrategySPE10(SolutionStrategyTPF):
@@ -221,8 +328,17 @@ class SolutionStrategySPE10(SolutionStrategyTPF):
         Parameters:
             g (pp.Grid): Grid to load the data for.
 
+        Raises:
+            ValueError: If the cell size is larger than the SPE10 model cell size.
 
         """
+        cell_size = self.params["meshing_arguments"]["cell_size"]
+        assert isinstance(cell_size, float)
+        if cell_size > 20 * FEET:
+            raise ValueError(
+                "The cell size is larger than the SPE10 model cell size. "
+                + "This is not supported yet."
+            )
         layer: int = self.params.get("spe10_layer", 1)
         isotropic_perm: bool = self.params.get("spe10_isotropic_perm", True)
         for param_name, value in zip(
@@ -238,10 +354,10 @@ class SolutionStrategySPE10(SolutionStrategyTPF):
         if isotropic_perm:
             self._permeability: np.ndarray = np.zeros((1, g.num_cells))
         else:
-            self._permeability: np.ndarray = np.zeros((g.dim, g.num_cells))
+            self._permeability = np.zeros((g.dim, g.num_cells))
         self._porosity: np.ndarray = np.zeros((g.num_cells,))
         for i in range(g.num_cells):
-            # FIXME Average over all SPE10 cells instead of using the center of the
+            # TODO Average over all SPE10 cells instead of using the center of the
             # cell. This fix applies only for coarse resolutions.
             coors: np.ndarray = g.cell_centers[:, i]
             # One cell in the original SPE10 model is 20 ft x 10 ft x 2 ft.
@@ -339,4 +455,8 @@ class ModelGeometrySPE10(pp.ModelGeometry):
         self._domain = pp.Domain(bounding_box)
 
 
-class SPE10(EquationsSPE10, SolutionStrategySPE10, tpf.TwoPhaseFlow): ...
+# The various protocols define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class SPE10(EquationsSPE10, ModifiedBoundarySPE10, SolutionStrategySPE10, ModelGeometrySPE10, tpf.TwoPhaseFlow): ...  # type: ignore

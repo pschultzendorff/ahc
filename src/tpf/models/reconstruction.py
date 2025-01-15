@@ -45,9 +45,12 @@ class GlobalPressureMixin(TPFProtocol):
         )
         self.epsilon: float = global_pressure_constants.get("epsilon", 1e-6)
 
-        # Do not start evaluation at zero, where the derivative is :math:`\infty`.
+        # Do not start evaluation at normalized saturation = zero, where the derivative
+        # is :math:`\infty`. Instead add an epsilon.
         self.s_interpol_vals: np.ndarray = np.linspace(
-            self.epsilon, 1, global_pressure_constants.get("interpolation_degree", 100)
+            self.wetting.residual_saturation + self.epsilon,
+            1 - self.nonwetting.residual_saturation,
+            global_pressure_constants.get("interpolation_degree", 100),
         )
         self.calc_pressure_interpolants()
         # Evaluate initial values for global and complimentary pressure.
@@ -189,8 +192,6 @@ class GlobalPressureMixin(TPFProtocol):
             upwinding.
 
             """
-            # TODO: Write rel. perm. and cap_press_deriv functions for np.arrays and use
-            # those instead.
             w_mobility: np.ndarray = (
                 self.rel_perm_np(s, self.wetting) / self.wetting.viscosity
             )
@@ -237,20 +238,17 @@ class GlobalPressureMixin(TPFProtocol):
             upwinding.
 
             """
-            # TODO: Write rel. perm. and cap_press_deriv functions for np.arrays and use
-            # those instead.
-            s_ad = pp.ad.DenseArray(s)
-            w_mobility: pp.ad.DenseArray = self.rel_perm(
-                s_ad, self.wetting
-            ) / pp.ad.Scalar(self.wetting.viscosity)
-            n_mobility: pp.ad.DenseArray = self.rel_perm(
-                s_ad, self.nonwetting
-            ) / pp.ad.Scalar(self.nonwetting.viscosity)
-            t_mobility: pp.ad.DenseArray = w_mobility + n_mobility
-            p_c: pp.ad.DenseArray = (
-                w_mobility * n_mobility / t_mobility * self.cap_press_deriv(s_ad)
+            w_mobility: np.ndarray = (
+                self.rel_perm_np(s, self.wetting) / self.wetting.viscosity
             )
-            return p_c.value(self.equation_system)
+            n_mobility: np.ndarray = (
+                self.rel_perm_np(s, self.nonwetting) / self.nonwetting.viscosity
+            )
+            t_mobility: np.ndarray = w_mobility + n_mobility
+            p_c: np.ndarray = (
+                w_mobility * n_mobility / t_mobility * self.cap_press_deriv_np(s)
+            )
+            return p_c
 
         integral: Integral = self.quadrature_1d.integrate(func, intervals)
         return -1 * integral.elementwise[..., 0]
@@ -264,11 +262,11 @@ class GlobalPressureMixin(TPFProtocol):
         # ``update_boundary_condition`` and ``create_boundary_operator`` in
         # ``BoundaryConditionsTPF`` and get the pressure and saturation values from
         # the data dictionary instead of calling the functions here.
-        p_w_bc = self.bc_dirichlet_pressure_values(g, self.wetting)
+        p_n_bc = self.bc_dirichlet_pressure_values(g, self.nonwetting)
         s_w_bc = self.bc_dirichlet_saturation_values(g, self.wetting)
 
         # Compute global and complimentary pressures on boundaries.
-        p_g_bc = self.eval_glob_compl_pressure(s_w_bc, GLOBAL_PRESSURE, p_w=p_w_bc)
+        p_g_bc = self.eval_glob_compl_pressure(s_w_bc, GLOBAL_PRESSURE, p_n=p_n_bc)
         p_c_bc = self.eval_glob_compl_pressure(s_w_bc, COMPLIMENTARY_PRESSURE)
 
         # TODO See change above. If we loop over boundaries, we do not need to do
@@ -551,7 +549,8 @@ class PressureReconstructionMixin(TPFProtocol):
                 iterate_index=0,
             )
 
-    def gradient_mismatch(self, reconstructed_pressure) -> np.ndarray: ...
+    def gradient_mismatch(self, reconstructed_pressure) -> np.ndarray:
+        raise NotImplementedError
 
 
 class EquilibratedFluxMixin(TPFProtocol):
@@ -594,6 +593,8 @@ class EquilibratedFluxMixin(TPFProtocol):
         )
 
         if nonlinear_increment is None:
+            # NOTE The variables are retrieved in the same order as in the Jacobian
+            # construction.
             var_val: np.ndarray = self.equation_system.get_variable_values(
                 [self.primary_pressure_var, self.primary_saturation_var],
                 iterate_index=1,
@@ -663,22 +664,15 @@ class EquilibratedFluxMixin(TPFProtocol):
             signs of the local and global normals are the same, and -1 otherwise.
 
         """
+        if self.params["grid_type"] != "simplex":
+            raise ValueError("Not implemented for non-simplex grids.")
         logger.info(f"Extending {flux_name}{flux_specifier} flux to RT0 functions.")
 
         # Only one domain is considered here.
         g, g_data = self.mdg.subdomains(return_data=True)[0]
 
-        # Create key if it does not exist
-        # TODO: is this necessary?
-        # FIXME Should be done for sub dir pp.ITERATE_SOLUTIONS or
-        # pp.TIME_STEP_SOLUTIONS!
-        if not f"{flux_name}_flux{flux_specifier}_RT0_coeffs" in g_data:
-            g_data[f"{flux_name}_flux{flux_specifier}_RT0_coeffs"] = {}
-
         # Cell-basis arrays
         cell_faces_map = sps.find(g.cell_faces.T)[1]
-        # TODO: This depends on the shape of the grid. For now, we assume a
-        # triangular grid.
         faces_cell = cell_faces_map.reshape(g.num_cells, g.dim + 1)
         opp_nodes_cell = get_opposite_side_nodes(g)
         opp_nodes_coor_cell = g.nodes[:, opp_nodes_cell]
@@ -786,7 +780,7 @@ class EquilibratedFluxMixin(TPFProtocol):
             vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
             vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
 
-            flow_equation = div @ flux_t - self.volume_integral(source_ad_t, [g], 1)
+            flow_equation = div @ flux_t - source_ad_t
             transport_equation_ff = (
                 porosity_ad * (self.volume_integral(dt_s, [g], 1))
                 + div
@@ -801,32 +795,38 @@ class EquilibratedFluxMixin(TPFProtocol):
                         - flux_mpfa.vector_source() @ vector_source_n
                     )
                 )
-                - self.volume_integral(source_ad_w, [g], 1)
+                - source_ad_w
             )
             transport_equation_wf = (
                 porosity_ad * (self.volume_integral(dt_s, [g], 1))
                 + div @ flux_w
-                - self.volume_integral(source_ad_w, [g], 1)
+                - source_ad_w
             )
         flow_equation.set_name("Flow reconstruction mismatch")
         transport_equation_ff.set_name(
             "Transport reconstruction fractional flow mismatch"
         )
         transport_equation_wf.set_name("Transport reconstruction wetting flow mismatch")
+        # Mypy complains about wrong types, because ``*.value(*)`` is not necessarily an
+        # ``np.ndarray``. We ignore this.
         logger.info(
-            f"Flow equation mismatch {np.sum(np.abs(flow_equation.value(self.equation_system)))}"
+            f"Flow equation mismatch {np.sum(np.abs(flow_equation.value(self.equation_system)))}"  # type: ignore
         )
         logger.info(
-            f"Transport equation mismatch fractional flow {np.sum(np.abs(transport_equation_ff.value(self.equation_system)))}"
+            f"Transport equation mismatch fractional flow {np.sum(np.abs(transport_equation_ff.value(self.equation_system)))}"  # type: ignore
         )
         logger.info(
-            f"Transport equation mismatch wetting flow {np.sum(np.abs(transport_equation_wf.value(self.equation_system)))}"
+            f"Transport equation mismatch wetting flow {np.sum(np.abs(transport_equation_wf.value(self.equation_system)))}"  # type: ignore
         )
 
 
 # This could also be a mixin, but by subclassing ``SolutionStrategyTPF``, we avoid
 # having to pay attention to the order of the different solution strategy classes.
-class SolutionStrategyReconstruction(
+# ``TPFProtocol`` and ``pp.SolutionStrategy`` define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class SolutionStrategyReconstruction(  # type: ignore
     ReconstructionProtocol,
     SolutionStrategyTPF,
 ):
@@ -951,7 +951,7 @@ class SolutionStrategyReconstruction(
 
         for phase in self.phases.values():
             p_flux: pp.ad.AdArray = self.phase_flux(g, phase).value_and_jacobian(
-                self.equation_system
+                self.equation_system,
             )
             pp.shift_solution_values(
                 f"{phase.name}_flux",
@@ -1128,12 +1128,6 @@ def get_sign_normals(g: pp.Grid) -> np.ndarray:
 
 class DataSavingReconstruction(DataSavingTPF):
 
-    wetting: FluidPhase
-    """Normally provided by a mixin of instance :class:`SolutionStrategyTPF`."""
-
-    mdg: pp.MixedDimensionalGrid
-    """Normally provided by a mixin of instance :class:`~porepy.ModelGeometry`."""
-
     def _data_to_export(
         self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
     ) -> list[DataInput]:
@@ -1143,24 +1137,35 @@ class DataSavingReconstruction(DataSavingTPF):
             time_step_index=time_step_index,
             iterate_index=iterate_index,
         )
-        g, g_data = self.mdg.subdomains(return_data=True)[0]
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
-            data.append(
-                (
-                    g,
-                    pressure_key,
-                    pp.get_solution_values(
+        # Only export for nonzero time steps or nonlinear steps. Otherwise, this causes
+        # an error, as the function is called via
+        # ``SolutionStrategyTPF.prepare_simulation`` BEFORE the initial values are set
+        # by ``SolutionStrategyEst.prepare_simulation``.
+        if (time_step_index is not None and self.time_manager.time_index > 0) or (
+            iterate_index is not None
+        ):
+            g, g_data = self.mdg.subdomains(return_data=True)[0]
+            for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+                data.append(
+                    (
+                        g,
                         pressure_key,
-                        g_data,
-                        time_step_index=time_step_index,
-                        iterate_index=iterate_index,
-                    ),
+                        pp.get_solution_values(
+                            pressure_key,
+                            g_data,
+                            time_step_index=time_step_index,
+                            iterate_index=iterate_index,
+                        ),
+                    )
                 )
-            )
         return data
 
 
-class TwoPhaseFlowWithReconstruction(
+# ``TPFProtocol`` and ``pp.SolutionStrategy`` define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class TwoPhaseFlowWithReconstruction(  # type: ignore
     GlobalPressureMixin,
     PressureReconstructionMixin,
     EquilibratedFluxMixin,

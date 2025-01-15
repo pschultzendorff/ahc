@@ -1,6 +1,6 @@
 import abc
 import logging
-from typing import Callable, Literal, Optional, Self
+from typing import Callable, Literal, Optional
 
 import numpy as np
 import porepy as pp
@@ -15,19 +15,19 @@ class Integral:
         self.shape: tuple = values.shape
         self._elementwise: np.ndarray = values
 
-    def __add__(self, other: Self) -> Self:
+    def __add__(self, other: "Integral") -> "Integral":
         if self.shape == other.shape:
             return Integral(self.elementwise + other.elementwise)
         else:
             raise ValueError(f"Shapes {self.shape} and {other.shape} not aligned.")
 
-    def __neg__(self, other: Self) -> Self:
+    def __neg__(self, other: "Integral") -> "Integral":
         if self.shape == other.shape:
             return Integral(self.elementwise - other.elementwise)
         else:
             raise ValueError(f"Shapes {self.shape} and {other.shape} not aligned.")
 
-    def __mul__(self, other: Self | float) -> Self:
+    def __mul__(self, other: "Integral | float") -> "Integral":
         if isinstance(other, float):
             return Integral(other * self.elementwise)
         else:
@@ -36,7 +36,7 @@ class Integral:
                 + f" and {type(other)}."
             )
 
-    def __rmul__(self, other: Self | float) -> Self:
+    def __rmul__(self, other: "Integral | float") -> "Integral":
         if isinstance(other, float):
             return Integral(other * self.elementwise)
         else:
@@ -45,7 +45,7 @@ class Integral:
                 + f" and {type(other)}."
             )
 
-    def __pow__(self, other: float) -> Self:
+    def __pow__(self, other: float) -> "Integral":
         if isinstance(other, float) or isinstance(other, int):
             return Integral(self.elementwise**other)
         else:

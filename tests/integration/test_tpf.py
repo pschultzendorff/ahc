@@ -1,5 +1,4 @@
-"""
-Test the two-phase flow model in the fractional flow formulation.
+r"""Test the two-phase flow model in the fractional flow formulation.
 
 The following parts of the equations are tested separately
 

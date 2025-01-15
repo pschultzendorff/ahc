@@ -95,11 +95,10 @@ def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
 
     """
     # If neither var_0 or var_1 are ``AdArrays``, return the ``np.minimum`` function.
-    if isinstance(var_0, np.ndarray) and isinstance(var_1, np.ndarray):
+    if not isinstance(var_0, AdArray) and not isinstance(var_1, AdArray):
         # FIXME: According to the type hints, this should not be possible.
         return np.minimum(var_0, var_1, dtype=np.float64)
-    elif isinstance(var_0, float) and isinstance(var_1, float):
-        return min(var_0, var_1)
+
     # Make a fall-back zero Jacobian for constant arguments.
     # EK: It is not clear if this is relevant, or if we filter out these cases with the
     # above parsing of ``np.ndarrays``. Keep it for now, but we should revisit once we
@@ -161,9 +160,9 @@ def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
     min_jac = jacs[0].copy()
 
     if isinstance(min_jac, sps.spmatrix):
-        # We enforce matrix format ``csr`` s.t. ``merge_matrices`` gets passed matrices
-        # of the same format.
-        min_jac = min_jac.tocsr()
+        # Enforce csr format, unless the matrix is csc, in which case we keep it.
+        if not min_jac.getformat() == "csc":
+            min_jac = min_jac.tocsr()
         lines = pp.matrix_operations.slice_mat(jacs[1].tocsr(), inds)
         pp.matrix_operations.merge_matrices(min_jac, lines, inds, min_jac.getformat())
     else:

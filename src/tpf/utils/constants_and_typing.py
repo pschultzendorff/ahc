@@ -1,13 +1,11 @@
-from typing import Final, Literal, TypeVar
-
-import porepy as pp
+from typing import Final, Literal
 
 # Type aliases and type variables:
 type PHASENAME = Literal["wetting", "nonwetting", "oil", "water", "gas", "co2"]
 WETTING: PHASENAME = "wetting"
 NONWETTING: PHASENAME = "nonwetting"
 
-type REL_PERM_MODEL = Literal[
+REL_PERM_MODEL = Literal[
     "Brooks-Corey",
     "Corey",
     "power",
@@ -15,16 +13,15 @@ type REL_PERM_MODEL = Literal[
     "van Genuchten-Burdine",
     "van Genuchten-Mualem",
 ]
-type CAP_PRESS_MODEL = Literal["Brooks-Corey", "linear", "van Genuchten", None]
-OperatorType = TypeVar("OperatorType", bound=pp.ad.Operator)
+CAP_PRESS_MODEL = Literal["Brooks-Corey", "linear", "van Genuchten", None]
 
 # region KEYWORDS
 # Keywords:
-type PRESSURE_KEY = Literal["global_pressure", "complimentary_pressure"]
+PRESSURE_KEY = Literal["global_pressure", "complimentary_pressure"]
 GLOBAL_PRESSURE: Final = "global_pressure"
 COMPLIMENTARY_PRESSURE: Final = "complimentary_pressure"
 
-type FLUX_KEY = Literal["global_flux", "complimentary_flux"]
+FLUX_KEY = Literal["global_flux", "complimentary_flux"]
 GLOBAL_FLUX: Final = "global_flux"
 COMPLIMENTARY_FLUX: Final = "complimentary_flux"
 
