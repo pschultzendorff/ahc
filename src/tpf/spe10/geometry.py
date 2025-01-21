@@ -6,12 +6,16 @@ from typing import Optional
 import numpy as np
 import porepy as pp
 import requests
+from tpf.utils.constants_and_typing import FEET
 
 logger = logging.getLogger(__name__)
 
 DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent / "data"
 ZIP_FILENAME: str = "por_perm_case2a.zip"
 URL: str = "https://www.spe.org/web/csp/datasets/por_perm_case2a.zip"
+
+X_LENGTH: float = 1200 * FEET
+Y_LENGTH: float = 2200 * FEET
 
 
 def download_spe10_data(data_dir: pathlib.Path, zip_filepath: pathlib.Path) -> None:

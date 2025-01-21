@@ -1,4 +1,4 @@
-r"""Study homotopy continuation.
+r"""Study adaptive homotopy continuation.
 
 We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
 continuation. The considered model is similar to the heterogeneous 3D models in the
@@ -147,9 +147,8 @@ params = {
     # HC params:
     "nonlinear_solver_statistics": SolverStatisticsHC,
     "nonlinear_solver": HCSolver,
-    "hc_max_iterations": 50,
-    "hc_min_lambda": 0.1,
-    "hc_adaptive": False,
+    "hc_max_iterations": 20,
+    "hc_adaptive": True,
     # HC decay parameters.
     "hc_constant_decay": False,
     "hc_lambda_decay": 0.9,
@@ -158,8 +157,8 @@ params = {
     "nl_iter_relax_factors": (0.7, 1.3),
     "hc_decay_recomp_max": 5,
     # Adaptivity parameters.
-    "hc_error_ratio": 0.1,
-    "nl_error_ratio": 0.05,
+    "hc_error_ratio": 0.01,
+    "nl_error_ratio": 0.01,
     # Nonlinear params:
     "max_iterations": 10,
     "nl_convergence_tol": 1e-5,
@@ -209,7 +208,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
     )
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "homotopy continuation"
+        / "adaptive homotopy continuation_3_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
@@ -224,7 +223,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
         {
             # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
-                schedule=np.array([0, 10 * pp.DAY]),  # 5 days
+                schedule=np.array([0, 1.5 * pp.DAY]),  # 5 days
                 dt_init=0.5 * pp.DAY,  # Time step size in days.
                 constant_dt=True,
             ),
@@ -257,7 +256,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
     )
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "homotopy continuation"
+        / "adaptive homotopy continuation_3_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
@@ -289,9 +288,9 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
         except IndexError:
             pass
 
-    ax.semilogy(discretization_est, label="Discretization estimator")
-    ax.semilogy(hc_est, label="HC estimator")
-    ax.semilogy(linearization_est, label="Linearization estimator")
+    ax.semilogy(discretization_est[:100], label="Discretization estimator")
+    ax.semilogy(hc_est[:100], label="HC estimator")
+    ax.semilogy(linearization_est[:100], label="Linearization estimator")
     ax.set_xlabel("Nonlinear iteration")
     ax.set_ylabel("Estimator")
     ax.set_title(f"Estimator values")
@@ -299,16 +298,16 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
     plt.show()
     fig.savefig(foldername / "solver_convergence.png")
 
-    fig, ax = plt.subplots()
-    ax.semilogy(discretization_est, label="Discretization estimator")
-    ax.semilogy(hc_est, label="HC estimator")
-    ax.semilogy(linearization_est, label="Linearization estimator")
-    ax.set_ylim([5e-5, 1e2])
-    ax.set_xlabel("Nonlinear iteration")
-    ax.set_ylabel("Estimator")
-    ax.set_title(f"Estimator values")
-    ax.legend()
-    plt.show()
-    fig.savefig(foldername / "solver_convergence_zoomed.png")
+    # fig, ax = plt.subplots()
+    # ax.semilogy(discretization_est[:100], label="Discretization estimator")
+    # ax.semilogy(hc_est[:100], label="HC estimator")
+    # ax.semilogy(linearization_est[:100], label="Linearization estimator")
+    # # ax.set_ylim([5e-5, 1e5])
+    # ax.set_xlabel("Nonlinear iteration")
+    # ax.set_ylabel("Estimator")
+    # ax.set_title(f"Estimator values")
+    # ax.legend()
+    # plt.show()
+    # fig.savefig(foldername / "solver_convergence_zoomed.png")
 
 # endregion

@@ -228,6 +228,10 @@ else:
             """Total volume flux."""
             ...
 
+        def wetting_flux_from_fractional_flow(self, g: pp.Grid) -> pp.ad.Operator:
+            """Calculate the wetting flux from the total flux and fractional flow."""
+            ...
+
         # EquationsTPF
         def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
             """Volumetric phase source term."""
@@ -434,7 +438,7 @@ else:
         # EquilibratedFluxMixin attributes and methods:
         def equilibrate_flux_during_Newton(
             self,
-            flux_name: Literal["total", PHASENAME],
+            flux_name: Literal["total", "wetting_from_ff"],
             nonlinear_increment: Optional[np.ndarray] = None,
         ) -> None:
             """Equilibrate an approximate flux solution at a given Newton iteration."""
@@ -442,13 +446,13 @@ else:
 
         def extend_fv_fluxes(
             self,
-            flux_name: Literal["total", PHASENAME],
+            flux_name: Literal["total", "wetting_from_ff", PHASENAME],
             flux_specifier: str = "",
         ) -> None:
             """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions."""
             ...
 
-        def divergence_mismatch(self) -> None:
+        def equilibrated_flux_mismatch(self) -> dict[str, float]:
             r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)` and
             being mass conservative.
 
@@ -456,6 +460,10 @@ else:
             ...
 
         # SolutionStrategyReconstructionsMixin attributes and methods:
+        def eval_val_and_jac_fluxes(self) -> None:
+            """Evaluate residual and Jacobian of fluxes to be equilibrated."""
+            ...
+
         def eval_additional_vars(self, prepare_simulation: bool = False) -> None:
             """Evaluate additional pressure and flux variables and save in data dictionary
             after each iteration.
@@ -463,7 +471,7 @@ else:
             """
             ...
 
-        def postprocess_solution(self) -> None:
+        def postprocess_solution(self, nonlinear_increment: np.ndarray) -> None:
             """Equilibrate fluxes and reconstruct pressures."""
             ...
 
@@ -482,11 +490,15 @@ else:
             """Compute the Poincare constant."""
             ...
 
-        def local_residual_est(self, flux_name: Literal["total", PHASENAME]) -> None:
+        def local_residual_est(
+            self, flux_name: Literal["total", "wetting_from_ff"]
+        ) -> None:
             """Calculate and store the local residual estimate for each element."""
             ...
 
-        def local_flux_est(self, flux_name: Literal["total", PHASENAME]) -> None:
+        def local_flux_est(
+            self, flux_name: Literal["total", "wetting_from_ff"]
+        ) -> None:
             """Calculate and store the local flux estimate for each element."""
             ...
 

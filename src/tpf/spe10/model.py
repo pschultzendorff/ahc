@@ -1,8 +1,7 @@
 import pathlib
 import typing
 import warnings
-from typing import Callable, Optional, override
-from venv import logger
+from typing import Callable
 
 import numpy as np
 import porepy as pp
@@ -14,9 +13,16 @@ from tpf.models.flow_and_transport import (
     SolutionStrategyTPF,
 )
 from tpf.models.phase import FluidPhase
-from tpf.spe10.fluid_values import BHP, INITIAL_PRESSURE, INITIAL_SATURATION, oil, water
-from tpf.spe10.geometry import load_spe10_data
-from tpf.utils.constants_and_typing import FEET, NONWETTING, PSI, WETTING
+from tpf.spe10.fluid_values import (
+    BHP,
+    INITIAL_PRESSURE,
+    INITIAL_SATURATION,
+    PRODUCTION_WELL_SIZE,
+    oil,
+    water,
+)
+from tpf.spe10.geometry import X_LENGTH, Y_LENGTH, load_spe10_data
+from tpf.utils.constants_and_typing import FEET, NONWETTING, WETTING
 
 
 class EquationsSPE10(EquationsTPF):
@@ -102,185 +108,282 @@ class EquationsSPE10(EquationsTPF):
         return center
 
     @staticmethod
-    def corner_cell_ids(g: pp.Grid) -> list[np.intp]:
-        """Identify the four corner cells of the grid.
+    def corner_faces_id(g: pp.Grid, height: float, width: float) -> np.ndarray:
+        """Identify the boundary faces in the corners of the grid corresponding to
+        production wells.
 
         Parameters:
             g: Grid.
 
         Returns:
-            corners: Indices of the corner cells.
+            corners: Indices of the boundary faces in the corners.
 
         """
         # Ignore z-values of the grid.
-        cell_centers = g.cell_centers[:2, :]
-
-        min_x, min_y = np.min(cell_centers, axis=1)
-        max_x, max_y = np.max(cell_centers, axis=1)
-        corners = [
-            np.argmin(
-                np.sum((cell_centers - np.array([[min_x], [min_y]])) ** 2, axis=0)
-            ),
-            np.argmin(
-                np.sum((cell_centers - np.array([[min_x], [max_y]])) ** 2, axis=0)
-            ),
-            np.argmin(
-                np.sum((cell_centers - np.array([[max_x], [min_y]])) ** 2, axis=0)
-            ),
-            np.argmin(
-                np.sum((cell_centers - np.array([[max_x], [max_y]])) ** 2, axis=0)
-            ),
-        ]
-        return corners
-
-    def corner_masks(self, g: pp.Grid) -> tuple[pp.ad.DenseArray, pp.ad.DenseArray]:
-        """Create masks that hide and single out the corner cells."""
-        corner_cell_ids: list[np.intp] = self.corner_cell_ids(g)
-        corner_mask_ndarray: np.ndarray = np.zeros((g.num_cells))
-        corner_mask_ndarray[corner_cell_ids] = 1
-        corner_mask = pp.ad.DenseArray(corner_mask_ndarray)
-        corner_mask_inverse = pp.ad.DenseArray(1 - corner_mask_ndarray)
-        corner_mask.set_name("Corner mask")
-        corner_mask_inverse.set_name("Corner mask inverse")
-        return corner_mask, corner_mask_inverse
-
-    @typing.override
-    def set_equations(self, equation_names: Optional[dict[str, str]] = None) -> None:
-        """Modify the equations s.t. the corner cells get prescibed a pressure and
-        saturation explicitly. This simulates production wells.
-
-        """
-        super().set_equations(equation_names)
-
-        # Prescribe the corner cell values directly. This resembles Dirichlet
-        # conditions.
-        g: pp.Grid = self.mdg.subdomains()[0]
-        flow_equation: pp.ad.Operator = self.equation_system.equations["Flow equation"]
-        transport_equation: pp.ad.Operator = self.equation_system.equations[
-            "Transport equation"
-        ]
-
-        corner_mask, corner_mask_inverse = self.corner_masks(g)
-
-        # Subdivide new equations in 3 parts for easier debugging.
-        old_flow_equation_masked: pp.ad.Operator = corner_mask_inverse * flow_equation
-        old_transport_equation_masked: pp.ad.Operator = (
-            corner_mask_inverse * transport_equation
+        boundary_faces: np.ndarray = g.get_boundary_faces()
+        boundary_face_centers: np.ndarray = g.face_centers[:2, boundary_faces]
+        # Find indices of faces in the corners.
+        indices: list[np.ndarray] = []
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] == 0,
+                    boundary_face_centers[1] <= PRODUCTION_WELL_SIZE,
+                ),
+            )
         )
-        old_flow_equation_masked.set_name("Old flow equation masked")
-        old_transport_equation_masked.set_name("Old transport equation masked")
-
-        explicit_pressure: pp.ad.Operator = corner_mask * (
-            self.nonwetting.p - pp.ad.Scalar(BHP)
-        )
-        explicit_saturation: pp.ad.Operator = corner_mask * (
-            self.wetting.s - pp.ad.Scalar(self.wetting.residual_saturation)
-        )
-        explicit_pressure.set_name("Explicit pressure")
-        explicit_saturation.set_name("Explicit saturation")
-
-        # Attach the pressure values to the flow equation and the saturation values to
-        # the transport equation.
-        new_flow_equation: pp.ad.Operator = old_flow_equation_masked + explicit_pressure
-        new_transport_equation: pp.ad.Operator = (
-            old_transport_equation_masked + explicit_saturation
-        )
-        new_flow_equation.set_name("Flow equation")
-        new_transport_equation.set_name("Transport equation")
-
-        self.equation_system.equations["Flow equation"] = new_flow_equation
-        self.equation_system.equations["Transport equation"] = new_transport_equation
-
-    def divergence_mismatch(self) -> None:
-        r"""Modify the check for divergence mismatch of the equilibrated fluxes
-        s.t. the mismatch is zero in the corners.
-
-        """
-        g, g_data = self.mdg.subdomains(return_data=True)[0]
-
-        corner_mask_inverse: pp.ad.DenseArray = self.corner_masks(g)[1]
-
-        # Spatial discretization operators.
-        div = pp.ad.Divergence([g])
-        flux_mpfa = pp.ad.MpfaAd(self.flux_key, [g])
-
-        # Time derivatives.
-        dt = pp.ad.Scalar(self.time_manager.dt)
-        dt_s: pp.ad.Operator = pp.ad.time_derivatives.dt(self.wetting.s, dt)
-
-        # Ad source.
-        source_ad_w = pp.ad.DenseArray(self.phase_fluid_source(g, self.wetting))
-        source_ad_t = pp.ad.DenseArray(self.total_fluid_source(g))
-
-        # Ad parameters.
-        porosity_ad = pp.ad.DenseArray(self.porosity(g))
-
-        # Compute cap pressure and relative permeabilities.
-        p_cap = self.cap_press(self.wetting.s)
-        # p_cap_bc = pp.ad.DenseArray(self._bc_values_cap_press(g))
-
-        mobility_w = self.phase_mobility(g, self.wetting)
-        mobility_n = self.phase_mobility(g, self.nonwetting)
-        mobility_t = self.total_mobility(g)
-
-        # Ad equations
-        if self.formulation == "fractional_flow":
-            # Note, that for ``flux_t``, the total mobility is already included.
-            flux_t = pp.ad.DenseArray(
-                pp.get_solution_values(
-                    "total_flux_equilibrated", g_data, iterate_index=0
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] == 0,
+                    boundary_face_centers[1] >= height - PRODUCTION_WELL_SIZE,
                 )
             )
-            flux_w = pp.ad.DenseArray(
-                pp.get_solution_values(
-                    f"{self.wetting.name}_flux_equilibrated", g_data, iterate_index=0
+        )
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] == width,
+                    boundary_face_centers[1] <= PRODUCTION_WELL_SIZE,
                 )
             )
-            fractional_flow_w = mobility_w / mobility_t
-            vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
-            vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
-
-            flow_equation = (div @ flux_t - source_ad_t) * corner_mask_inverse
-            transport_equation_ff = (
-                porosity_ad * (self.volume_integral(dt_s, [g], 1))
-                + div
-                @ (
-                    fractional_flow_w * flux_t
-                    + fractional_flow_w
-                    * mobility_n
-                    * (
-                        flux_mpfa.flux() @ p_cap
-                        # TODO: Plus boundary values here or are they included in the total flux?
-                        + flux_mpfa.vector_source() @ vector_source_w
-                        - flux_mpfa.vector_source() @ vector_source_n
-                    )
+        )
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] == width,
+                    boundary_face_centers[1] >= height - PRODUCTION_WELL_SIZE,
                 )
-                - source_ad_w
-            ) * corner_mask_inverse
-            transport_equation_wf = (
-                porosity_ad * (self.volume_integral(dt_s, [g], 1))
-                + div @ flux_w
-                - source_ad_w
-            ) * corner_mask_inverse
+            )
+        )
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] <= PRODUCTION_WELL_SIZE,
+                    boundary_face_centers[1] == 0,
+                )
+            )
+        )
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] >= width - PRODUCTION_WELL_SIZE,
+                    boundary_face_centers[1] == 0,
+                )
+            )
+        )
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] <= PRODUCTION_WELL_SIZE,
+                    boundary_face_centers[1] == height,
+                )
+            )
+        )
+        indices.append(
+            np.argwhere(
+                np.logical_and(
+                    boundary_face_centers[0] >= width - PRODUCTION_WELL_SIZE,
+                    boundary_face_centers[1] == height,
+                )
+            )
+        )
+        return boundary_faces[np.concatenate(indices).flatten()]
 
-        flow_equation.set_name("Equilibration flow equation mismatch")
-        transport_equation_ff.set_name(
-            "Equilibration transport fractional flow mismatch"
-        )
-        transport_equation_wf.set_name("Equilibration transport wetting flow mismatch")
-        logger.info(
-            f"Equilibration flow equation mismatch {np.sum(np.abs(flow_equation.value(self.equation_system)))}"
-        )
-        logger.info(
-            f"Equilibration transport equation mismatch fractional flow {np.sum(np.abs(transport_equation_ff.value(self.equation_system)))}"
-        )
-        logger.info(
-            f"Equilibration transport equation mismatch wetting flow {np.sum(np.abs(transport_equation_wf.value(self.equation_system)))}"
-        )
+    # @staticmethod
+    # def corner_cell_ids(g: pp.Grid) -> list[np.intp]:
+    #     """Identify the four corner cells of the grid.
+
+    #     Parameters:
+    #         g: Grid.
+
+    #     Returns:
+    #         corners: Indices of the corner cells.
+
+    #     """
+    #     # Ignore z-values of the grid.
+    #     cell_centers = g.cell_centers[:2, :]
+
+    #     min_x, min_y = np.min(cell_centers, axis=1)
+    #     max_x, max_y = np.max(cell_centers, axis=1)
+    #     corners = [
+    #         np.argmin(
+    #             np.sum((cell_centers - np.array([[min_x], [min_y]])) ** 2, axis=0)
+    #         ),
+    #         np.argmin(
+    #             np.sum((cell_centers - np.array([[min_x], [max_y]])) ** 2, axis=0)
+    #         ),
+    #         np.argmin(
+    #             np.sum((cell_centers - np.array([[max_x], [min_y]])) ** 2, axis=0)
+    #         ),
+    #         np.argmin(
+    #             np.sum((cell_centers - np.array([[max_x], [max_y]])) ** 2, axis=0)
+    #         ),
+    #     ]
+    #     return corners
+
+    # def corner_masks(self, g: pp.Grid) -> tuple[pp.ad.DenseArray, pp.ad.DenseArray]:
+    #     """Create masks that hide and single out the corner cells."""
+    #     corner_cell_ids: list[np.intp] = self.corner_cell_ids(g)
+    #     corner_mask_ndarray: np.ndarray = np.zeros((g.num_cells))
+    #     corner_mask_ndarray[corner_cell_ids] = 1
+    #     corner_mask = pp.ad.DenseArray(corner_mask_ndarray)
+    #     corner_mask_inverse = pp.ad.DenseArray(1 - corner_mask_ndarray)
+    #     corner_mask.set_name("Corner mask")
+    #     corner_mask_inverse.set_name("Corner mask inverse")
+    #     return corner_mask, corner_mask_inverse
+
+    # @typing.override
+    # def set_equations(self, equation_names: Optional[dict[str, str]] = None) -> None:
+    #     """Modify the equations s.t. the corner cells get prescibed a pressure and
+    #     saturation explicitly. This simulates production wells.
+
+    #     """
+    #     super().set_equations(equation_names)
+
+    #     # Prescribe the corner cell values directly. This resembles Dirichlet
+    #     # conditions.
+    #     g: pp.Grid = self.mdg.subdomains()[0]
+    #     flow_equation: pp.ad.Operator = self.equation_system.equations["Flow equation"]
+    #     transport_equation: pp.ad.Operator = self.equation_system.equations[
+    #         "Transport equation"
+    #     ]
+
+    #     corner_mask, corner_mask_inverse = self.corner_masks(g)
+
+    #     # Subdivide new equations in 3 parts for easier debugging.
+    #     old_flow_equation_masked: pp.ad.Operator = corner_mask_inverse * flow_equation
+    #     old_transport_equation_masked: pp.ad.Operator = (
+    #         corner_mask_inverse * transport_equation
+    #     )
+    #     old_flow_equation_masked.set_name("Old flow equation masked")
+    #     old_transport_equation_masked.set_name("Old transport equation masked")
+
+    #     explicit_pressure: pp.ad.Operator = corner_mask * (
+    #         self.nonwetting.p - pp.ad.Scalar(BHP)
+    #     )
+    #     explicit_saturation: pp.ad.Operator = corner_mask * (
+    #         self.wetting.s - pp.ad.Scalar(self.wetting.residual_saturation)
+    #     )
+    #     explicit_pressure.set_name("Explicit pressure")
+    #     explicit_saturation.set_name("Explicit saturation")
+
+    #     # Attach the pressure values to the flow equation and the saturation values to
+    #     # the transport equation.
+    #     new_flow_equation: pp.ad.Operator = old_flow_equation_masked + explicit_pressure
+    #     new_transport_equation: pp.ad.Operator = (
+    #         old_transport_equation_masked + explicit_saturation
+    #     )
+    #     new_flow_equation.set_name("Flow equation")
+    #     new_transport_equation.set_name("Transport equation")
+
+    #     self.equation_system.equations["Flow equation"] = new_flow_equation
+    #     self.equation_system.equations["Transport equation"] = new_transport_equation
+
+    # def equilibrated_flux_mismatch(self) -> dict[str, float]:
+    #     r"""Modify the check for divergence mismatch of the equilibrated fluxes
+    #     s.t. the mismatch is zero in the corners.
+
+    #     """
+    #     g, g_data = self.mdg.subdomains(return_data=True)[0]
+
+    #     corner_mask_inverse: pp.ad.DenseArray = self.corner_masks(g)[1]
+
+    #     # Spatial discretization operators.
+    #     div = pp.ad.Divergence([g])
+    #     flux_tpfa = pp.ad.TpfaAd(self.flux_key, [g])
+
+    #     # Time derivatives.
+    #     dt = pp.ad.Scalar(self.time_manager.dt)
+    #     dt_s: pp.ad.Operator = pp.ad.time_derivatives.dt(self.wetting.s, dt)
+
+    #     # Ad source.
+    #     source_ad_w = pp.ad.DenseArray(self.phase_fluid_source(g, self.wetting))
+    #     source_ad_t = pp.ad.DenseArray(self.total_fluid_source(g))
+
+    #     # Ad parameters.
+    #     porosity_ad = pp.ad.DenseArray(self.porosity(g))
+
+    #     # Ad equations
+    #     if self.formulation == "fractional_flow":
+    #         # Note, that for ``flux_t``, the total mobility is already included.
+    #         flux_t = pp.ad.DenseArray(
+    #             pp.get_solution_values(
+    #                 "total_flux_equilibrated", g_data, iterate_index=0
+    #             )
+    #         )
+    #         flux_w = pp.ad.DenseArray(
+    #             pp.get_solution_values(
+    #                 f"wetting_from_ff_flux_equilibrated", g_data, iterate_index=0
+    #             )
+    #         )
+
+    #         flow_equation = (div @ flux_t - source_ad_t) * corner_mask_inverse
+    #         transport_equation = (
+    #             porosity_ad * (self.volume_integral(dt_s, [g], 1))
+    #             + div @ flux_w
+    #             - source_ad_w
+    #         ) * corner_mask_inverse
+
+    #         # Compute cap pressure and relative permeabilities.
+    #         # p_cap = self.cap_press(self.wetting.s)
+    #         # p_cap_bc = pp.ad.DenseArray(self._bc_values_cap_press(g))
+
+    #         # mobility_w = self.phase_mobility(g, self.wetting)
+    #         # mobility_n = self.phase_mobility(g, self.nonwetting)
+    #         # mobility_t = self.total_mobility(g)
+    #         # fractional_flow_w = mobility_w / mobility_t
+    #         # vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
+    #         # vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+    #         # transport_equation_ff = (
+    #         #     porosity_ad * (self.volume_integral(dt_s, [g], 1))
+    #         #     + div
+    #         #     @ (
+    #         #         fractional_flow_w * flux_t
+    #         #         + fractional_flow_w
+    #         #         * mobility_n
+    #         #         * (
+    #         #             flux_tpfa.flux() @ p_cap
+    #         #             # TODO: Plus boundary values here or are they included in the total flux?
+    #         #             + flux_tpfa.vector_source() @ vector_source_w
+    #         #             - flux_tpfa.vector_source() @ vector_source_n
+    #         #         )
+    #         #     )
+    #         #     - source_ad_w
+    #         # ) * corner_mask_inverse
+
+    #     flow_equation.set_name("Equilibration flow equation mismatch")
+    #     transport_equation.set_name("Equilibration transport wetting flow mismatch")
+    #     # transport_equation_ff.set_name(
+    #     #     "Equilibration transport fractional flow mismatch"
+    #     # )
+    #     # Multiply with cell volumes to get elementwise mismatch.
+    #     # Mypy complains about wrong types, because ``*.value(*)`` is not necessarily an
+    #     # ``np.ndarray``. We ignore this.
+    #     flow_equation_mismatch: float = np.sum(
+    #         np.abs(g.cell_volumes * flow_equation.value(self.equation_system))  # type: ignore
+    #     )
+    #     transport_equation_mismatch: float = np.sum(
+    #         np.abs(g.cell_volumes * transport_equation.value(self.equation_system))  # type: ignore
+    #     )
+    #     logger.info(f"Flow equation mismatch {flow_equation_mismatch}")
+    #     logger.info(
+    #         f"Transport equation mismatch wetting flow {transport_equation_mismatch}"
+    #     )
+    #     # logger.info(
+    #     #     f"Transport equation mismatch fractional flow {np.sum(np.abs(transport_equation_ff.value(self.equation_system)))}"  # type: ignore
+    #     # )
+    #     return {
+    #         "flow": flow_equation_mismatch,
+    #         "transport": transport_equation_mismatch,
+    #     }
 
 
 class ModifiedBoundarySPE10(BoundaryConditionsTPF):
 
+    corner_faces_id: Callable[[pp.Grid, float, float], np.ndarray]
+
+    @typing.override
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann).
 
@@ -288,7 +391,48 @@ class ModifiedBoundarySPE10(BoundaryConditionsTPF):
         a pressure explicitely, which acts as a Dirichlet condition.
 
         """
-        return pp.BoundaryCondition(g)
+        height: float = (
+            (Y_LENGTH / 2) if self.params["spe10_quarter_domain"] else Y_LENGTH
+        )
+        width: float = X_LENGTH / 2 if self.params["spe10_quarter_domain"] else X_LENGTH
+        corner_faces_id: np.ndarray = self.corner_faces_id(g, height, width)
+        return pp.BoundaryCondition(g, corner_faces_id, "dir")
+
+    def _bc_dirichlet_pressure_values(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> np.ndarray:
+        """Dirichle pressure values.
+
+        We assign Neumann conditions for all faces. The boundaries in all corners get
+        prescribed pressure explicitely and act as wells.
+
+        """
+        if phase == self.nonwetting:
+            height: float = (
+                Y_LENGTH / 2 if self.params["spe10_quarter_domain"] else Y_LENGTH
+            )
+            width: float = (
+                X_LENGTH / 2 if self.params["spe10_quarter_domain"] else X_LENGTH
+            )
+            corner_faces_id: np.ndarray = self.corner_faces_id(g, height, width)
+            bc: np.ndarray = np.zeros(g.num_faces)
+            bc[corner_faces_id] = BHP
+            return bc
+        else:
+            raise NotImplementedError(
+                "Dirichlet pressure values not implemented for the wetting phase."
+            )
+
+    def _bc_dirichlet_saturation_values(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> np.ndarray:
+        if phase.name == self.wetting.name:
+            s_bc: np.ndarray = np.full(g.num_faces, INITIAL_SATURATION)
+        elif phase.name == self.nonwetting.name:
+            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
+                g, self.wetting
+            )
+        return s_bc
 
 
 class SolutionStrategySPE10(SolutionStrategyTPF):
@@ -386,12 +530,12 @@ class SolutionStrategySPE10(SolutionStrategyTPF):
 
         """
         g: pp.Grid = self.mdg.subdomains()[0]
-        corner_cell_ids: list[np.intp] = self.corner_cell_ids(g)
+        # corner_cell_ids: list[np.intp] = self.corner_cell_ids(g)
 
         initial_pressure = np.full(g.num_cells, INITIAL_PRESSURE)
-        initial_pressure[corner_cell_ids] = BHP
+        # initial_pressure[corner_cell_ids] = BHP
         initial_saturation = np.full(g.num_cells, INITIAL_SATURATION)
-        initial_saturation[corner_cell_ids] = 1 - self.wetting.residual_saturation
+        # initial_saturation[corner_cell_ids] = 1 - self.wetting.residual_saturation
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),
             [self.wetting.p, self.nonwetting.p],
@@ -441,18 +585,67 @@ class ModelGeometrySPE10(pp.ModelGeometry):
         if quarter_domain:
             bounding_box: dict[str, pp.number] = {
                 "xmin": 0,
-                "xmax": 600 * FEET,
+                "xmax": X_LENGTH / 2,
                 "ymin": 0,
-                "ymax": 1100 * FEET,
+                "ymax": Y_LENGTH / 2,
             }
         else:
             bounding_box = {
                 "xmin": 0,
-                "xmax": 1200 * FEET,
+                "xmax": X_LENGTH,
                 "ymin": 0,
-                "ymax": 2200 * FEET,
+                "ymax": Y_LENGTH,
             }
         self._domain = pp.Domain(bounding_box)
+
+    def set_fractures(self) -> None:
+        # Use fractures as constraints to ensure that the grid is conforming to the well
+        # boundaries.
+        self._fractures = [
+            pp.LineFracture(
+                np.array([[0, X_LENGTH], [PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE]])
+            ),
+            pp.LineFracture(
+                np.array(
+                    [
+                        [0, X_LENGTH],
+                        [
+                            Y_LENGTH - PRODUCTION_WELL_SIZE,
+                            Y_LENGTH - PRODUCTION_WELL_SIZE,
+                        ],
+                    ]
+                )
+            ),
+            pp.LineFracture(
+                np.array([[PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE], [0, Y_LENGTH]])
+            ),
+            pp.LineFracture(
+                np.array(
+                    [
+                        [
+                            X_LENGTH - PRODUCTION_WELL_SIZE,
+                            X_LENGTH - PRODUCTION_WELL_SIZE,
+                        ],
+                        [0, Y_LENGTH],
+                    ]
+                )
+            ),
+        ]
+
+    def meshing_kwargs(self) -> dict:
+        """Keyword arguments for md-grid creation.
+
+        Returns:
+            Keyword arguments compatible with pp.create_mdg() method.
+
+        """
+        meshing_kwargs = self.params.get("meshing_kwargs", None)
+        if meshing_kwargs is None:
+            meshing_kwargs = {}
+        meshing_kwargs.update(
+            {"constraints": np.array(list(range(len(self.fractures))))}
+        )
+        return meshing_kwargs
 
 
 # The various protocols define different types for

@@ -1,4 +1,8 @@
-r"""We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
+r"""Study how the estimators evolve during a Newton loop. The simulation is run for 3
+ time steps to study the behavior during each time step.
+
+
+We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
 continuation. The considered model is similar to the heterogeneous 3D models in the
 article (section 4.6.4), but on a 2D domain for now.
 
@@ -41,25 +45,14 @@ import pathlib
 import random
 import shutil
 import warnings
+from collections import defaultdict
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from numba import config
-from tpf.models.error_estimate import (
-    DataSavingEst,
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
-)
-from tpf.models.flow_and_transport import TwoPhaseFlow
-from tpf.models.reconstruction import (
-    DataSavingReconstruction,
-    EquilibratedFluxMixin,
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-)
-from tpf.spe10.fluid_values import oil, water
+from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
 from tpf.spe10.model import SPE10
 from tpf.utils.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
@@ -67,7 +60,6 @@ from tpf.utils.constants_and_typing import (
     GLOBAL_PRESSURE,
     PSI,
 )
-from tpf.viz.iteration_exporting import IterationExporting
 from tpf.viz.solver_statistics import SolverStatisticsEst
 
 # region SETUP
@@ -100,22 +92,11 @@ logger.setLevel(logging.INFO)
 # region MODEL
 
 
-class ConvergenceAnalysisEstimatesSPE(
-    # IterationExporting,
+class SPE10Newton(
     # SPE10:
     SPE10,
-    # Modified model:
-    # Estimator mixins:
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
-    DataSavingEst,
-    # Reconstruction mixins:
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-    EquilibratedFluxMixin,
-    DataSavingReconstruction,
-    # Base data saving:
-    TwoPhaseFlow,
+    # Two phase flow with estimators:
+    TwoPhaseFlowErrorEstimate,
 ): ...  # type: ignore
 
 
@@ -143,6 +124,7 @@ params = {
     # Nonlinear params:
     "nonlinear_solver_statistics": SolverStatisticsEst,
     "nonlinear_solver": pp.NewtonSolver,
+    # Nonlinear params:
     "max_iterations": 20,
     "nl_convergence_tol": 1e-5,
     "nl_divergence_tol": 1e15,
@@ -151,16 +133,12 @@ params = {
     # * PSI,  # Scale the nonlinear tolerance by pressure values
 }
 
-cell_sizes: list[float] = [
-    # 600 * FEET / 15,
-    600 * FEET / 30,
-    600 * FEET / 60,
-]
+cell_sizes: list[float] = [600 * FEET / 30]
 rel_perm_constants_list: list[dict[str, Any]] = [
     {"model": "linear", "limit": False},
     {
         "model": "Brooks-Corey",
-        "limit": False,
+        "limit": True,
         "n1": 2,
         "n2": 2,  # 1 + 2/n_b
         "n3": 1,
@@ -183,11 +161,11 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
 
     # We have the file name both in the folder name and the filename to make
     # distinguishing different runs in ParaView easier.
-    filename: str = f"cellsz_{int(cell_size)}"
+    filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "grid_convergence"
-        / f"lay_{spe10_layer}_rp_{rp_model['model']}_cp._{cp_model['model']}"
+        / "newton_3_ts"
+        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
 
@@ -199,16 +177,10 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
 
     params.update(
         {
-            # Reinitialize the time manager for each run
+            # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
-                schedule=np.array([0, 5.0 * pp.DAY]),  # 5 days
-                dt_init=1.0 * pp.DAY,  # time step size in days
-                # dt_min_max=(1e-6 * pp.DAY, 1.0 * pp.DAY),
-                # constant_dt=False,
-                # recomp_factor=0.1,
-                # recomp_max=5,
-                # Run with constant time step s.t. the discretization error varies only
-                # with grid size.
+                schedule=np.array([0, 1.5 * pp.DAY]),  # 5 days
+                dt_init=0.5 * pp.DAY,  # Time step size in days.
                 constant_dt=True,
             ),
             "folder_name": foldername,
@@ -219,26 +191,24 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
             "cap_press_constants": cp_model,
         }
     )
-    model = ConvergenceAnalysisEstimatesSPE(params)
+    model = SPE10Newton(params)
     try:
         pp.run_time_dependent_model(model=model, params=params)
     except Exception as error:
         logger.error(f"Model {model} failed with error: {error}")
-        raise error
 
 # endregion
 
 # region PLOTTING
-fig, (ax1, ax2) = plt.subplots(2, 1)
 
-for i, (cell_size, rp_model, cp_model) in enumerate(
-    itertools.product(cell_sizes, rel_perm_constants_list, cap_press_constants_list)
+for i, (rp_model, cp_model) in enumerate(
+    itertools.product(rel_perm_constants_list, cap_press_constants_list)
 ):
-    filename: str = f"cellsz_{int(cell_size)}"
+    filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "grid_convergence"
-        / f"lay_{spe10_layer}_rp_{rp_model['model']}_cp._{cp_model['model']}"
+        / "newton_3_ts"
+        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
     solver_statistics_file: pathlib.Path = foldername / "solver_statistics.json"
@@ -246,106 +216,44 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         history = json.load(f)
         history_list = list(history.values())[1:]
 
-    flow_equation_mismatch: list[float] = []
-    transport_equation_mismatch: list[float] = []
-
     residual_and_flux_est: list[float] = []
     glob_nonconformity_est: list[float] = []
     compl_nonconformity_est: list[float] = []
-    times: list[float] = []
-    time_deltas: list[float] = []
+    fig, ax = plt.subplots()
 
-    for j, time_step in enumerate(history_list):
-        # Find out whether the time step converged. If not, we do not plot anything.
-        # If yes, we plot the final value of the estimators.
+    for n, time_step in enumerate(history_list):
+        residual_and_flux_est.extend(time_step["residual_and_flux_est"])
+        # Transform list of dicts to dict containing two lists.
+        converted_nonconformity_est = defaultdict(list)
+        for nonconformity in time_step["nonconformity_est"]:
+            for key, value in nonconformity.items():
+                converted_nonconformity_est[key].append(value)
+        glob_nonconformity_est.extend(converted_nonconformity_est[GLOBAL_PRESSURE])
+        compl_nonconformity_est.extend(
+            converted_nonconformity_est[COMPLIMENTARY_PRESSURE]
+        )
+
+        # Draw a vertical line when the time increase in the next time step, i.e., the
+        # nonlinear iterations at the current time step converged.
         time: float = time_step["current time"]
-        time_delta: float = time_step["time step size"]
-        time_step_converged: bool = True
         try:
-            next_time: float = history_list[j + 1]["current time"]
-            if time >= next_time:
-                time_step_converged = False
+            next_time: float = history_list[n + 1]["current time"]
+            if time < next_time:
+                ax.axvline(x=len(residual_and_flux_est), color="gray", linestyle="--")
         except IndexError:
-            # At the last time step, we assume convergence.
-            time_step_converged = True
+            pass
 
-        if not time_step_converged:
-            continue
-
-        times.append(time)
-        time_deltas.append(time_delta)
-        flow_equation_mismatch.extend(
-            [iteration["flow"] for iteration in time_step["equilibrated_flux_mismatch"]]
-        )
-        transport_equation_mismatch.extend(
-            iteration["transport"]
-            for iteration in time_step["equilibrated_flux_mismatch"]
-        )
-
-        residual_and_flux_est.append(
-            time_step["residual_and_flux_est"][-1]  # / time_delta
-        )
-        glob_nonconformity_est.append(
-            time_step["nonconformity_est"][-1][GLOBAL_PRESSURE]  # / time_delta
-        )
-        compl_nonconformity_est.append(
-            time_step["nonconformity_est"][-1][COMPLIMENTARY_PRESSURE]  # / time_delta
-        )
-    # ax.semilogy(
-    #     time_steps,
-    #     np.array(residual_and_flux_est),
-    #     label=f"{foldername.parents[0].stem} residual and flux error stimator",
-    # )
-    # ax.semilogy(
-    #     time_steps,
-    #     np.array(glob_nonconformity_est),
-    #     label=f"{foldername.parents[0].stem} global pressure error estimator",
-    # )
-    # ax.semilogy(
-    #     time_steps,
-    #     np.array(compl_nonconformity_est),
-    #     label=f"{foldername.parents[0].stem} complimentary pressure error estimator",
-    # )
-    # When there is only one time step, plot a constant value over the entire time
-    # interval.
-    if j == 0:
-        times.insert(0, 0.0)
-        residual_and_flux_est.append(residual_and_flux_est[-1])
-        glob_nonconformity_est.append(glob_nonconformity_est[-1])
-        compl_nonconformity_est.append(compl_nonconformity_est[-1])
-
-    ax1.semilogy(
-        times,
-        np.array(residual_and_flux_est)
-        + np.array(glob_nonconformity_est)
-        + np.array(compl_nonconformity_est),
-        label=f"{filename} total error estimator",
-        marker="s",
+    ax.semilogy(residual_and_flux_est, label="Residual and flux estimator")
+    ax.semilogy(glob_nonconformity_est, label="Global pressure nonconformity estimator")
+    ax.semilogy(
+        compl_nonconformity_est, label="Complimentary pressure nonconformity estimator"
     )
-    ax2.semilogy(
-        range(len(flow_equation_mismatch)),
-        np.array(flow_equation_mismatch),
-        label=f"{filename} flow equation mismatch",
-        marker="s",
-    )
-    ax2.semilogy(
-        range(len(transport_equation_mismatch)),
-        np.array(transport_equation_mismatch),
-        label=f"{filename} transport equation mismatch",
-        marker="s",
-    )
-
-ax1.set_xlabel("Time (s)")
-ax1.set_ylabel("Estimator")
-ax1.set_title(f"Total error estimator")
-ax1.legend()
-
-ax2.set_xlabel("Nonlinear iteration")
-ax2.set_ylabel("Mismatch")
-ax2.set_title(f"Flux equilibrations mismatch")
-ax2.legend()
-
-plt.show()
-fig.savefig(pathlib.Path(__file__).parent / "grid_convergence" / "convergence_plot.png")
+    ax.set_xlabel("Nonlinear iteration (over multiple time steps)")
+    ax.set_ylabel("Estimator")
+    ax.set_title(f"Discretization estimator")
+    # ax.set_ylim([5e-4, 1e3])
+    ax.legend()
+    plt.show()
+    fig.savefig(foldername / "solver_convergence.png")
 
 # endregion

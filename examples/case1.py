@@ -22,7 +22,7 @@ from tpf.models.homotopy_continuation import (
     EstimatesHCMixin,
     HCSolver,
     RelativePermeabilityHC,
-    SolutionStrategyEstHCMixin,
+    SolutionStrategyEstHC,
     SolutionStrategyHCMixin,
     SolverStatisticsHC,
 )
@@ -119,7 +119,7 @@ class HCTwoPhaseFlow(
     # Homotopy continuation mixins:
     EstimatesHCMixin,
     SolutionStrategyHCMixin,
-    SolutionStrategyEstHCMixin,
+    SolutionStrategyEstHC,
     # Estimator mixins:
     ErrorEstimateMixin,
     SolutionStrategyEst,

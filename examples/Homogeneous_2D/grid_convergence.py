@@ -1,5 +1,4 @@
 r"""Homogenous five-spot example. Study convergence of the error estimators with grid
- size. Time step is kept constant s.t. the discretization error varies only with grid
  size.
 
 Model description:
@@ -24,6 +23,8 @@ Model description:
     - Corey with power 2.
 - Capillary pressure model:
     - Brooks-Corey
+- Time step size is kept constant s.t. the discretization error varies only with grid
+  size.
 
 """
 
@@ -48,7 +49,6 @@ from tpf.models.error_estimate import (
 )
 from tpf.models.flow_and_transport import EquationsTPF, TwoPhaseFlow
 from tpf.models.reconstruction import (
-    DataSavingReconstruction,
     EquilibratedFluxMixin,
     GlobalPressureMixin,
     PressureReconstructionMixin,
@@ -130,7 +130,6 @@ class ConvergenceAnalysisEstimatesHomogeneous(
     GlobalPressureMixin,
     PressureReconstructionMixin,
     EquilibratedFluxMixin,
-    DataSavingReconstruction,
     # Base data saving:
     TwoPhaseFlow,
 ): ...  # type: ignore
@@ -153,7 +152,7 @@ params = {
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
-    "spe_quarter_domain": True,
+    "spe10_quarter_domain": True,
     # Nonlinear params:
     "nonlinear_solver_statistics": SolverStatisticsEst,
     "nonlinear_solver": pp.NewtonSolver,
@@ -162,21 +161,18 @@ params = {
     "nl_divergence_tol": 1e15,
     # "nl_convergence_tol": 1e-10
     # * 10000,  # Scale the nonlinear tolerance by pressure values.
-    # Grid and time discretization:
 }
 
 cell_sizes: list[float] = [
-    600 * FEET / 1.5,
     600 * FEET / 7.5,
     # 600 * FEET / 15,
     # 600 * FEET / 30,
-    # 600 * FEET / 60,
 ]
 rel_perm_constants_list: list[dict[str, Any]] = [
     {"model": "linear", "limit": True},
 ]
 cap_press_constants_list: list[dict[str, Any]] = [
-    {"model": "linear", "entry_pressure": 5 * PSI},
+    {"model": "linear", "entry_pressure": 0 * PSI},
 ]
 
 
@@ -234,7 +230,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
 # endregion
 
 # region PLOTTING
-fig, ax = plt.subplots()
+fig, (ax1, ax2) = plt.subplots(2, 1)
 
 for i, (cell_size, rp_model, cp_model) in enumerate(
     itertools.product(cell_sizes, rel_perm_constants_list, cap_press_constants_list)
@@ -250,6 +246,9 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
     with open(solver_statistics_file) as f:
         history = json.load(f)
         history_list = list(history.values())[1:]
+
+    flow_equation_mismatch: list[float] = []
+    transport_equation_mismatch: list[float] = []
 
     residual_and_flux_est: list[float] = []
     glob_nonconformity_est: list[float] = []
@@ -276,16 +275,23 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
 
         times.append(time)
         time_deltas.append(time_delta)
-        residual_and_flux_est.append(
-            time_step["residual_and_flux_est"][-1] / time_delta
+        flow_equation_mismatch.extend(
+            [iteration["flow"] for iteration in time_step["equilibrated_flux_mismatch"]]
         )
-        glob_nonconformity_est.append(
-            time_step["nonconformity_est"][-1][GLOBAL_PRESSURE] / time_delta
-        )
-        compl_nonconformity_est.append(
-            time_step["nonconformity_est"][-1][COMPLIMENTARY_PRESSURE] / time_delta
+        transport_equation_mismatch.extend(
+            iteration["transport"]
+            for iteration in time_step["equilibrated_flux_mismatch"]
         )
 
+        residual_and_flux_est.append(
+            time_step["residual_and_flux_est"][-1]  # / time_delta
+        )
+        glob_nonconformity_est.append(
+            time_step["nonconformity_est"][-1][GLOBAL_PRESSURE]  # / time_delta
+        )
+        compl_nonconformity_est.append(
+            time_step["nonconformity_est"][-1][COMPLIMENTARY_PRESSURE]  # / time_delta
+        )
     # ax.semilogy(
     #     time_steps,
     #     np.array(residual_and_flux_est),
@@ -309,19 +315,37 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         glob_nonconformity_est.append(glob_nonconformity_est[-1])
         compl_nonconformity_est.append(compl_nonconformity_est[-1])
 
-    ax.semilogy(
+    ax1.semilogy(
         times,
         np.array(residual_and_flux_est)
         + np.array(glob_nonconformity_est)
         + np.array(compl_nonconformity_est),
         label=f"{filename} total error estimator",
+        marker="s",
+    )
+    ax2.semilogy(
+        range(len(flow_equation_mismatch)),
+        np.array(flow_equation_mismatch),
+        label=f"{filename} flow equation mismatch",
+        marker="s",
+    )
+    ax2.semilogy(
+        range(len(transport_equation_mismatch)),
+        np.array(transport_equation_mismatch),
+        label=f"{filename} transport equation mismatch",
+        marker="s",
     )
 
-ax.set_xlabel("Time (s)")
-ax.set_ylabel("Estimator")
-ax.set_title(f"Total error estimator")
-# ax.set_ylim([5e-2, 1e3])
-ax.legend()
+ax1.set_xlabel("Time (s)")
+ax1.set_ylabel("Estimator")
+ax1.set_title(f"Total error estimator")
+ax1.legend()
+
+ax2.set_xlabel("Nonlinear iteration")
+ax2.set_ylabel("Mismatch")
+ax2.set_title(f"Flux equilibrations mismatch")
+ax2.legend()
+
 plt.show()
 fig.savefig(pathlib.Path(__file__).parent / "grid_convergence" / "convergence_plot.png")
 

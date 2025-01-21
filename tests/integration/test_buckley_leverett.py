@@ -222,21 +222,21 @@ def test_tpfa(
 
 
 @pytest.fixture
-def mpfa_array() -> np.ndarray:
+def tpfa_array() -> np.ndarray:
     """Array of the divergence of the TPFA array."""
     return np.asarray([[3, -1, 0, 0], [-1, 2, -1, 0], [0, -1, 2, -1], [0, 0, -1, 1]])
 
 
-def test_mpfa(
-    mpfa_array: np.ndarray,
+def test_tpfa(
+    tpfa_array: np.ndarray,
     model_4_grid_cells: BuckleyLeverettSetup,
 ) -> None:
     """Test that MPFA works correctly."""
     subdomains = model_4_grid_cells.mdg.subdomains()
-    tpfa = pp.ad.MpfaAd(model_4_grid_cells.w_flux_key, subdomains)
+    tpfa = pp.ad.TpfaAd(model_4_grid_cells.w_flux_key, subdomains)
     div = pp.ad.Divergence(subdomains)
     tpfa_system = (div * tpfa.flux).evaluate(model_4_grid_cells.equation_system)
-    assert np.allclose(tpfa_system.todense(), mpfa_array)
+    assert np.allclose(tpfa_system.todense(), tpfa_array)
 
 
 @pytest.fixture

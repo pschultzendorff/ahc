@@ -11,7 +11,7 @@ from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFPr
 from tpf.models.reconstruction import (
     DataSavingReconstruction,
     SolutionStrategyReconstruction,
-    TwoPhaseFlowWithReconstruction,
+    TwoPhaseFlowReconstruction,
 )
 from tpf.numerics.quadrature import Integral, TriangleQuadrature
 from tpf.utils.constants_and_typing import (
@@ -41,12 +41,13 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
     def poincare_constant(self, g: pp.Grid) -> np.ndarray:
         return g.cell_diameters() / np.pi
 
-    def local_residual_est(self, flux_name: Literal["total", PHASENAME]) -> None:
+    def local_residual_est(
+        self, flux_name: Literal["total", "wetting_from_ff"]
+    ) -> None:
         r"""Calculate and store the local residual estimate for each element.
 
 
         Note: The values stored are actually the squares of the elementwise norms, i.e.,
-
         .. math::
             \|q_t - \nabla \cdot \theta_t\|_K^2, \\
             \|\varphi \partial_t s_w - q_w+ \nabla \cdot \theta_w\|_K^2.
@@ -57,16 +58,13 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # Collect terms for the estimators as ``np.ndarray``.
         poincare_constant: np.ndarray = self.poincare_constant(g)
 
-        dt = pp.ad.Scalar(self.time_manager.dt)
-        dt_s_ad = pp.ad.time_derivatives.dt(self.wetting.s, dt)
-        dt_s: np.ndarray = (dt_s_ad).value(self.equation_system)
-
-        porosity: np.ndarray = self.porosity(g)
+        # To get the average source term for each element, we divide by element volumes.
+        # Integrating gives the element source again.
         source: np.ndarray = (
             self.phase_fluid_source(g, self.wetting)
-            if flux_name == self.wetting.name
+            if flux_name == "wetting_from_ff"
             else self.total_fluid_source(g)
-        )
+        ) / g.cell_volumes
 
         equilibrated_flux_coeffs: np.ndarray = pp.get_solution_values(
             f"{flux_name}_flux_equilibrated_RT0_coeffs",
@@ -82,7 +80,11 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # NOTE The saturation term, source term, and divergence of the flux
         # reconstruction, are all elementwise constant. Therefore, we can integrate
         # explicitely by multiplying with the element volume.
-        if flux_name == self.wetting.name:
+        if flux_name == "wetting_from_ff":
+            dt = pp.ad.Scalar(self.time_manager.dt)
+            dt_s_ad = pp.ad.time_derivatives.dt(self.wetting.s, dt)
+            dt_s: np.ndarray = (dt_s_ad).value(self.equation_system)
+            porosity: np.ndarray = self.porosity(g)
             integral: Integral = Integral(
                 g.cell_volumes
                 * poincare_constant
@@ -108,7 +110,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             iterate_index=0,
         )
 
-    def local_flux_est(self, flux_name: Literal["total", PHASENAME]) -> None:
+    def local_flux_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
         r"""Calculate and store the local flux estimate for each element.
 
 
@@ -353,9 +355,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         _, g_data = self.mdg.subdomains(return_data=True)[0]
 
         estimators: dict[str, float] = {}
-        for flux_name in ["total", self.wetting.name]:
+        for flux_name in ["total", "wetting_from_ff"]:
             # Satisfy mypy.
-            flux_name = typing.cast(Literal[PHASENAME, "total"], flux_name)
+            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
 
             # Calculate local estimates.
             self.local_residual_est(flux_name)
@@ -486,6 +488,42 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         return estimators[GLOBAL_PRESSURE], estimators[COMPLIMENTARY_PRESSURE]
 
+    def local_energy_norm(self) -> np.ndarray:
+        r"""Calculate the local in space and time energy norm of the numerical
+        solution.
+
+        .. math::
+            \mathcal{E}_{I_n,K}(p_{n,h,\tau}, s_{w,h,\tau}) :=
+                \left\{
+                    \int_{I_n} \|\kappa \lambda_t(s_{w,h,\tau}) \nabla P(p_{n,h,\tau}, s_{w,h,\tau})\|_K^2 dt
+                    + \int_{I_n} \|\kappa \lambda_t(s_{w,h,\tau}) \nabla Q(s_{w,h,\tau})\|_K^2 dt
+                \right\}^{\frac{1}{2}}.
+
+        """
+        _, g_data = self.mdg.subdomains(return_data=True)[0]
+        global_pressure: np.ndarray = pp.get_solution_values(
+            f"{GLOBAL_PRESSURE}_reconstructed_coeffs", g_data, iterate_index=0
+        )
+        complimentary_pressure: np.ndarray = pp.get_solution_values(
+            f"{COMPLIMENTARY_PRESSURE}_reconstructed_coeffs", g_data, iterate_index=0
+        )
+        # Calculate the energy norm for each element.
+        energy_norms: np.ndarray = np.zeros(g.number_of_cells)
+
+    def global_energy_norm(self) -> float:
+        r"""Calculate the global in space and local in time energy norm of the numerical
+        solution.
+
+        .. math::
+            \mathcal{E}_{I_n}(p_{n,h,\tau}, s_{w,h,\tau}) :=
+                \left\{
+                    \int_{I_n} \|\kappa \lambda_t(s_{w,h,\tau}) \nabla P(p_{n,h,\tau}, s_{w,h,\tau})\|_\Omega^2 dt
+                    + \int_{I_n} \|\kappa \lambda_t(s_{w,h,\tau}) \nabla Q(s_{w,h,\tau})\|_\Omega^2 dt
+                \right\}^{\frac{1}{2}}.
+
+        """
+        pass
+
 
 # This could also be a mixin, but by subclassing ``SolutionStrategyReconstruction``, we
 # avoid having to pay attention to the order of the different solution strategy classes.
@@ -524,16 +562,15 @@ class SolutionStrategyEst(  # type: ignore
         """
         sd, g_data = self.mdg.subdomains(return_data=True)[0]
 
-        # Extend and equilibrate fluxes. Reconstruct pressures.
-        # self.postprocess_solution()
         # Calculate flux coefficients. The flux values were set by
         # ``SolutionStrategyReconstructionsMixin.eval_additional_vars``.
         for flux_name in [
             "total",
+            "wetting_from_ff",
             self.wetting.name,
             self.nonwetting.name,
         ]:
-            flux_name = cast(Literal["total", PHASENAME], flux_name)
+            flux_name = cast(Literal["total", "wetting_from_ff", PHASENAME], flux_name)
             self.extend_fv_fluxes(flux_name)
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             pressure_key = cast(PRESSURE_KEY, pressure_key)
@@ -556,7 +593,7 @@ class SolutionStrategyEst(  # type: ignore
             )
 
         # Initialize time step and iterate values for local estimators.
-        for flux_name in ["total", self.wetting.name]:
+        for flux_name in ["total", "wetting_from_ff"]:
             pp.set_solution_values(
                 f"{flux_name}_R_estimate",
                 np.zeros(sd.num_cells),
@@ -631,7 +668,7 @@ class SolutionStrategyEst(  # type: ignore
                 f"{pressure_key}_{key}", pressure_values, g_data, time_step_index=0
             )
         for flux_name, key in itertools.product(
-            ["total", self.wetting.name],
+            ["total", "wetting_from_ff"],
             ["R_estimate", "F_estimate"],
         ):
             pp.shift_solution_values(
@@ -653,8 +690,7 @@ class DataSavingEst(DataSavingReconstruction):
     def _data_to_export(
         self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
     ) -> list[DataInput]:
-        """Append porosity and permeability to the exported data."""
-        # Get data from ``super()`` and append porosity and permeability.
+        """Append error estimates to the exported data."""
         data: list[DataInput] = super()._data_to_export(
             time_step_index=time_step_index,
             iterate_index=iterate_index,
@@ -668,7 +704,7 @@ class DataSavingEst(DataSavingReconstruction):
         ):
             g, g_data = self.mdg.subdomains(return_data=True)[0]
             for flux_name, est_name in itertools.product(
-                ["total", self.wetting.name], ["R_estimate", "F_estimate"]
+                ["total", "wetting_from_ff"], ["R_estimate", "F_estimate"]
             ):
                 data.append(
                     (
@@ -702,9 +738,9 @@ class DataSavingEst(DataSavingReconstruction):
 # ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
 # practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
 # the error.
-class TwoPhaseFlowWithErrorEstimate(  # type: ignore
+class TwoPhaseFlowErrorEstimate(  # type: ignore
     ErrorEstimateMixin,
     SolutionStrategyEst,
     DataSavingEst,
-    TwoPhaseFlowWithReconstruction,
+    TwoPhaseFlowReconstruction,
 ): ...  # type: ignore

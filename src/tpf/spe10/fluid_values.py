@@ -56,3 +56,7 @@ water.update(
 BHP: float = 4000 * PSI  # [psi], bottom hole pressure.
 INITIAL_PRESSURE: float = 6000 * PSI  # [psi], initial pressure.
 INITIAL_SATURATION: float = 0.3  # [-], initial saturation.
+PRODUCTION_WELL_SIZE: float = 100 * FEET
+"""Size of the production wells in the corner cells. The boundary in in vicinity of the
+corners is prescribed Dirichlet conditions corresponding to a production well, i.e.,
+fixed BHP."""

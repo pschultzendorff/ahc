@@ -147,8 +147,8 @@ params = {
     # HC params:
     "nonlinear_solver_statistics": SolverStatisticsHC,
     "nonlinear_solver": HCSolver,
-    "hc_max_iterations": 50,
-    "hc_min_lambda": 0.1,
+    "hc_max_iterations": 20,
+    "hc_min_lambda": 0.01,
     "hc_adaptive": False,
     # HC decay parameters.
     "hc_constant_decay": False,
@@ -209,7 +209,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
     )
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "homotopy continuation"
+        / "homotopy continuation_3_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
@@ -224,7 +224,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
         {
             # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
-                schedule=np.array([0, 10 * pp.DAY]),  # 5 days
+                schedule=np.array([0, 1.5 * pp.DAY]),  # 5 days
                 dt_init=0.5 * pp.DAY,  # Time step size in days.
                 constant_dt=True,
             ),
@@ -257,7 +257,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
     )
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "homotopy continuation"
+        / "homotopy continuation_3_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )

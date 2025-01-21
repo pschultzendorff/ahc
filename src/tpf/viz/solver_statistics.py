@@ -74,7 +74,60 @@ class SolverStatisticsTPF(pp.SolverStatistics):
 
 
 @dataclass
-class SolverStatisticsEst(SolverStatisticsTPF):
+class SolverStatisticsRec(SolverStatisticsTPF):
+
+    equilibrated_flux_mismatch: list[dict[str, float]] = field(default_factory=list)
+    """List of mismatches of equilibrated fluxes for each non-linear iteration."""
+
+    @typing.override
+    def log_error(
+        self,
+        nonlinear_increment_norm: Optional[float] = None,
+        residual_norm: Optional[float] = None,
+        **kwargs,
+    ) -> None:
+        if "equilibrated_flux_mismatch" in kwargs:
+            self.equilibrated_flux_mismatch.append(kwargs["equilibrated_flux_mismatch"])
+        else:
+            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
+
+    @typing.override
+    def reset(self) -> None:
+        """Reset the mismatch list."""
+        super().reset()
+        self.equilibrated_flux_mismatch.clear()
+
+    @typing.override
+    def save(self) -> None:
+        """Save the estimator statistics to a JSON file."""
+        # This calls ``pp.SolverStatistics.save``, which adds a new entry to the
+        # ``data`` dictionary that is found at ``self.path``.
+        super().save()
+        # Instead of creating a new entry, we load the already created entry and append.
+        if self.path is not None:
+            # Check if object exists and append to it
+            if self.path.exists():
+                with self.path.open("r") as file:
+                    data = json.load(file)
+            else:
+                data = {}
+
+            # Append data.
+            ind = len(data)
+            # Since data was stored and loaded as json, the keys have turned to strings.
+            data[str(ind)].update(
+                {
+                    "equilibrated_flux_mismatch": self.equilibrated_flux_mismatch,
+                }
+            )
+
+            # Save to file
+            with self.path.open("w") as file:
+                json.dump(data, file, indent=4)
+
+
+@dataclass
+class SolverStatisticsEst(SolverStatisticsRec):
     residual_and_flux_est: list[float] = field(default_factory=list)
     """List of residual and flux error estimates for each non-linear iteration."""
     nonconformity_est: list[dict[str, float]] = field(default_factory=list)
@@ -133,7 +186,7 @@ class SolverStatisticsEst(SolverStatisticsTPF):
 
 
 @dataclass
-class SolverStatisticsHC(SolverStatisticsTPF):
+class SolverStatisticsHC(SolverStatisticsRec):
     hc_lambda_fl: float = 1.0
     """Homotopy continuation lambda."""
     hc_lambda_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
