@@ -375,8 +375,6 @@ class CapPressConstants:
     """Second exponent for the van Genuchten model."""
     beta_g: float = 1.0
     """Scaling factor for the van Genuchten model."""
-    linear_param: float = 1.0
-    """Scaling factor for the linear model."""
 
     def __post_init__(self) -> None:
         if not self.is_cap_press_model(self.model):
@@ -456,10 +454,10 @@ class CapillaryPressure(TPFProtocol):
                 -1 / cap_press_constants.n_b
             )
         elif cap_press_constants.model == "linear":
-            cap_press_linear_param = pp.ad.Scalar(
-                cap_press_constants.linear_param, name="cap. press. linear param"
+            entry_pressure = pp.ad.Scalar(
+                cap_press_constants.entry_pressure, name="entry pressure"
             )
-            p_c = cap_press_linear_param * s_normalized
+            p_c = entry_pressure * s_normalized
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             p_c = (
@@ -511,7 +509,7 @@ class CapillaryPressure(TPFProtocol):
                 where=s_normalized != 0,
             )
         elif cap_press_constants.model == "linear":
-            p_c = cap_press_constants.linear_param * s_normalized
+            p_c = cap_press_constants.entry_pressure * s_normalized
         elif cap_press_constants.model == "van Genuchten":
             p_c = (
                 (
@@ -552,8 +550,8 @@ class CapillaryPressure(TPFProtocol):
                 * s_normalized ** pp.ad.Scalar(-1 / cap_press_constants.n_b - 1)
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
-            cap_press_linear_param = pp.ad.Scalar(cap_press_constants.linear_param)
-            return cap_press_linear_param * s_normalized_deriv
+            entry_pressure = pp.ad.Scalar(cap_press_constants.entry_pressure)
+            return entry_pressure * s_normalized_deriv
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             return (
@@ -614,10 +612,8 @@ class CapillaryPressure(TPFProtocol):
                 )
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
-            cap_press_linear_param = cap_press_constants.linear_param
-            return np.full_like(
-                s_normalized, cap_press_linear_param * s_normalized_deriv
-            )
+            entry_pressure = cap_press_constants.entry_pressure
+            return np.full_like(s_normalized, entry_pressure * s_normalized_deriv)
         elif cap_press_constants.model == "van Genuchten":
             return (
                 (1 / cap_press_constants.n_g - 1)

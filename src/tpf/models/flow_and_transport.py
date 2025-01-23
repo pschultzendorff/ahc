@@ -1223,6 +1223,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             iterate_index=0,
         )
         self.eval_secondary_variables()
+        self.nonlinear_solver_statistics.num_iteration += 1
 
     def eval_secondary_variables(self) -> None:
         """Evaluate and update secondary variables."""
@@ -1252,8 +1253,6 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             iterate_index=0,
             additive=False,
         )
-
-        self.nonlinear_solver_statistics.num_iteration += 1
 
     @typing.override
     def after_nonlinear_convergence(self) -> None:  # type: ignore

@@ -165,8 +165,8 @@ params = {
 
 cell_sizes: list[float] = [
     600 * FEET / 7.5,
-    # 600 * FEET / 15,
-    # 600 * FEET / 30,
+    600 * FEET / 15,
+    600 * FEET / 30,
 ]
 rel_perm_constants_list: list[dict[str, Any]] = [
     {"model": "linear", "limit": True},
@@ -230,7 +230,10 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
 # endregion
 
 # region PLOTTING
-fig, (ax1, ax2) = plt.subplots(2, 1)
+fig1, ax1 = plt.subplots()
+fig2, ax2 = plt.subplots()
+fig3, ax3 = plt.subplots()
+fig4, ax4 = plt.subplots()
 
 for i, (cell_size, rp_model, cp_model) in enumerate(
     itertools.product(cell_sizes, rel_perm_constants_list, cap_press_constants_list)
@@ -253,6 +256,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
     residual_and_flux_est: list[float] = []
     glob_nonconformity_est: list[float] = []
     compl_nonconformity_est: list[float] = []
+    global_energy_norm: list[float] = []
     times: list[float] = []
     time_deltas: list[float] = []
 
@@ -283,15 +287,15 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
             for iteration in time_step["equilibrated_flux_mismatch"]
         )
 
-        residual_and_flux_est.append(
-            time_step["residual_and_flux_est"][-1]  # / time_delta
-        )
+        residual_and_flux_est.append(time_step["residual_and_flux_est"][-1])
         glob_nonconformity_est.append(
-            time_step["nonconformity_est"][-1][GLOBAL_PRESSURE]  # / time_delta
+            time_step["nonconformity_est"][-1][GLOBAL_PRESSURE]
         )
         compl_nonconformity_est.append(
-            time_step["nonconformity_est"][-1][COMPLIMENTARY_PRESSURE]  # / time_delta
+            time_step["nonconformity_est"][-1][COMPLIMENTARY_PRESSURE]
         )
+        global_energy_norm.append(time_step["global_energy_norm"][-1])
+
     # ax.semilogy(
     #     time_steps,
     #     np.array(residual_and_flux_est),
@@ -314,6 +318,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         residual_and_flux_est.append(residual_and_flux_est[-1])
         glob_nonconformity_est.append(glob_nonconformity_est[-1])
         compl_nonconformity_est.append(compl_nonconformity_est[-1])
+        global_energy_norm.append(global_energy_norm[-1])
 
     ax1.semilogy(
         times,
@@ -335,6 +340,17 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         label=f"{filename} transport equation mismatch",
         marker="s",
     )
+    for name, est in zip(
+        ["Residual and flux", "NC1", "NC2"],
+        [residual_and_flux_est, glob_nonconformity_est, compl_nonconformity_est],
+    ):
+        ax3.semilogy(
+            times,
+            np.array(est) / np.array(global_energy_norm),
+            label=f"{filename} relative {name} estimator",
+            marker="s",
+        )
+    ax4.semilogy(times, np.array(global_energy_norm), marker="s", label=filename)
 
 ax1.set_xlabel("Time (s)")
 ax1.set_ylabel("Estimator")
@@ -346,7 +362,23 @@ ax2.set_ylabel("Mismatch")
 ax2.set_title(f"Flux equilibrations mismatch")
 ax2.legend()
 
-plt.show()
-fig.savefig(pathlib.Path(__file__).parent / "grid_convergence" / "convergence_plot.png")
+ax3.set_xlabel("Time (s)")
+ax3.set_ylabel("Relative error")
+ax3.set_title(f"Relative error estimators")
+ax3.legend()
+
+ax4.set_xlabel("Time (s)")
+ax4.set_ylabel("Global energy norm")
+ax4.set_title(f"Global energy")
+ax4.legend()
+
+fig1.savefig(pathlib.Path(__file__).parent / "grid_convergence" / "total_estimator.png")
+fig2.savefig(
+    pathlib.Path(__file__).parent / "grid_convergence" / "equilibration_mismatch.png"
+)
+fig3.savefig(
+    pathlib.Path(__file__).parent / "grid_convergence" / "relative_estimators.png"
+)
+fig4.savefig(pathlib.Path(__file__).parent / "grid_convergence" / "global_energy.png")
 
 # endregion

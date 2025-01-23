@@ -431,6 +431,7 @@ else:
             self,
             pressure_key: PRESSURE_KEY,
             flux_specifier: str = "",
+            prepare_simulation: bool = False,
         ) -> None:
             """Reconstruct pressure as elementwise P2 polynomials."""
             ...
@@ -448,6 +449,7 @@ else:
             self,
             flux_name: Literal["total", "wetting_from_ff", PHASENAME],
             flux_specifier: str = "",
+            prepare_simulation: bool = False,
         ) -> None:
             """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions."""
             ...
@@ -460,7 +462,7 @@ else:
             ...
 
         # SolutionStrategyReconstructionsMixin attributes and methods:
-        def eval_val_and_jac_fluxes(self) -> None:
+        def eval_val_and_jac_fluxes(self, prepare_simulation: bool = False) -> None:
             """Evaluate residual and Jacobian of fluxes to be equilibrated."""
             ...
 
@@ -471,8 +473,20 @@ else:
             """
             ...
 
-        def postprocess_solution(self, nonlinear_increment: np.ndarray) -> None:
+        def postprocess_solution(
+            self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
+        ) -> None:
             """Equilibrate fluxes and reconstruct pressures."""
+            ...
+
+        def local_energy_norm(self) -> None:
+            r"""Calculate the local in space and time energy norm of the numerical
+            solution."""
+            ...
+
+        def global_energy_norm(self) -> float:
+            r"""Calculate the global in space and local in time energy norm of the
+            numerical solution."""
             ...
 
     class EstimatesProtocol(Protocol):

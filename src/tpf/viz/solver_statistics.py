@@ -132,6 +132,8 @@ class SolverStatisticsEst(SolverStatisticsRec):
     """List of residual and flux error estimates for each non-linear iteration."""
     nonconformity_est: list[dict[str, float]] = field(default_factory=list)
     """List of nonconformity error estimates for each non-linear iteration."""
+    global_energy_norm: list[float] = field(default_factory=list)
+    """List of global energy norms for each non-linear iteration."""
 
     @typing.override
     def log_error(
@@ -140,11 +142,16 @@ class SolverStatisticsEst(SolverStatisticsRec):
         residual_norm: Optional[float] = None,
         **kwargs,
     ) -> None:
-        if "residual_and_flux_est" in kwargs and "nonconformity_est" in kwargs:
+        if (
+            "residual_and_flux_est" in kwargs
+            and "nonconformity_est" in kwargs
+            and "global_energy_norm" in kwargs
+        ):
             self.residual_and_flux_est.append(kwargs["residual_and_flux_est"])
             self.nonconformity_est.append(
                 kwargs["nonconformity_est"],
             )
+            self.global_energy_norm.append(kwargs["global_energy_norm"])
         else:
             super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
 
@@ -154,6 +161,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
         super().reset()
         self.residual_and_flux_est.clear()
         self.nonconformity_est.clear()
+        self.global_energy_norm.clear()
 
     @typing.override
     def save(self) -> None:
@@ -177,6 +185,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
                 {
                     "residual_and_flux_est": self.residual_and_flux_est,
                     "nonconformity_est": self.nonconformity_est,
+                    "global_energy_norm": self.global_energy_norm,
                 }
             )
 

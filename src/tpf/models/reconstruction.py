@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import logging
 import typing
 from typing import Any, Literal, Optional
@@ -124,6 +125,11 @@ class GlobalPressureMixin(TPFProtocol):
     ) -> None:
         """Evaluate the global or complimentary pressure field on the full domain and
         store it in the data dictionary.
+
+        Parameters:
+            pressure_key: Name of the pressure field to be evaluated.
+            prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
+                Stores values additionally for the time step.
 
         """
         if prepare_simulation:
@@ -299,10 +305,12 @@ class PressureReconstructionMixin(TPFProtocol):
         self,
         pressure_key: PRESSURE_KEY,
         flux_specifier: str = "",
+        prepare_simulation: bool = False,
     ) -> None:
         """Reconstruct pressure as elementwise P2 polynomials.
 
         Parameters:
+            pressure_key: Name of the pressure field to be reconstructed.
             flux_specifier: Specify the name of the flux field used to post-process the
                 pressure. Used, e.g., in homotopy continuation, where the fluxes used
                 are ``f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs"`` instead of
@@ -310,12 +318,19 @@ class PressureReconstructionMixin(TPFProtocol):
                 Gets appended between ``f"{flux_name}_flux"`` and ``"_RT0_coeffs"``,
                 i.e., the values ``f"{flux_name}_flux{flux_specifier}_RT0_coeffs"`` in
                 the data dir are accessed.
+            prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
+                Stores values additionally for the time step.
 
         Returns:
             None
 
         """
         logger.info(f"Reconstructing {pressure_key} pressure.")
+
+        if prepare_simulation:
+            time_step_index: Optional[int] = 0
+        else:
+            time_step_index = None
 
         g, g_data = self.mdg.subdomains(return_data=True)[0]
         bg, bg_data = self.mdg.boundaries(return_data=True)[0]
@@ -331,36 +346,41 @@ class PressureReconstructionMixin(TPFProtocol):
             )
             for phase in self.phases.values()
         }
-        if pressure_key == GLOBAL_PRESSURE:
-            coeffs_flux = pp.get_solution_values(
-                f"total_flux{flux_specifier}_RT0_coeffs", g_data, iterate_index=0
-            )
-        elif pressure_key == COMPLIMENTARY_PRESSURE:
-            coeffs_phase_fluxes: dict[str, np.ndarray] = {
-                phase.name: pp.get_solution_values(
-                    f"{phase.name}_flux{flux_specifier}_RT0_coeffs",
-                    g_data,
-                    iterate_index=0,
-                )
-                for phase in self.phases.values()
-            }
-            coeffs_flux = (
-                phase_mobilities[self.nonwetting.name][..., None]
-                * coeffs_phase_fluxes[self.wetting.name]
-                - phase_mobilities[self.wetting.name][..., None]
-                * coeffs_phase_fluxes[self.nonwetting.name]
-            )
+        total_mobility: np.ndarray = sum(phase_mobilities.values())
 
+        total_flux_coeffs: np.ndarray = pp.get_solution_values(
+            f"total_flux{flux_specifier}_RT0_coeffs", g_data, iterate_index=0
+        )
+
+        if pressure_key == GLOBAL_PRESSURE:
+            coeffs_flux: np.ndarray = total_flux_coeffs
+        elif pressure_key == COMPLIMENTARY_PRESSURE:
+            wetting_flux_coeffs: np.ndarray = pp.get_solution_values(
+                f"wetting_from_ff_flux{flux_specifier}_RT0_coeffs",
+                g_data,
+                iterate_index=0,
+            )
+            coeffs_flux = (
+                wetting_flux_coeffs
+                - (
+                    phase_mobilities[self.wetting.name][..., None]
+                    / total_mobility[..., None]
+                )
+                * total_flux_coeffs
+            )
+            pass
         # Multiply by inverse of the permeability and total mobility to obtain
         # pressure potential.
-        total_mobility: np.ndarray = sum(phase_mobilities.values())
         perm = g_data[pp.PARAMETERS][self.flux_key]["second_order_tensor"].values
 
         # Loop through all cells and compute the vector r.
         s = np.zeros((g.num_cells, 6))
         for ci in range(g.num_cells):
             # Local permeability tensor
-            K = perm[: g.dim, : g.dim, ci] * total_mobility[ci]
+            if pressure_key == GLOBAL_PRESSURE:
+                K = perm[: g.dim, : g.dim, ci] * total_mobility[ci]
+            else:
+                K = perm[: g.dim, : g.dim, ci]
             Kxx = K[0][0]
             Kxy = K[0][1]
             Kyy = K[1][1]
@@ -409,6 +429,7 @@ class PressureReconstructionMixin(TPFProtocol):
             f"{pressure_key}_postprocessed_coeffs",
             s,
             g_data,
+            time_step_index=time_step_index,
             iterate_index=0,
         )
 
@@ -542,6 +563,7 @@ class PressureReconstructionMixin(TPFProtocol):
                 f"{pressure_key}_reconstructed_{name}",
                 value,
                 g_data,
+                time_step_index=time_step_index,
                 iterate_index=0,
             )
 
@@ -582,12 +604,13 @@ class EquilibratedFluxMixin(TPFProtocol):
         # values when set by ``eval_additional_vars`` and hence we do not need to care
         # about bc values here.
         logger.info(f"Equilibrating {flux_name} flux.")
-        g, g_data = self.mdg.subdomains(return_data=True)[0]
+
+        g_data = self.mdg.subdomains(return_data=True)[0][1]
         val: np.ndarray = pp.get_solution_values(
-            f"{flux_name}_flux", g_data, iterate_index=0
+            f"{flux_name}_flux", g_data, iterate_index=1
         )
         jac: np.ndarray = pp.get_solution_values(
-            f"{flux_name}_flux_jacobian", g_data, iterate_index=0
+            f"{flux_name}_flux_jacobian", g_data, iterate_index=1
         )
 
         if nonlinear_increment is None:
@@ -626,13 +649,9 @@ class EquilibratedFluxMixin(TPFProtocol):
         self,
         flux_name: Literal["total", "wetting_from_ff", PHASENAME],
         flux_specifier: str = "",
+        prepare_simulation: bool = False,
     ) -> None:
         """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions.
-
-        Parameters:
-            mdg: pp.MixedDimensionalGrid
-                Mixed-dimensional grid for the problem.
-                flux_specifier: E.g., "_equilibrated" or "_wrt_goal_rel_perm".
 
         Note:
             The data dictionary of each node of the grid bucket will be updated with the
@@ -666,10 +685,24 @@ class EquilibratedFluxMixin(TPFProtocol):
             opposite side nodes to the face j. The function s(normal_j) = 1 if the
             signs of the local and global normals are the same, and -1 otherwise.
 
+        Parameters:
+            mdg: pp.MixedDimensionalGrid
+                Mixed-dimensional grid for the problem.
+            flux_name: Name of the flux field to be extended.
+            flux_specifier: E.g., "_equilibrated" or "_wrt_goal_rel_perm".
+            prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
+                Stores values additionally for the time step.
+
+
         """
         if self.params["grid_type"] != "simplex":
             raise ValueError("Not implemented for non-simplex grids.")
         logger.info(f"Extending {flux_name}{flux_specifier} flux to RT0 functions.")
+
+        if prepare_simulation:
+            time_step_index: Optional[int] = 0
+        else:
+            time_step_index = None
 
         # Only one domain is considered here.
         g, g_data = self.mdg.subdomains(return_data=True)[0]
@@ -708,6 +741,7 @@ class EquilibratedFluxMixin(TPFProtocol):
             f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
             coeffs,
             g_data,
+            time_step_index=time_step_index,
             iterate_index=0,
         )
 
@@ -859,18 +893,37 @@ class SolutionStrategyReconstruction(  # type: ignore
 
         # Initialize fluxes, global, and complimentary pressure from the initial data of
         # the problem.
+        self.eval_val_and_jac_fluxes(prepare_simulation=True)
         self.eval_additional_vars(prepare_simulation=True)
-        self.eval_val_and_jac_fluxes()
         self.set_boundary_pressures()
+        self.postprocess_solution(
+            np.zeros(self.mdg.subdomains()[0].num_cells * 2), prepare_simulation=True
+        )
 
     @typing.override
     def before_nonlinear_iteration(self) -> None:
-        super().before_nonlinear_iteration()
-        self.eval_val_and_jac_fluxes()
+        """
+
+        Note: In comparison to the base implementation, the pressure potentials are not
+        updated here, but in :meth:`after_nonlinear_iteration`. This is done s.t. the
+        total and wetting flux needed for flux equilibration and pressure reconstruction
+        are evaluated with the correct upwind values without too much hassle. Similarly,
+        the operators are rediscretized after the nonlinear iteration.
+
+        """
+        pass
 
     @typing.override
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
         super().after_nonlinear_iteration(nonlinear_increment)
+        # Update pressure potentials.
+        self.set_discretization_parameters()
+        # Re-discretize nonlinear terms. If none have been added to
+        # self.nonlinear_discretizations, this will be a no-op.
+        self.rediscretize()
+
+        # Now, the fluxes can be evaluated with the new upwinded mobilities.
+        self.eval_val_and_jac_fluxes()
         self.eval_additional_vars()
         self.postprocess_solution(nonlinear_increment)
 
@@ -898,19 +951,27 @@ class SolutionStrategyReconstruction(  # type: ignore
         super().after_nonlinear_convergence()
         # Shift reconstructions to the next time step.
         g_data = self.mdg.subdomains(return_data=True)[0][1]
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+        for pressure_key, specifier in itertools.product(
+            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
+            ["postprocessed_coeffs", "reconstructed_coeffs"],
+        ):
             pp.shift_solution_values(
-                pressure_key,
+                f"{pressure_key}_{specifier}",
                 g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             values: np.ndarray = pp.get_solution_values(
-                pressure_key, g_data, iterate_index=0
+                f"{pressure_key}_{specifier}", g_data, iterate_index=0
             )
-            pp.set_solution_values(pressure_key, values, g_data, time_step_index=0)
+            pp.set_solution_values(
+                f"{pressure_key}_{specifier}",
+                values,
+                g_data,
+                time_step_index=0,
+            )
 
-    def eval_val_and_jac_fluxes(self) -> None:
+    def eval_val_and_jac_fluxes(self, prepare_simulation: bool = False) -> None:
         """Evaluate residual and Jacobian of fluxes to be equilibrated.
 
         Note: This is separated from ``eval_additional_vars`` and called **before** the
@@ -921,6 +982,10 @@ class SolutionStrategyReconstruction(  # type: ignore
         - 'total_flux_val', 'total_flux_jac': Total flux value and Jacobian.
         - 'wetting_from_ff_flux_val','wetting_from_ff_flux_jac': Wetting flux value and
         Jacobian.
+
+        Parameters:
+            prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
+                If True, values are additionally saved at `iterate_index = 1`.
 
         """
         g, g_data = self.mdg.subdomains(return_data=True)[0]
@@ -933,63 +998,52 @@ class SolutionStrategyReconstruction(  # type: ignore
         column_projection = self.equation_system.projection_to(
             [self.primary_saturation_var, self.primary_pressure_var]
         ).transpose()
-
-        # Total flux for equilibration.
-        t_flux: pp.ad.AdArray = self.total_flux(g).value_and_jacobian(
-            self.equation_system
-        )
-        pp.shift_solution_values(
-            "total_flux",
-            g_data,
-            pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
-        pp.set_solution_values(
-            "total_flux",
-            t_flux.val,
-            g_data,
-            iterate_index=0,
-        )
-        pp.shift_solution_values(
-            "total_flux_jacobian",
-            g_data,
-            pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
-        pp.set_solution_values(
-            "total_flux_jacobian",
-            t_flux.jac * column_projection,
-            g_data,
-            iterate_index=0,
-        )
-        # Wetting flux from fractional flow formulation for equilibration.
-        w_flux_from_ff: pp.ad.AdArray = self.wetting_flux_from_fractional_flow(
-            g
-        ).value_and_jacobian(self.equation_system)
-        pp.shift_solution_values(
-            f"wetting_from_ff_flux",
-            g_data,
-            pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
-        pp.set_solution_values(
-            f"wetting_from_ff_flux",
-            w_flux_from_ff.val,
-            g_data,
-            iterate_index=0,
-        )
-        pp.shift_solution_values(
-            f"wetting_from_ff_flux_jacobian",
-            g_data,
-            pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
-        pp.set_solution_values(
-            f"wetting_from_ff_flux_jacobian",
-            w_flux_from_ff.jac * column_projection,
-            g_data,
-            iterate_index=0,
-        )
+        for flux_name in ["total", "wetting_from_ff"]:
+            if flux_name == "total":
+                flux: pp.ad.AdArray = self.total_flux(g).value_and_jacobian(
+                    self.equation_system
+                )
+            elif flux_name == "wetting_from_ff":
+                flux: pp.ad.AdArray = self.wetting_flux_from_fractional_flow(
+                    g
+                ).value_and_jacobian(self.equation_system)
+            pp.shift_solution_values(
+                f"{flux_name}_flux",
+                g_data,
+                pp.ITERATE_SOLUTIONS,
+                max_index=len(self.iterate_indices),
+            )
+            pp.set_solution_values(
+                f"{flux_name}_flux",
+                flux.val,
+                g_data,
+                iterate_index=0,
+            )
+            pp.shift_solution_values(
+                f"{flux_name}_flux_jacobian",
+                g_data,
+                pp.ITERATE_SOLUTIONS,
+                max_index=len(self.iterate_indices),
+            )
+            pp.set_solution_values(
+                f"{flux_name}_flux_jacobian",
+                flux.jac * column_projection,
+                g_data,
+                iterate_index=0,
+            )
+        if prepare_simulation:
+            pp.set_solution_values(
+                flux_name,
+                flux.val,
+                g_data,
+                iterate_index=0,
+            )
+            pp.set_solution_values(
+                f"{flux_name}_jacobian",
+                flux.jac * column_projection,
+                g_data,
+                iterate_index=1,
+            )
 
     @typing.override
     def eval_additional_vars(self, prepare_simulation: bool = False) -> None:
@@ -1012,7 +1066,7 @@ class SolutionStrategyReconstruction(  # type: ignore
         else:
             time_step_index = None
 
-        g, g_data = self.mdg.subdomains(return_data=True)[0]
+        g_data = self.mdg.subdomains(return_data=True)[0][1]
 
         # Save FV P0 pressures.
         self.eval_glob_compl_pressure_on_domain(
@@ -1021,25 +1075,6 @@ class SolutionStrategyReconstruction(  # type: ignore
         self.eval_glob_compl_pressure_on_domain(
             COMPLIMENTARY_PRESSURE, prepare_simulation=prepare_simulation
         )
-
-        # Phase fluxes for pressure reconstruction.
-        for phase in self.phases.values():
-            p_flux: pp.ad.AdArray = self.phase_flux(g, phase).value_and_jacobian(
-                self.equation_system,
-            )
-            pp.shift_solution_values(
-                f"{phase.name}_flux",
-                g_data,
-                pp.ITERATE_SOLUTIONS,
-                max_index=len(self.iterate_indices),
-            )
-            pp.set_solution_values(
-                f"{phase.name}_flux",
-                p_flux.val,
-                g_data,
-                time_step_index=time_step_index,
-                iterate_index=0,
-            )
 
         # TODO When we have buoyancy terms, the complimentary flux must NOT include
         # gravity flux!!! Thus, we need to calculate it in a slightly more
@@ -1062,7 +1097,9 @@ class SolutionStrategyReconstruction(  # type: ignore
                 iterate_index=0,
             )
 
-    def postprocess_solution(self, nonlinear_increment: np.ndarray) -> None:
+    def postprocess_solution(
+        self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
+    ) -> None:
         """Equilibrate fluxes and reconstruct pressures."""
         for flux_name in ["total", "wetting_from_ff"]:
             # Satisfy mypy.
@@ -1070,26 +1107,28 @@ class SolutionStrategyReconstruction(  # type: ignore
 
             # Calculate RT0 coefficients for the FV fluxes.
             # TODO Do we actually need this?
-            self.extend_fv_fluxes(flux_name)
-            # Calculate RT0 coefficients for the equilibrated fluxes.
-            # In ``nonlinear_increment``, the saturation variable comes first, then the
-            # pressure variable, just as required by ``equilibrate_flux_during_Newton``.
-            self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
-            self.extend_fv_fluxes(flux_name, flux_specifier="_equilibrated")
+            self.extend_fv_fluxes(flux_name, prepare_simulation=prepare_simulation)
 
-        # NOTE The wetting and nonwetting phase fluxes are only used to post-process the
-        # global and complimentary pressures and do NOT need to be equilibrated.
-        for flux_name in [self.wetting.name, self.nonwetting.name]:
-            # Satisfy mypy.
-            flux_name = typing.cast(PHASENAME, flux_name)
-
-            self.extend_fv_fluxes(flux_name)
+            # Equilibration requires at least one Newton iteration.
+            if not prepare_simulation:
+                # Calculate RT0 coefficients for the equilibrated fluxes.
+                # In ``nonlinear_increment``, the saturation variable comes first, then
+                # the pressure variable, just as required by
+                # ``equilibrate_flux_during_Newton``.
+                self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
+                self.extend_fv_fluxes(
+                    flux_name,
+                    flux_specifier="_equilibrated",
+                    prepare_simulation=prepare_simulation,
+                )
 
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             # Satisfy mypy.
             pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
 
-            self.reconstruct_pressure_vohralik(pressure_key)
+            self.reconstruct_pressure_vohralik(
+                pressure_key, prepare_simulation=prepare_simulation
+            )
 
 
 def r2c(array: np.ndarray) -> np.ndarray:

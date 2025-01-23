@@ -250,16 +250,12 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
             # Calculate local estimate.
             self.local_hc_est(flux_name)
             # Load spatial integral from current time step.
-            integral_C_new: Integral = Integral(
-                pp.get_solution_values(
-                    f"{flux_name}_C_estimate", g_data, iterate_index=0
-                )
+            integral_C_new: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_C_estimate", g_data, iterate_index=0
             )
             # Load spatial integral from previous time step.
-            integral_C_old: Integral = Integral(
-                pp.get_solution_values(
-                    f"{flux_name}_C_estimate", g_data, time_step_index=0
-                )
+            integral_C_old: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_C_estimate", g_data, time_step_index=0
             )
             # Calculate global values at current and previous time step.
             # NOTE The values stored were the squares of the elementwise norms, hence we
@@ -270,7 +266,6 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
             estimators[flux_name] = (
                 self.time_manager.dt / 2 * (global_integral_new + global_integral_old)
             ) ** (1 / 2)
-        # FIXME Scale by interval length!!!
         logger.info(
             f"Global continuation error estimate: {3 * sum(estimators.values())}"
         )
@@ -286,16 +281,12 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
             # Calculate local estimate.
             self.local_linearization_est(flux_name)
             # Load spatial integral from current time step.
-            integral_L_new: Integral = Integral(
-                pp.get_solution_values(
-                    f"{flux_name}_L_estimate", g_data, iterate_index=0
-                )
+            integral_L_new: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_L_estimate", g_data, iterate_index=0
             )
             # Load spatial integral from previous time step.
-            integral_L_old: Integral = Integral(
-                pp.get_solution_values(
-                    f"{flux_name}_L_estimate", g_data, time_step_index=0
-                )
+            integral_L_old: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_L_estimate", g_data, time_step_index=0
             )
             # Calculate global values at current and previous time step.
             # NOTE The values stored were the squares of the elementwise norms, hence we
@@ -306,7 +297,6 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
             estimators[flux_name] = (
                 self.time_manager.dt / 2 * (global_integral_new + global_integral_old)
             ) ** (1 / 2)
-        # FIXME Scale by interval length!!!
         logger.info(
             f"Global linearization error estimate: {3 * sum(estimators.values())}"
         )
@@ -340,16 +330,12 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
                 # Calculate local estimates.
                 self.local_residual_est(flux_name)
                 # Load spatial integrals from current time step.
-                integral_R_new: Integral = Integral(
-                    pp.get_solution_values(
-                        f"{flux_name}_R_estimate", g_data, iterate_index=0
-                    )
+                integral_R_new: np.ndarray = pp.get_solution_values(
+                    f"{flux_name}_R_estimate", g_data, iterate_index=0
                 )
                 # Load spatial integrals from previous time step.
-                integral_R_old: Integral = Integral(
-                    pp.get_solution_values(
-                        f"{flux_name}_R_estimate", g_data, time_step_index=0
-                    )
+                integral_R_old: np.ndarray = pp.get_solution_values(
+                    f"{flux_name}_R_estimate", g_data, time_step_index=0
                 )
                 # Calculate global values at current and previous time step.
                 # NOTE The values stored were the squares of the elementwise norms, hence we
@@ -362,9 +348,20 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
                     / 2
                     * (global_integral_new + global_integral_old)
                 ) ** (1 / 2)
-            # FIXME Scale by interval length!!!
             logger.info(f"Global residual error estimate: {sum(estimators.values())}")
             return sum(estimators.values())
+
+    def relative_global_discretization_est(self) -> float:
+        """Return relative global discretization error estimate."""
+        return self.global_discretization_est() / self.global_energy_norm()
+
+    def relative_global_hc_est(self) -> float:
+        """Return relative global homotopy continuation error estimate."""
+        return self.global_hc_est() / self.global_energy_norm()
+
+    def relative_global_linearization_est(self) -> float:
+        """Return relative global linearization error estimate."""
+        return self.global_linearization_est() / self.global_energy_norm()
 
     def total_est(self) -> float:
         """Return total error estimate, consisting of discretization, homotopy
@@ -495,37 +492,57 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
 
         # Shift reconstructions and estimates to the next time step.
         g_data = self.mdg.subdomains(return_data=True)[0][1]
-        for pressure_key, key in itertools.product(
+        for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["", "_NC_estimate"],
+            ["postprocessed_coeffs", "reconstructed_coeffs", "NC_estimate"],
         ):
             pp.shift_solution_values(
-                f"{pressure_key}_{key}",
+                f"{pressure_key}_{specifier}",
                 g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             pressure_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{key}", g_data, hc_index=0
+                f"{pressure_key}_{specifier}", g_data, hc_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{key}", pressure_values, g_data, time_step_index=0
+                f"{pressure_key}_{specifier}",
+                pressure_values,
+                g_data,
+                time_step_index=0,
             )
-        for flux_name, key in itertools.product(
+        for flux_name, estimate_name in itertools.product(
             ["total", "wetting_from_ff"],
             ["R_estimate", "F_estimate", "C_estimate", "L_estimate"],
         ):
             pp.shift_solution_values(
-                f"{flux_name}_{key}",
+                f"{flux_name}_{estimate_name}",
                 g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             flux_values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{key}", g_data, hc_index=0
+                f"{flux_name}_{estimate_name}", g_data, hc_index=0
             )
             pp.set_solution_values(
-                f"{flux_name}_{key}", flux_values, g_data, time_step_index=0
+                f"{flux_name}_{estimate_name}", flux_values, g_data, time_step_index=0
+            )
+        for energy_norm_term in [
+            "energy_norm_saturation_part",
+            "energy_norm_global_pressure_part",
+            "energy_norm_complimentary_pressure_part",
+        ]:
+            pp.shift_solution_values(
+                energy_norm_term,
+                g_data,
+                pp.TIME_STEP_SOLUTIONS,
+                len(self.time_step_indices),
+            )
+            local_term: np.ndarray = pp.get_solution_values(
+                energy_norm_term, g_data, hc_index=0
+            )
+            pp.set_solution_values(
+                energy_norm_term, local_term, g_data, time_step_index=0
             )
 
     def after_hc_failure(self) -> None:
@@ -730,38 +747,53 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
 
         # Reconstructions and estimates.
         g_data = self.mdg.subdomains(return_data=True)[0][1]
-        for pressure_key, key in itertools.product(
+        for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["", "_NC_estimate"],
+            ["postprocessed_coeffs", "reconstructed_coeffs", "NC_estimate"],
         ):
             pp.shift_solution_values(
-                f"{pressure_key}_{key}",
+                f"{pressure_key}_{specifier}",
                 g_data,
                 pp.HC_ITERATE_SOLUTIONS,
                 len(self.hc_indices),
             )
             pressure_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}{key}", g_data, iterate_index=0
+                f"{pressure_key}_{specifier}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{key}", pressure_values, g_data, hc_index=0
+                f"{pressure_key}_{specifier}", pressure_values, g_data, hc_index=0
             )
-        for flux_name, key in itertools.product(
+        for flux_name, estimate_name in itertools.product(
             ["total", "wetting_from_ff"],
             ["R_estimate", "F_estimate", "C_estimate", "L_estimate"],
         ):
             pp.shift_solution_values(
-                f"{flux_name}_{key}",
+                f"{flux_name}_{estimate_name}",
                 g_data,
                 pp.HC_ITERATE_SOLUTIONS,
                 len(self.hc_indices),
             )
             flux_values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{key}", g_data, iterate_index=0
+                f"{flux_name}_{estimate_name}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{flux_name}_{key}", flux_values, g_data, hc_index=0
+                f"{flux_name}_{estimate_name}", flux_values, g_data, hc_index=0
             )
+        for energy_norm_term in [
+            "energy_norm_saturation_part",
+            "energy_norm_global_pressure_part",
+            "energy_norm_complimentary_pressure_part",
+        ]:
+            pp.shift_solution_values(
+                energy_norm_term,
+                g_data,
+                pp.HC_ITERATE_SOLUTIONS,
+                len(self.hc_indices),
+            )
+            local_term: np.ndarray = pp.get_solution_values(
+                energy_norm_term, g_data, iterate_index=0
+            )
+            pp.set_solution_values(energy_norm_term, local_term, g_data, hc_index=0)
 
         # Adapt decay rate based on number of nonlinear iterations.
         self.compute_hc_decay(
