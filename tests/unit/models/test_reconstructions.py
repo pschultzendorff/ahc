@@ -3,18 +3,43 @@ import pytest
 from tpf.models.reconstruction import EquilibratedFluxMixin, PressureReconstructionMixin
 
 
-def test_reconstruction():
-    """Check if mass conservation is satisfied on a cell basis, in order to do
-    this, we check on a local basis, if the divergence of the flux equals
-    the sum of internal and external source terms
+class TestPressureReconstruction(PressureReconstructionMixin):
+    def test_integral_of_postprocessed_pressures(self):
+        # Create a mock grid and pressure values
+        grid = self.create_mock_grid()
+        cellwise_pressure = np.random.rand(grid.num_cells)
 
-    """
-    full_flux_local_div = (sign_normals_cell * flux[faces_cell]).sum(axis=1)
-    external_src = d[pp.PARAMETERS][self.kw]["source"]
-    np.testing.assert_allclose(
-        full_flux_local_div,
-        external_src + mortar_jump,
-        rtol=1e-6,
-        atol=1e-3,
-        err_msg="Error estimates only valid for local mass-conservative methods.",
-    )
+        # Perform pressure reconstruction
+        postprocessed_pressure = self.reconstruct_pressure_vohralik(
+            grid, cellwise_pressure
+        )
+
+        # Compute integrals of the postprocessed pressures
+        integral_postprocessed_pressure = (
+            self.compute_integral_of_postprocessed_pressures(
+                grid, postprocessed_pressure
+            )
+        )
+
+        # Check if the integrals equal the cellwise constant pressure values
+        np.testing.assert_allclose(
+            integral_postprocessed_pressure, cellwise_pressure, rtol=1e-5
+        )
+
+    def create_mock_grid(self):
+        # Create a mock grid for testing purposes
+        class MockGrid:
+            def __init__(self):
+                self.num_cells = 10
+                self.cell_volumes = np.ones(self.num_cells)
+
+        return MockGrid()
+
+    def compute_integral_of_postprocessed_pressures(self, grid, postprocessed_pressure):
+        # Compute the integral of the postprocessed pressures
+        return np.sum(postprocessed_pressure * grid.cell_volumes, axis=1)
+
+
+# Run the test
+if __name__ == "__main__":
+    pytest.main([__file__])

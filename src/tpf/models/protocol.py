@@ -82,6 +82,11 @@ else:
 
         nonlinear_solver_statistics: SolverStatisticsTPF
 
+        @property
+        def uses_hc(self) -> bool:
+            """"""
+            ...
+
         def normalize_saturation(
             self,
             saturation: pp.ad.Operator,
@@ -313,11 +318,6 @@ else:
             ...
 
         @property
-        def uses_hc(self) -> bool:
-            """"""
-            ...
-
-        @property
         def hc_indices(self) -> list[int]:
             """"""
             ...
@@ -447,7 +447,12 @@ else:
 
         def extend_fv_fluxes(
             self,
-            flux_name: Literal["total", "wetting_from_ff", PHASENAME],
+            flux_name: Literal[
+                "total",
+                "wetting_from_ff",
+                "total_by_t_mobility",
+                "total_times_fractional_flow",
+            ],
             flux_specifier: str = "",
             prepare_simulation: bool = False,
         ) -> None:
@@ -543,6 +548,12 @@ else:
             ...
 
     class DataSavingMixinExtendedProtocol(DataSavingProtocol):
+
+        def data_to_export_iteration(
+            self,
+        ) -> list[DataInput]:
+            """Export data after nonlinear iteration."""
+            ...
 
         def _data_to_export(
             self,

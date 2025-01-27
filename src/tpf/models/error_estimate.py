@@ -490,10 +490,29 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         saturation_term: Integral = Integral(np.zeros(g.num_cells))
 
         # Global pressure term:
+        # Note that the postprocessing of the pressure is done
+        # s.t. :math:`\kappa \lambda_t \nabla P = \bm{F}_t` at the edges. Instead of
+        # integrating the pressure potential times total (upwinded) mobility times
+        # permeability, we integrate the flux directly.
+        # total_flux_coeffs: np.ndarray = pp.get_solution_values(
+        #     f"total_flux_RT0_coeffs", g_data, iterate_index=0
+        # )
+        # global_pressure_term: Integral = Integral(
+        #     2 * total_flux_coeffs[..., 0] * g.cell_volumes
+        # )
         global_pressure_coeffs: np.ndarray = pp.get_solution_values(
             f"{GLOBAL_PRESSURE}_postprocessed_coeffs", g_data, iterate_index=0
         )
         perm: np.ndarray | dict[str, np.ndarray] = self.permeability(g)
+        rel_perms: dict[str, np.ndarray] = {}
+        for phase in self.phases.values():
+            rel_perms[phase.name] = self.rel_perm(self.wetting.s, phase).value(
+                self.equation_system
+            )
+        total_mobility: np.ndarray = (
+            rel_perms[self.wetting.name] / self.wetting.viscosity
+            + rel_perms[self.nonwetting.name] / self.nonwetting.viscosity
+        )
 
         def integrand_1(
             x: np.ndarray,
@@ -520,9 +539,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             )
             # Different treatment for scalar and tensor permeabilities.
             if isinstance(perm, np.ndarray):
-                pressure_potential *= perm[None, :, None] ** (1 / 2)
+                pressure_potential *= perm[None, :, None]  # ** (1 / 2)
             elif len(perm) == 1:
-                pressure_potential *= perm["kxx"][None, :, None] ** (1 / 2)
+                pressure_potential *= perm["kxx"][None, :, None]  # ** (1 / 2)
             elif len(perm) == 2:
                 # TODO Fix this for tensor permeabilities.
                 # Perm has form ``{"kxx": np.ndarray, "kyy": np.ndarray, ...}``.
@@ -538,6 +557,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                     "Permeability must be scalar or tensor with zero"
                     + " values off the diagonal."
                 )
+            pressure_potential *= total_mobility[None, :, None]  # ** (1 / 2)
             return pressure_potential[..., 0] ** 2 + pressure_potential[..., 1] ** 2
 
         global_pressure_term: Integral = self.quadrature_estimate.integrate(
@@ -547,35 +567,65 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             recalc_volumes=False,
         )
 
-        complimentary_pressure_coeffs: np.ndarray = pp.get_solution_values(
-            f"{COMPLIMENTARY_PRESSURE}_postprocessed_coeffs", g_data, iterate_index=0
-        )
+        # Complimentary pressure term.
+        # complimentary_pressure_coeffs: np.ndarray = pp.get_solution_values(
+        #     f"{COMPLIMENTARY_PRESSURE}_postprocessed_coeffs", g_data, iterate_index=0
+        # )
 
-        def integrand_2(
-            x: np.ndarray,
-        ) -> np.ndarray:
-            r"""
-            Returns:
-                integrand: :math:`Q(x)^2`.
+        # def integrand_2(
+        #     x: np.ndarray,
+        # ) -> np.ndarray:
+        #     r"""
+        #     Returns:
+        #         integrand: :math:`Q(x)^2`.
 
-            """
-            nonlocal complimentary_pressure_coeffs
-            integrand_squared: np.ndarray = (
-                complimentary_pressure_coeffs[..., 0] * x[..., 0] ** 2
-                + complimentary_pressure_coeffs[..., 1] * x[..., 0] * x[..., 1]
-                + complimentary_pressure_coeffs[..., 2] * x[..., 0]
-                + complimentary_pressure_coeffs[..., 3] * x[..., 1] ** 2
-                + complimentary_pressure_coeffs[..., 4] * x[..., 1]
-                + complimentary_pressure_coeffs[..., 5]
-            )
-            return integrand_squared**2
+        #     """
+        #     nonlocal complimentary_pressure_coeffs
+        #     integrand_squareroot: np.ndarray = (
+        #         complimentary_pressure_coeffs[..., 0] * x[..., 0] ** 2
+        #         + complimentary_pressure_coeffs[..., 1] * x[..., 0] * x[..., 1]
+        #         + complimentary_pressure_coeffs[..., 2] * x[..., 0]
+        #         + complimentary_pressure_coeffs[..., 3] * x[..., 1] ** 2
+        #         + complimentary_pressure_coeffs[..., 4] * x[..., 1]
+        #         + complimentary_pressure_coeffs[..., 5]
+        #     )
+        #     return integrand_squareroot**2
 
-        complimentary_pressure_term: Integral = self.quadrature_estimate.integrate(
-            integrand_2,
-            self.quadpy_elements,
-            recalc_points=False,
-            recalc_volumes=False,
-        )
+        # complimentary_pressure_term: Integral = self.quadrature_estimate.integrate(
+        #     integrand_2,
+        #     self.quadpy_elements,
+        #     recalc_points=False,
+        #     recalc_volumes=False,
+        # )
+
+        # def integrand_3(
+        #     x: np.ndarray,
+        # ) -> np.ndarray:
+        #     r"""
+        #     Returns:
+        #         integrand: :math:`Q(x)^2`.
+
+        #     """
+        #     nonlocal complimentary_pressure_coeffs
+        #     integrand_squared: np.ndarray = (
+        #         complimentary_pressure_coeffs[..., 0] * x[..., 0] ** 2
+        #         + complimentary_pressure_coeffs[..., 1] * x[..., 0] * x[..., 1]
+        #         + complimentary_pressure_coeffs[..., 2] * x[..., 0]
+        #         + complimentary_pressure_coeffs[..., 3] * x[..., 1] ** 2
+        #         + complimentary_pressure_coeffs[..., 4] * x[..., 1]
+        #         + complimentary_pressure_coeffs[..., 5]
+        #     )
+        #     return integrand_squared
+
+        # complimentary_pressure_term_not_squared: Integral = (
+        #     self.quadrature_estimate.integrate(
+        #         integrand_3,
+        #         self.quadpy_elements,
+        #         recalc_points=False,
+        #         recalc_volumes=False,
+        #     )
+        # )
+        # pass
         # # Complimentary pressure term. The pressure is postprocessed from an elementwise
         # # constant form s.t. its cellwise integral equals the constant term.
         # complimentary_pressure: np.ndarray = pp.get_solution_values(
@@ -584,7 +634,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # complimentary_pressure_term: Integral = Integral(complimentary_pressure ** 2)
 
         # FIXME This is just while the term is too high.
-        # complimentary_pressure_term = Integral(np.zeros(g.num_cells))
+        complimentary_pressure_term = Integral(np.zeros(g.num_cells))
 
         for name, term in zip(
             [
@@ -611,7 +661,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         r"""Calculate the global in space and local in time energy norm of the numerical
         solution.
 
-        The energy norm is defined as in [Cancès, C., Pop, I. & Vohralík, M. An a
+        The energy norm is defined similar to [Cancès, C., Pop, I. & Vohralík, M. An a
         posteriori  error estimate for vertex-centered finite volume discretizations of
         immiscible incompressible two-phase flow. Math. Comp. 83, 153–188 (2014).]
 
@@ -624,7 +674,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         Here,
             .. math::
                 \|v\|_{H^1_0(\Omega)} :=
-                \left{\int_\Omega |\kappa^{1/2} \nabla v|^2\right}^{1/2}
+                \left{\int_\Omega |\kappa^{1/2} \lambda_t \nabla v|^2\right}^{1/2}
 
         is the energy norm equivalent to the :math:`H^1` norm due to homogeneous
         Dirichlet boundary conditions and positive-definiteness and symmetry of
@@ -865,6 +915,24 @@ class DataSavingEst(DataSavingReconstruction):
                         ),
                     )
                 )
+            for energy_norm_term in [
+                "energy_norm_saturation_part",
+                "energy_norm_global_pressure_part",
+                "energy_norm_complimentary_pressure_part",
+            ]:
+                data.append(
+                    (
+                        g,
+                        energy_norm_term,
+                        pp.get_solution_values(
+                            energy_norm_term,
+                            g_data,
+                            time_step_index=time_step_index,
+                            iterate_index=iterate_index,
+                        ),
+                    )
+                )
+
         return data
 
 

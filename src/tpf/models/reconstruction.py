@@ -188,7 +188,7 @@ class GlobalPressureMixin(TPFProtocol):
         """
         intervals = np.linspace(s_0, s_1, 2)[..., None]
 
-        def func(s: np.ndarray) -> np.ndarray:
+        def integrand(s: np.ndarray) -> np.ndarray:
             """Note: We cannot use ``two_phase_flow.DarcyFluxes.phase_mobility`` and
             ``two_phase_flow.DarcyFluxes.total_mobility`` here, because they require
             upwinding.
@@ -203,7 +203,7 @@ class GlobalPressureMixin(TPFProtocol):
             t_mobility: np.ndarray = w_mobility + n_mobility
             return w_mobility / t_mobility * self.cap_press_deriv_np(s)
 
-        integral: Integral = self.quadrature_1d.integrate(func, intervals)
+        integral: Integral = self.quadrature_1d.integrate(integrand, intervals)
         return integral.elementwise[:, 0]
 
     def complimentary_pressure_integral_part(
@@ -234,7 +234,7 @@ class GlobalPressureMixin(TPFProtocol):
         """
         intervals = np.linspace(s_0, s_1, 2)[..., None]
 
-        def func(s: np.ndarray) -> np.ndarray:
+        def integrand(s: np.ndarray) -> np.ndarray:
             """Note: We cannot use ``two_phase_flow.DarcyFluxes.phase_mobility`` and
             ``two_phase_flow.DarcyFluxes.total_mobility`` here, because they require
             upwinding.
@@ -247,12 +247,9 @@ class GlobalPressureMixin(TPFProtocol):
                 self.rel_perm_np(s, self.nonwetting) / self.nonwetting.viscosity
             )
             t_mobility: np.ndarray = w_mobility + n_mobility
-            p_c: np.ndarray = (
-                w_mobility * n_mobility / t_mobility * self.cap_press_deriv_np(s)
-            )
-            return p_c
+            return w_mobility * n_mobility / t_mobility * self.cap_press_deriv_np(s)
 
-        integral: Integral = self.quadrature_1d.integrate(func, intervals)
+        integral: Integral = self.quadrature_1d.integrate(integrand, intervals)
         return -1 * integral.elementwise[..., 0]
 
     def set_boundary_pressures(self) -> None:
@@ -340,35 +337,22 @@ class PressureReconstructionMixin(TPFProtocol):
         assert p_cc.size == g.num_cells
 
         # Retrieve RT0 flux coefficients.
-        phase_mobilities: dict[str, np.ndarray] = {
-            phase.name: pp.get_solution_values(
-                f"{phase.name}_mobility", g_data, iterate_index=0
-            )
-            for phase in self.phases.values()
-        }
-        total_mobility: np.ndarray = sum(phase_mobilities.values())
-
-        total_flux_coeffs: np.ndarray = pp.get_solution_values(
-            f"total_flux{flux_specifier}_RT0_coeffs", g_data, iterate_index=0
-        )
-
         if pressure_key == GLOBAL_PRESSURE:
-            coeffs_flux: np.ndarray = total_flux_coeffs
+            coeffs_flux: np.ndarray = pp.get_solution_values(
+                f"total_by_t_mobility_flux{flux_specifier}_RT0_coeffs",
+                g_data,
+                iterate_index=0,
+            )
         elif pressure_key == COMPLIMENTARY_PRESSURE:
-            wetting_flux_coeffs: np.ndarray = pp.get_solution_values(
+            coeffs_flux: np.ndarray = pp.get_solution_values(
+                f"total_times_fractional_flow_flux{flux_specifier}_RT0_coeffs",
+                g_data,
+                iterate_index=0,
+            ) - pp.get_solution_values(
                 f"wetting_from_ff_flux{flux_specifier}_RT0_coeffs",
                 g_data,
                 iterate_index=0,
             )
-            coeffs_flux = (
-                wetting_flux_coeffs
-                - (
-                    phase_mobilities[self.wetting.name][..., None]
-                    / total_mobility[..., None]
-                )
-                * total_flux_coeffs
-            )
-            pass
         # Multiply by inverse of the permeability and total mobility to obtain
         # pressure potential.
         perm = g_data[pp.PARAMETERS][self.flux_key]["second_order_tensor"].values
@@ -377,10 +361,7 @@ class PressureReconstructionMixin(TPFProtocol):
         s = np.zeros((g.num_cells, 6))
         for ci in range(g.num_cells):
             # Local permeability tensor
-            if pressure_key == GLOBAL_PRESSURE:
-                K = perm[: g.dim, : g.dim, ci] * total_mobility[ci]
-            else:
-                K = perm[: g.dim, : g.dim, ci]
+            K = perm[: g.dim, : g.dim, ci]
             Kxx = K[0][0]
             Kxy = K[0][1]
             Kyy = K[1][1]
@@ -647,7 +628,12 @@ class EquilibratedFluxMixin(TPFProtocol):
 
     def extend_fv_fluxes(
         self,
-        flux_name: Literal["total", "wetting_from_ff", PHASENAME],
+        flux_name: Literal[
+            "total",
+            "wetting_from_ff",
+            "total_by_t_mobility",
+            "total_times_fractional_flow",
+        ],
         flux_specifier: str = "",
         prepare_simulation: bool = False,
     ) -> None:
@@ -949,23 +935,23 @@ class SolutionStrategyReconstruction(  # type: ignore
     @typing.override
     def after_nonlinear_convergence(self) -> None:
         super().after_nonlinear_convergence()
-        # Shift reconstructions to the next time step.
+        # Shift pressures, postprocessing, and reconstructions to the next time step.
         g_data = self.mdg.subdomains(return_data=True)[0][1]
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["postprocessed_coeffs", "reconstructed_coeffs"],
+            ["", "_postprocessed_coeffs", "_reconstructed_coeffs"],
         ):
             pp.shift_solution_values(
-                f"{pressure_key}_{specifier}",
+                f"{pressure_key}{specifier}",
                 g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{specifier}", g_data, iterate_index=0
+                f"{pressure_key}{specifier}", g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{specifier}",
+                f"{pressure_key}{specifier}",
                 values,
                 g_data,
                 time_step_index=0,
@@ -1066,7 +1052,7 @@ class SolutionStrategyReconstruction(  # type: ignore
         else:
             time_step_index = None
 
-        g_data = self.mdg.subdomains(return_data=True)[0][1]
+        g, g_data = self.mdg.subdomains(return_data=True)[0]
 
         # Save FV P0 pressures.
         self.eval_glob_compl_pressure_on_domain(
@@ -1076,26 +1062,29 @@ class SolutionStrategyReconstruction(  # type: ignore
             COMPLIMENTARY_PRESSURE, prepare_simulation=prepare_simulation
         )
 
-        # TODO When we have buoyancy terms, the complimentary flux must NOT include
-        # gravity flux!!! Thus, we need to calculate it in a slightly more
-        # complicated way
-        # FIXME Does this have to be NOT upwinded mobility mapped to faces? Not sure
-        # from the Vohralik paper.
-        # Calculate non upwinded mobilities.
-        rel_perms: dict[str, np.ndarray] = {}
-        phase_mobilities: dict[str, np.ndarray] = {}
-        for phase in self.phases.values():
-            rel_perms[phase.name] = self.rel_perm(self.wetting.s, phase).value(
-                self.equation_system
-            )
-            phase_mobilities[phase.name] = rel_perms[phase.name] / phase.viscosity
-            pp.set_solution_values(
-                f"{phase.name}_mobility",
-                phase_mobilities[phase.name],
-                g_data,
-                time_step_index=time_step_index,
-                iterate_index=0,
-            )
+        # Calculate fluxes divided by mobilities. These are needed for pressure
+        # post-processing.
+        total_by_t_mobility: np.ndarray = (
+            self.total_flux(g) / self.total_mobility(g)
+        ).value(self.equation_system)
+        total_times_fractional_flow: np.ndarray = (
+            total_by_t_mobility
+            * self.phase_mobility(g, self.wetting).value(self.equation_system)
+        )
+        pp.set_solution_values(
+            f"total_by_t_mobility_flux",
+            total_by_t_mobility,
+            g_data,
+            time_step_index=time_step_index,
+            iterate_index=0,
+        )
+        pp.set_solution_values(
+            "total_times_fractional_flow_flux",
+            total_times_fractional_flow,
+            g_data,
+            time_step_index=time_step_index,
+            iterate_index=0,
+        )
 
     def postprocess_solution(
         self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
@@ -1103,25 +1092,38 @@ class SolutionStrategyReconstruction(  # type: ignore
         """Equilibrate fluxes and reconstruct pressures."""
         for flux_name in ["total", "wetting_from_ff"]:
             # Satisfy mypy.
-            flux_name = typing.cast(Literal["wetting_from_ff", "total"], flux_name)
+            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
 
-            # Calculate RT0 coefficients for the FV fluxes.
-            # TODO Do we actually need this?
-            self.extend_fv_fluxes(flux_name, prepare_simulation=prepare_simulation)
+            # Extend both the nonequilibrated and equilibrated flux to compare in
+            # the flux estimator. The nonequilibrated wetting_from_ff flux is also used
+            # in the pressure reconstruction.
+            self.extend_fv_fluxes(
+                flux_name,
+            )
 
-            # Equilibration requires at least one Newton iteration.
+            # Equilibration can only be run during Newton.
             if not prepare_simulation:
-                # Calculate RT0 coefficients for the equilibrated fluxes.
                 # In ``nonlinear_increment``, the saturation variable comes first, then
                 # the pressure variable, just as required by
                 # ``equilibrate_flux_during_Newton``.
                 self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
+
                 self.extend_fv_fluxes(
                     flux_name,
                     flux_specifier="_equilibrated",
-                    prepare_simulation=prepare_simulation,
                 )
 
+        # Extend fluxes needed for pressure reconstruction.
+        for flux_name in ["total_by_t_mobility", "total_times_fractional_flow"]:
+            # Satisfy mypy.
+            flux_name = typing.cast(
+                Literal["total_by_t_mobility", "total_times_fractional_flow"],
+                flux_name,
+            )
+
+            self.extend_fv_fluxes(flux_name, prepare_simulation=prepare_simulation)
+
+        # Reconstruct pressures.
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             # Satisfy mypy.
             pressure_key = typing.cast(PRESSURE_KEY, pressure_key)

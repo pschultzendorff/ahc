@@ -457,7 +457,7 @@ class CapillaryPressure(TPFProtocol):
             entry_pressure = pp.ad.Scalar(
                 cap_press_constants.entry_pressure, name="entry pressure"
             )
-            p_c = entry_pressure * s_normalized
+            p_c = entry_pressure * (pp.ad.Scalar(1) - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             p_c = (
@@ -509,7 +509,7 @@ class CapillaryPressure(TPFProtocol):
                 where=s_normalized != 0,
             )
         elif cap_press_constants.model == "linear":
-            p_c = cap_press_constants.entry_pressure * s_normalized
+            p_c = cap_press_constants.entry_pressure * (1 - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             p_c = (
                 (
@@ -551,7 +551,7 @@ class CapillaryPressure(TPFProtocol):
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
             entry_pressure = pp.ad.Scalar(cap_press_constants.entry_pressure)
-            return entry_pressure * s_normalized_deriv
+            return pp.ad.Scalar(-1) * entry_pressure * s_normalized_deriv
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             return (
@@ -570,7 +570,7 @@ class CapillaryPressure(TPFProtocol):
             )
         else:
             # Return cap. pressure 0.
-            return pp.ad.Scalar(0) * s_normalized
+            return pp.ad.Scalar(0)
 
     def cap_press_deriv_np(
         self,
@@ -613,7 +613,7 @@ class CapillaryPressure(TPFProtocol):
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
             entry_pressure = cap_press_constants.entry_pressure
-            return np.full_like(s_normalized, entry_pressure * s_normalized_deriv)
+            return np.full_like(s_normalized, -1 * entry_pressure * s_normalized_deriv)
         elif cap_press_constants.model == "van Genuchten":
             return (
                 (1 / cap_press_constants.n_g - 1)

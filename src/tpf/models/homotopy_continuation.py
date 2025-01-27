@@ -906,24 +906,44 @@ class SolutionStrategyEstHC(  # type: ignore
 
     @typing.override
     def eval_additional_vars(self, prepare_simulation: bool = False) -> None:
-        """Calculate numerical fluxes w.r.t. the goal relative permeabilities."""
-        super().eval_additional_vars(prepare_simulation=prepare_simulation)
+        """Calculate numerical fluxes w.r.t. the goal relative permeabilities.
+
+        This is done for the fluxes used in pressure reconstruction as well as for
+        the fluxes used in the continuation estimator.
+
+        """
+        if prepare_simulation:
+            time_step_index: Optional[int] = 0
+        else:
+            time_step_index = None
 
         g, g_data = self.mdg.subdomains(return_data=True)[0]
+
         # Switch rel. perm. to goal rel. perm, calculate fluxes, and switch back.
         self.hc_rel_perm_toggle = False
-        for flux_name in ["total", "wetting_from_ff", self.wetting, self.nonwetting]:
+
+        for flux_name in [
+            "total",
+            "wetting_from_ff",
+            "total_by_t_mobility",
+            "total_times_fractional_flow",
+        ]:
             if flux_name == "total":
                 flux: np.ndarray = self.total_flux(g).value(self.equation_system)
-            # TODO Is this needed? Presumably we need only total, wetting, and
-            # nonwetting flux to reconstruct pressures.
             elif flux_name == "wetting_from_ff":
                 flux = self.wetting_flux_from_fractional_flow(g).value(
                     self.equation_system
                 )
-            else:
-                flux = self.phase_flux(g, flux_name).value(self.equation_system)
-                flux_name = flux_name.name
+            elif flux_name == "total_by_t_mobility":
+                flux = (self.total_flux(g) / self.total_mobility(g)).value(
+                    self.equation_system
+                )
+            elif flux_name == "total_times_fractional_flow":
+                flux = (
+                    self.total_flux(g)
+                    / self.total_mobility(g)
+                    * self.phase_mobility(g, self.wetting)
+                ).value(self.equation_system)
             pp.shift_solution_values(
                 f"{flux_name}_flux_wrt_goal_rel_perm",
                 g_data,
@@ -931,45 +951,75 @@ class SolutionStrategyEstHC(  # type: ignore
                 max_index=len(self.iterate_indices),
             )
             pp.set_solution_values(
-                f"{flux_name}_flux_wrt_goal_rel_perm", flux, g_data, iterate_index=0
+                f"{flux_name}_flux_wrt_goal_rel_perm",
+                flux,
+                g_data,
+                time_step_index=time_step_index,
+                iterate_index=0,
             )
         self.hc_rel_perm_toggle = True
 
     @typing.override
-    def postprocess_solution(self, nonlinear_increment: np.ndarray) -> None:
+    def postprocess_solution(
+        self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
+    ) -> None:
         """Extend and equilibrate fluxes, postprocess and reconstruct pressures."""
         for flux_name in ["total", "wetting_from_ff"]:
             # Satisfy mypy.
             flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
 
-            # Calculate RT0 coefficients for the FV fluxes.
-            self.extend_fv_fluxes(flux_name)
-            # Calculate RT0 coefficients for the equilibrated fluxes.
-            # In ``nonlinear_increment``, the saturation variable comes first, then the
-            # pressure variable, just as required by ``equilibrate_flux_during_Newton``.
-            self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
-            self.extend_fv_fluxes(flux_name, flux_specifier="_equilibrated")
+            # Extend both the nonequilibrated and equilibrated flux to compare in
+            # the flux estimator. The nonequilibrated wetting_from_ff flux is also used
+            # in the pressure reconstruction.
+            self.extend_fv_fluxes(
+                flux_name,
+            )
+
+            # Equilibration can only be run during Newton.
+            if not prepare_simulation:
+                # In ``nonlinear_increment``, the saturation variable comes first, then
+                # the pressure variable, just as required by
+                # ``equilibrate_flux_during_Newton``.
+                self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
+
+                self.extend_fv_fluxes(
+                    flux_name,
+                    flux_specifier="_equilibrated",
+                )
 
         # NOTE The fluxes w.r.t. goal rel. perm are only used to post-process the global
-        # and complimentary pressures and do NOT need to be equilibrated.
+        # and complimentary pressures and in the contination estimators and do not need
+        # to be equilibrated.
         for flux_name in [
             "total",
             "wetting_from_ff",
-            self.wetting.name,
-            self.nonwetting.name,
+            "total_by_t_mobility",
+            "total_times_fractional_flow",
         ]:
             # Satisfy mypy.
             flux_name = typing.cast(
-                Literal[PHASENAME, "total", "wetting_from_ff"], flux_name
+                Literal[
+                    "total",
+                    "wetting_from_ff",
+                    "total_by_t_mobility",
+                    "total_times_fractional_flow",
+                ],
+                flux_name,
             )
-            self.extend_fv_fluxes(flux_name, flux_specifier="_wrt_goal_rel_perm")
+            self.extend_fv_fluxes(
+                flux_name,
+                flux_specifier="_wrt_goal_rel_perm",
+                prepare_simulation=prepare_simulation,
+            )
 
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             # Satisfy mypy.
             pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
 
             self.reconstruct_pressure_vohralik(
-                pressure_key, flux_specifier="_wrt_goal_rel_perm"
+                pressure_key,
+                flux_specifier="_wrt_goal_rel_perm",
+                prepare_simulation=prepare_simulation,
             )
 
         self.equilibrated_flux_mismatch()

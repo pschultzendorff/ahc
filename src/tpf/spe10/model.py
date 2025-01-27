@@ -7,12 +7,8 @@ import numpy as np
 import porepy as pp
 import tpf
 from porepy.viz.exporter import DataInput
-from tpf.models.flow_and_transport import (
-    BoundaryConditionsTPF,
-    EquationsTPF,
-    SolutionStrategyTPF,
-)
 from tpf.models.phase import FluidPhase
+from tpf.models.protocol import TPFProtocol
 from tpf.spe10.fluid_values import (
     BHP,
     INITIAL_PRESSURE,
@@ -25,7 +21,7 @@ from tpf.spe10.geometry import X_LENGTH, Y_LENGTH, load_spe10_data
 from tpf.utils.constants_and_typing import FEET, NONWETTING, WETTING
 
 
-class EquationsSPE10(EquationsTPF):
+class EquationsSPE10(TPFProtocol):
     """Mixin class to provide the SPE10 model equations and data.
 
     Takes care of:
@@ -42,7 +38,6 @@ class EquationsSPE10(EquationsTPF):
     _porosity: np.ndarray
     """Provided by :class:`SolutionStrategySPE10`."""
 
-    @typing.override
     def permeability(self, g: pp.Grid) -> dict[str, np.ndarray]:
         """Solid permeability. Chosen layer of the SPE10 model. Units are set by
         :attr:`self.solid`."""
@@ -51,12 +46,10 @@ class EquationsSPE10(EquationsTPF):
             for dim, perm in zip(["kxx", "kyy", "kzz"], self._permeability)
         }
 
-    @typing.override
     def porosity(self, g: pp.Grid) -> np.ndarray:
         """Solid porosity. Chosen layer of the SPE10 model."""
         return self._porosity
 
-    @typing.override
     def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:  # type: ignore
         r"""Volumetric phase source term. Given as volumetric flux.
 
@@ -379,11 +372,10 @@ class EquationsSPE10(EquationsTPF):
     #     }
 
 
-class ModifiedBoundarySPE10(BoundaryConditionsTPF):
+class ModifiedBoundarySPE10(TPFProtocol):
 
     corner_faces_id: Callable[[pp.Grid, float, float], np.ndarray]
 
-    @typing.override
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann).
 
@@ -435,7 +427,7 @@ class ModifiedBoundarySPE10(BoundaryConditionsTPF):
         return s_bc
 
 
-class SolutionStrategySPE10(SolutionStrategyTPF):
+class SolutionStrategySPE10(TPFProtocol):
     """Mixin class to provide the SPE10 model data.
 
     Takes care of:
@@ -451,7 +443,6 @@ class SolutionStrategySPE10(SolutionStrategyTPF):
 
     corner_cell_ids: Callable[[pp.Grid], list[np.intp]]
 
-    @typing.override
     def set_phases(self) -> None:
         self.phases: dict[str, FluidPhase] = {}
         for phase_name, constants in zip([WETTING, NONWETTING], [water, oil]):
@@ -520,7 +511,11 @@ class SolutionStrategySPE10(SolutionStrategyTPF):
         data.append((g, "porosity", self.porosity(g)))
         self.exporter.add_constant_data(data)
 
-    @typing.override
+        # For convenience, add the porosity and permeability to the iteration exporter
+        # if it exists.
+        if hasattr(self, "iteration_exporter"):
+            self.iteration_exporter.add_constant_data(data)
+
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation.
 
@@ -551,25 +546,22 @@ class SolutionStrategySPE10(SolutionStrategyTPF):
             iterate_index=0,
         )
 
-    @typing.override
     def prepare_simulation(self) -> None:
         self.set_materials()
         self.set_geometry()
         # Initialize permeability and porosity now. Must be done after setting the
         # geometry but before setting equations.
         self.load_spe10_model(self.mdg.subdomains()[0])
-        # Initialize data saving, s.t. ``self.exporter`` is instantiated and save
-        # porosity and permeability.
-        self.initialize_data_saving()
-        self.add_constant_spe10_data()
         # Continue with the simulation preparation. This will run ``set_geometry`` and
         # ``set_materials`` again, which is not an issue.
         super().prepare_simulation()
+        # Save porosity and permeability only after the exporter is initialized. Else,
+        # they would be overwritten.
+        self.add_constant_spe10_data()
 
 
-class ModelGeometrySPE10(pp.ModelGeometry):
+class ModelGeometrySPE10(TPFProtocol):
 
-    @typing.override
     def set_domain(self) -> None:
         r"""Single layer of the SPE10 problem 2 model. Extend of the full domain is
         :math:`\qty{1200 x 2200 x 170}{\feet}`. A single layer is
@@ -652,4 +644,4 @@ class ModelGeometrySPE10(pp.ModelGeometry):
 # ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
 # practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
 # the error.
-class SPE10(EquationsSPE10, ModifiedBoundarySPE10, SolutionStrategySPE10, ModelGeometrySPE10, tpf.TwoPhaseFlow): ...  # type: ignore
+class SPE10Mixin(EquationsSPE10, ModifiedBoundarySPE10, SolutionStrategySPE10, ModelGeometrySPE10): ...  # type: ignore

@@ -67,7 +67,7 @@ from tpf.utils.constants_and_typing import (
     GLOBAL_PRESSURE,
     PSI,
 )
-from tpf.viz.iteration_exporting import IterationExporting
+from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsEst
 
 # region SETUP

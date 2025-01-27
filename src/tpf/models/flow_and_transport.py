@@ -66,7 +66,24 @@ class DarcyFluxes(TPFProtocol):
         g: pp.Grid,
         phase: FluidPhase,
     ) -> pp.ad.Operator:
-        """
+        r"""
+
+        The phase mobility is evaluated with phase-potential upwinding as described in
+        [1. Hamon, F. P., Mallison, B. T. & Tchelepi, H. A. Implicit Hybrid Upwinding
+        for two-phase flow in heterogeneous porous media with buoyancy and capillarity.
+        Computer Methods in Applied Mechanics and Engineering 331, 701–727 (2018).].
+        More specifically, the phase mobility on edge :math:`e = K \cap K'`is evaluated
+        as follows:
+
+        .. math::
+            \lambda_{\alpha,e} = \begin{cases}
+                    \lambda_{alpha}(s_{w,K}) & \text{if } \Delta p_{\alpha,K,K'} +
+                        g_{\alpha,K,K'} \geq 0,\\
+                    \lambda_{alpha}(s_{w,K'}) & \text{if } \Delta p_{\alpha,K,K'} +
+                        g_{\alpha,K,K'} \geq 0 < 0.\\
+                \end{cases}
+
+        TODO Implement upwinding in the gravity case.
 
         Parameters:
             g:
@@ -202,7 +219,6 @@ class DarcyFluxes(TPFProtocol):
         # Neumann boundaries s.t. ``tpfa.bound_flux() @ p_..._bc`` is zero. This is not
         # necesarry for ``p_n_bc`` as it is already done by
         # ``self.bc_dirichlet_pressure_values``.
-        # neumann_ind = np.where(self.bc_type(g).is_neu)[0]
         is_neu: np.ndarray = self.bc_type(g).is_neu
         p_cap_bc_values: np.ndarray = self.cap_press_np(
             (self.bc_dirichlet_saturation_values(g, self.wetting))
@@ -236,9 +252,6 @@ class DarcyFluxes(TPFProtocol):
         #   mobilities. We add the Neumann bc values to the total flux by using an
         #   upwind discretization, but crucially ``p_n_bc`` is zero on Neumann faces s.t.
         #   the Mpfa discretization does not add any phase potential and thus flux here.
-
-        tpfa = pp.ad.TpfaAd(self.flux_key, [g])
-
         # NOTE We use TPFA for discretization of the capillary flux. Don't know the
         # reason, but apparently this was somehow necessary in 2023. Possibly stability
         # reasons.
@@ -1170,8 +1183,6 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         """
         t_0 = time.time()
-        if self.time_manager.time_index >= 2:
-            pass
         if self._use_ad:
             self.linear_system = self.equation_system.assemble(
                 variables=[self.primary_pressure_var, self.primary_saturation_var]

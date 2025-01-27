@@ -42,25 +42,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from numba import config
-from tpf.models.error_estimate import (
-    DataSavingEst,
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
-)
-from tpf.models.flow_and_transport import EquationsTPF, TwoPhaseFlow
-from tpf.models.reconstruction import (
-    EquilibratedFluxMixin,
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-)
-from tpf.spe10.model import SPE10
+from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
+from tpf.models.flow_and_transport import EquationsTPF
+from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     FEET,
     GLOBAL_PRESSURE,
     PSI,
 )
-from tpf.viz.iteration_exporting import IterationExporting
+from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsEst
 
 # region SETUP
@@ -93,7 +84,7 @@ logger.setLevel(logging.INFO)
 # region MODEL
 
 
-class HomogeneousGeometry:
+class HomogeneousGeometryMixin:
     """Override the heterogeneous geometry of the SPE10 model by using methods of
     ``EquationsTPF`` instead.
 
@@ -116,22 +107,10 @@ class HomogeneousGeometry:
 
 
 class ConvergenceAnalysisEstimatesHomogeneous(
-    IterationExporting,
-    # Homogeneous geometry:
-    HomogeneousGeometry,
-    # SPE10:
-    SPE10,
-    # Modified model:
-    # Estimator mixins:
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
-    DataSavingEst,
-    # Reconstruction mixins:
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-    EquilibratedFluxMixin,
-    # Base data saving:
-    TwoPhaseFlow,
+    IterationExportingMixin,
+    HomogeneousGeometryMixin,
+    SPE10Mixin,
+    TwoPhaseFlowErrorEstimate,
 ): ...  # type: ignore
 
 
@@ -159,14 +138,14 @@ params = {
     "max_iterations": 20,
     "nl_convergence_tol": 1e-5,
     "nl_divergence_tol": 1e15,
-    # "nl_convergence_tol": 1e-10
-    # * 10000,  # Scale the nonlinear tolerance by pressure values.
 }
 
 cell_sizes: list[float] = [
-    600 * FEET / 7.5,
-    600 * FEET / 15,
-    600 * FEET / 30,
+    # 600 * FEET / 7.5,
+    # 600 * FEET / 15,
+    600
+    * FEET
+    / 30,
 ]
 rel_perm_constants_list: list[dict[str, Any]] = [
     {"model": "linear", "limit": True},
@@ -207,7 +186,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
             # Reinitialize the time manager for each run
             "time_manager": pp.TimeManager(
                 schedule=np.array([0, 10.0 * pp.DAY]),  # 5 days
-                dt_init=1.0 * pp.DAY,  # time step size in days
+                dt_init=1.0 * pp.DAY,  # Time step size in days
                 # Run with constant time step s.t. the discretization error varies only
                 # with grid size.
                 constant_dt=True,

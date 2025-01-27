@@ -6,23 +6,12 @@ and adjusted for homotopy continuation.
 
 """
 
-from typing import Any, Callable
-
 import numpy as np
 import porepy as pp
-from porepy.viz.exporter import DataInput
+from tpf.models.protocol import DataSavingMixinExtendedProtocol, HCProtocol, TPFProtocol
 
 
-class IterationExporting:
-
-    mdg: pp.MixedDimensionalGrid
-    params: dict[str, Any]
-    equation_system: pp.EquationSystem
-    nonlinear_solver_statistics: pp.SolverStatistics
-    time_manager: pp.TimeManager
-    units: pp.Units
-    uses_hc: bool
-    data_to_export_iteration: Callable[[], list[DataInput]]
+class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFProtocol):
 
     def initialize_data_saving(self):
         """Initialize iteration exporter."""
@@ -31,7 +20,10 @@ class IterationExporting:
             self.mdg,
             file_name=self.params["file_name"] + "_iterations",
             folder_name=self.params["folder_name"],
-            export_constants_separately=True,
+            export_constants_separately=self.params.get(
+                "export_constants_separately", False
+            ),
+            length_scale=self.units.m,
         )
         # To make sure the nonlinear iteration index does not interfere with the
         # time part, we multiply the latter by the next power of ten above the
@@ -60,7 +52,7 @@ class IterationExporting:
         if self.uses_hc:
             time_step: int = int(
                 self.nonlinear_solver_statistics.num_iteration
-                + self.r_2 * self.nonlinear_solver_statistics.num_hc_iteration
+                + self.r_2 * self.nonlinear_solver_statistics.hc_num_iteration
                 + self.r_1 * self.time_manager.time_index
             )
         else:
@@ -83,3 +75,9 @@ class IterationExporting:
         super().after_nonlinear_iteration(nonlinear_increment)
         self.save_data_iteration()
         self.iteration_exporter.write_pvd()
+
+    def after_nonlinear_failure(self) -> None:
+        """Save model state after nonlinear failure."""
+        self.save_data_iteration()
+        self.iteration_exporter.write_pvd()
+        super().after_nonlinear_failure()
