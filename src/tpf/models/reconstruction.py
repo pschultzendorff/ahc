@@ -8,6 +8,8 @@ from typing import Any, Literal, Optional
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
+from jax import jit
+from numba import jit, njit
 from porepy.viz.exporter import DataInput
 from tpf.models.flow_and_transport import (
     DataSavingTPF,
@@ -24,7 +26,6 @@ from tpf.numerics.quadrature import (
 from tpf.utils.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     GLOBAL_PRESSURE,
-    PHASENAME,
     PRESSURE_KEY,
 )
 
@@ -76,7 +77,6 @@ class GlobalPressureMixin(TPFProtocol):
         self.compl_pressure_interpol_vals = np.insert(
             self.compl_pressure_interpol_vals, 0, 0.0
         )
-        # TODO Values too high?
 
     def eval_glob_compl_pressure(
         self,

@@ -6,6 +6,7 @@ from typing import Literal, Optional, TypeGuard
 
 import numpy as np
 import porepy as pp
+from numba import jit, njit
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.ad.functions import minimum
@@ -128,10 +129,10 @@ class RelativePermeability(TPFProtocol):
 
         Brooks-Corey model
         .. math::
-            k_{r,w}(\hat{S}_w) = \hat{S}_w^{n_1 + n_2 \cdot n_3}, \\
-            k_{r,n}(\hat{S}_w) = (1 - \hat{S}_w)^{n_1}(1 - \hat{S}_w^{n_2})^{n_3}, \\
+            k_{r,w}(\hat{s}_w) = \hat{s}_w^{n_1 + n_2 \cdot n_3}, \\
+            k_{r,n}(\hat{s}_w) = (1 - \hat{s}_w)^{n_1}(1 - \hat{s}_w^{n_2})^{n_3}, \\
             \text{where} \\
-            \hat{S}_w = \frac{S_w - S_{w,res}}{1 - S_{w,res} - S_{n,res}}
+            \hat{s}_w = \frac{S_w - S_{w,res}}{1 - S_{w,res} - S_{n,res}}
 
         The default values (Brooks–Corey–Burdine model) are
         .. math::
@@ -139,8 +140,8 @@ class RelativePermeability(TPFProtocol):
 
         Corey model
         .. math::
-            k_{r,w}(S_w) = \hat{S}_w^3, \\
-            k_{r,n}(S_w) = (1 - \hat{S}_w)^3.
+            k_{r,w}(S_w) = \hat{s}_w^3, \\
+            k_{r,n}(S_w) = (1 - \hat{s}_w)^3.
 
         To avoid ill-conditioned equation systems and crashing of the Newton solver at
         unphysical saturations (i.e., :math:`S_w\not\in[0,1]`), the nonwetting rel.
@@ -375,6 +376,8 @@ class CapPressConstants:
     """Second exponent for the van Genuchten model."""
     beta_g: float = 1.0
     """Scaling factor for the van Genuchten model."""
+    linear_param: float = 1.0
+    """Linear parameter for the linear model."""
 
     def __post_init__(self) -> None:
         if not self.is_cap_press_model(self.model):
@@ -412,19 +415,19 @@ class CapillaryPressure(TPFProtocol):
 
         Brooks-Corey model
         .. math::
-            p_c(\hat{S}_w) = p_e\hat{S}_w^{n_b}
+            p_c(\hat{s}_w) = p_e\hat{s}_w^{n_b}
 
         Linear model
         .. math::
-            p_c(\hat{S}_w) = c\hat{S}_w
+            p_c(\hat{s}_w) = c\hat{}_w
 
         van Genuchten model
         .. math::
-            p_c(\hat{S}_w) = \frac{(\hat{S}_w^{m_g}-1)^{-n_g}}{\beta_g}
+            p_c(\hat{s}_w) = \frac{(\hat{s}_w^{m_g}-1)^{-n_g}}{\beta_g}
 
         All three models are computed in terms of the normalized saturation
         .. math::
-            \hat{S}_w = \frac{S_w - S_w^{min}}{S_w^{max} - S_w^{min}},
+            \hat{s}_w = \frac{S_w - S_w^{min}}{S_w^{max} - S_w^{min}},
 
         If none of the models is chosen, the capillary pressure is set to 0.
 
@@ -454,10 +457,10 @@ class CapillaryPressure(TPFProtocol):
                 -1 / cap_press_constants.n_b
             )
         elif cap_press_constants.model == "linear":
-            entry_pressure = pp.ad.Scalar(
-                cap_press_constants.entry_pressure, name="entry pressure"
+            linear_param = pp.ad.Scalar(
+                cap_press_constants.linear_param, name="linear param"
             )
-            p_c = entry_pressure * (pp.ad.Scalar(1) - s_normalized)
+            p_c = linear_param * (pp.ad.Scalar(1) - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             p_c = (
@@ -509,7 +512,7 @@ class CapillaryPressure(TPFProtocol):
                 where=s_normalized != 0,
             )
         elif cap_press_constants.model == "linear":
-            p_c = cap_press_constants.entry_pressure * (1 - s_normalized)
+            p_c = cap_press_constants.linear_param * (1 - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             p_c = (
                 (
@@ -550,8 +553,8 @@ class CapillaryPressure(TPFProtocol):
                 * s_normalized ** pp.ad.Scalar(-1 / cap_press_constants.n_b - 1)
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
-            entry_pressure = pp.ad.Scalar(cap_press_constants.entry_pressure)
-            return pp.ad.Scalar(-1) * entry_pressure * s_normalized_deriv
+            linear_param = pp.ad.Scalar(cap_press_constants.linear_param)
+            return pp.ad.Scalar(-1) * linear_param * s_normalized_deriv
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             return (
@@ -612,7 +615,7 @@ class CapillaryPressure(TPFProtocol):
                 )
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
-            entry_pressure = cap_press_constants.entry_pressure
+            entry_pressure = cap_press_constants.linear_param
             return np.full_like(s_normalized, -1 * entry_pressure * s_normalized_deriv)
         elif cap_press_constants.model == "van Genuchten":
             return (

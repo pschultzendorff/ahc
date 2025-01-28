@@ -1,7 +1,8 @@
 # torch>=1.13
+# deepdiff
+numba
+jax
 tqdm
-ipython
-jupyter
-deepdiff
 seaborn
+viztracer
 pytest-lazy-fixture

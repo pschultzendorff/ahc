@@ -300,6 +300,57 @@ class DarcyFluxes(TPFProtocol):
         total_flux.set_name("Total volume flux")
         return total_flux
 
+    def wetting_flux_from_fractional_flow(self, g: pp.Grid) -> pp.ad.Operator:
+        """Calculate the wetting flux from the total flux and fractional flow.
+
+        Note: This is different from obtaining the flux directly from phase pressures
+        and saturations.
+
+
+        Note: When equilibrating the wetting flux, it needs to be equilibrated w.r.t. to
+        this term as it's the term used during Newton.
+
+        """
+
+        # Spatial discretization operators.
+        flux_tpfa = pp.ad.TpfaAd(self.flux_key, [g])
+        upwind_w = pp.ad.UpwindAd(self.wetting.mobility_key, [g])
+
+        # Compute cap pressure and relative permeabilities.
+        p_cap = self.cap_press(self.wetting.s)
+
+        mobility_w: pp.ad.Operator = self.phase_mobility(g, self.wetting)
+        mobility_n: pp.ad.Operator = self.phase_mobility(g, self.nonwetting)
+        mobility_t: pp.ad.Operator = self.total_mobility(g)
+
+        # NOTE For ``flux_t``, the total mobility is already included.
+        flux_t = self.total_flux(g)
+        fractional_flow_w: pp.ad.Operator = mobility_w / mobility_t
+        vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
+        vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+        bc_neumann_flux_values_w = pp.ad.DenseArray(
+            self.bc_neumann_flux_values(g, self.wetting)
+        )
+
+        wetting_flux: pp.ad.Operator = (
+            fractional_flow_w * flux_t
+            + fractional_flow_w
+            * mobility_n
+            * (
+                flux_tpfa.flux() @ p_cap
+                + flux_tpfa.vector_source() @ vector_source_w
+                - flux_tpfa.vector_source() @ vector_source_n
+            )
+            # NOTE ``phase_mobility(self.wetting)`` and hence
+            # ``fractional_flow_w`` are zero on Neumann boundaries. We add the
+            # wetting flux at Neumann boundaries by using an upwind
+            # discretization. For the total flux, this is already included,
+            # hence it does not need to be added to the flow equation
+            + upwind_w.bound_transport_neu() @ bc_neumann_flux_values_w
+        )
+        wetting_flux.set_name(("Wetting flux from fractional flow"))
+        return wetting_flux
+
 
 class ConstitutiveLawsTPF(
     RelativePermeability,
@@ -384,57 +435,6 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
         """Solid porosity. This unmodified base function assumes homogeneous
         porosity. Value is set by :attr:`self.solid`."""
         return np.full(g.num_cells, self.solid.porosity())
-
-    def wetting_flux_from_fractional_flow(self, g: pp.Grid) -> pp.ad.Operator:
-        """Calculate the wetting flux from the total flux and fractional flow.
-
-        Note: This is different from obtaining the flux directly from phase pressures
-        and saturations.
-
-
-        Note: When equilibrating the wetting flux, it needs to be equilibrated w.r.t. to
-        this term as it's the term used during Newton.
-
-        """
-
-        # Spatial discretization operators.
-        flux_tpfa = pp.ad.TpfaAd(self.flux_key, [g])
-        upwind_w = pp.ad.UpwindAd(self.wetting.mobility_key, [g])
-
-        # Compute cap pressure and relative permeabilities.
-        p_cap = self.cap_press(self.wetting.s)
-
-        mobility_w: pp.ad.Operator = self.phase_mobility(g, self.wetting)
-        mobility_n: pp.ad.Operator = self.phase_mobility(g, self.nonwetting)
-        mobility_t: pp.ad.Operator = self.total_mobility(g)
-
-        # NOTE For ``flux_t``, the total mobility is already included.
-        flux_t = self.total_flux(g)
-        fractional_flow_w: pp.ad.Operator = mobility_w / mobility_t
-        vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
-        vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
-        bc_neumann_flux_values_w = pp.ad.DenseArray(
-            self.bc_neumann_flux_values(g, self.wetting)
-        )
-
-        wetting_flux: pp.ad.Operator = (
-            fractional_flow_w * flux_t
-            + fractional_flow_w
-            * mobility_n
-            * (
-                flux_tpfa.flux() @ p_cap
-                + flux_tpfa.vector_source() @ vector_source_w
-                - flux_tpfa.vector_source() @ vector_source_n
-            )
-            # NOTE ``phase_mobility(self.wetting)`` and hence
-            # ``fractional_flow_w`` are zero on Neumann boundaries. We add the
-            # wetting flux at Neumann boundaries by using an upwind
-            # discretization. For the total flux, this is already included,
-            # hence it does not need to be added to the flow equation
-            + upwind_w.bound_transport_neu() @ bc_neumann_flux_values_w
-        )
-        wetting_flux.set_name(("Wetting flux from fractional flow"))
-        return wetting_flux
 
     @typing.override
     def set_equations(self, equation_names: Optional[dict[str, str]] = None) -> None:
@@ -1185,7 +1185,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         t_0 = time.time()
         if self._use_ad:
             self.linear_system = self.equation_system.assemble(
-                variables=[self.primary_pressure_var, self.primary_saturation_var]
+                variables=[self.primary_saturation_var, self.primary_pressure_var]
             )
         logger.debug(f"Assembled linear system in {time.time() - t_0:.2e} seconds")
 
@@ -1404,30 +1404,14 @@ class DataSavingTPF(TPFProtocol, pp.DataSavingMixin):
             data.append((var.domain[0], var.name, values))
 
         # Add secondary variables/derived quantities.
-        # All models are expected to have the dimension reduction methods for aperture
-        # and specific volume. More methods may be added as needed, e.g. by overriding
-        # this method:
-        #   def data_to_export(self):
-        #       data = super().data_to_export()
-        #       data.append(
-        #           (grid, "name", self._evaluate_and_scale(sd, "name", "units"))
-        #       )
-        #       return data
-        for dim in range(self.nd + 1):
-            for sd in self.mdg.subdomains(dim=dim):
-                if dim < self.nd:
-                    data.append(
-                        (sd, "aperture", self._evaluate_and_scale(sd, "aperture", "m"))
-                    )
-                data.append(
-                    (
-                        sd,
-                        "specific_volume",
-                        self._evaluate_and_scale(
-                            sd, "specific_volume", f"m^{self.nd - sd.dim}"
-                        ),
-                    )
-                )
+        g: pp.Grid = self.mdg.subdomains()[0]
+        data.append(
+            (
+                g,
+                "specific_volume",
+                self._evaluate_and_scale(g, "specific_volume", f"m^{self.nd - g.dim}"),
+            )
+        )
 
         # We combine grids and mortar grids. This is supported by the exporter, but not
         # by the type hints in the exporter module. Hence, we ignore the type hints.

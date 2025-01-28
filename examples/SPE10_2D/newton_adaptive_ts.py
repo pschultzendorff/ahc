@@ -32,8 +32,6 @@ Model description:
     - Corey with power 2.
 - Capillary pressure model:
     - Brooks-Corey
-- Time step size is kept constant s.t. the discretization error varies only with grid
-  size.
 
 """
 
@@ -66,7 +64,7 @@ from tpf.viz.solver_statistics import SolverStatisticsEst
 # region SETUP
 
 # Disable numba JIT for debugging.
-config.DISABLE_JIT = False
+# config.DISABLE_JIT = False
 
 # Limit number of threads for NREC.
 N_THREADS = "4"
@@ -78,10 +76,6 @@ os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
 # Catch numpy warnings.
 np.seterr(all="raise")
 warnings.filterwarnings("default")
-
-# Fix seed for reproducability.
-random.seed(0)
-np.random.seed(0)
 
 # Setup logging.
 logger = logging.getLogger()
@@ -106,9 +100,6 @@ class SPE10Newton(
 spe10_layer: int = 80
 
 params = {
-    # Base folder and file name. These will get changed by
-    # ``ConvergenceAnalysisExtended``.
-    "file_name": "setup",
     "progressbars": True,
     # Model:
     "formulation": "fractional_flow",
@@ -124,25 +115,24 @@ params = {
     "nonlinear_solver": pp.NewtonSolver,
     "max_iterations": 20,
     "nl_convergence_tol": 1e-5,
-    "nl_divergence_tol": 1e15,
+    "nl_divergence_tol": 1e30,
 }
 
 cell_sizes: list[float] = [600 * FEET / 30]
 rel_perm_constants_list: list[dict[str, Any]] = [
     {"model": "linear", "limit": False},
-    # {
-    #     "model": "Brooks-Corey",
-    #     "limit": True,
-    #     "n1": 2,
-    #     "n2": 2,  # 1 + 2/n_b
-    #     "n3": 1,
-    # },
+    {
+        "model": "Brooks-Corey",
+        "limit": True,
+        "n1": 2,
+        "n2": 2,  # 1 + 2/n_b
+        "n3": 1,
+    },
 ]
 cap_press_constants_list: list[dict[str, Any]] = [
-    # {"model": "linear", "entry_pressure": 30 * PSI},  # 0.3447 bar
-    {"model": None},
+    # {"model": None},
+    {"model": "linear", "linear_param": 7.25 * PSI},  # 0.5 bar at s_w = 0.2.
 ]
-appleyard: list[bool] = [False, True]
 
 
 for i, (cell_size, rp_model, cp_model) in enumerate(
@@ -160,7 +150,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
     filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "newton_3_ts"
+        / "newton_adaptive_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
@@ -175,9 +165,12 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         {
             # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
-                schedule=np.array([0, 3.0 * pp.DAY]),  # 5 days
-                dt_init=1.0 * pp.DAY,  # Time step size in days.
-                constant_dt=True,
+                schedule=np.array([0.0, 10.0 * pp.DAY]),
+                dt_init=10 * pp.DAY,
+                constant_dt=False,
+                dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
+                recomp_factor=0.1,
+                recomp_max=5,
             ),
             "folder_name": foldername,
             "file_name": filename,
@@ -200,10 +193,11 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
 for i, (rp_model, cp_model) in enumerate(
     itertools.product(rel_perm_constants_list, cap_press_constants_list)
 ):
+    continue
     filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "newton_3_ts"
+        / "newton_adaptive_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )

@@ -1,18 +1,49 @@
 # Two-phase flow in PorePy.
+This repository extends the functionality of
+[PorePy](https://github.com/pmgbergen/porepy) with the following:
+- an incompressible & immiscible two-phase flow model in the fractional flow formulation
+- a posteriori error estimators for the two-phase flow model
+- an adaptive homotopy continuation algorithm based on the error estimators
+- integration of neural networks into PorePy models
+- some miscellaneous additions to PorePy functionality.
 
-This repo contains a working two-phase flow model in PorePy, a posteriori error
-estimators, an adaptive homotopy continuation algorithm, integration of neural networks
-into PorePy models, and some miscellaneous additions to PorePy functionality.
+The code does not work with a current PorePy build, but requires [this
+fork](https://github.com/pschultzendorff/porepy_hc), which adds some functionalities for
+homotopy continuation to work properly.
 
+#### Setup
+The following should be done in either a docker container or a virtual environment. A
+dockerfile & build will be provided at a later point.
+1. Clone https://github.com/pschultzendorff/porepy_hc and follow the instructions to
+   install PorePy
+2. Clone this repository `clone ...`
+3. Run
 
-As of now the code works with PorePy commit c5732db (19th October 2024). Some modules
-are not yet updated to modern PorePy. Checkout the other branches for this.
-
-### PorePy changes/additions
-In ``./src`` the adaptions to PorePy are found.
 
 #### Two-phase flow model
 Implemented in the fractional flow formulation.
+
+#### A posteriori error estimates
+The implementation closely follows [C. Cancès, I. Pop, and M. Vohralík, “An a posteriori
+error estimate for vertex-centered finite volume discretizations of immiscible
+incompressible two-phase flow,” Math. Comp., vol. 83, no. 285, pp. 153–188, Jan. 2014,
+doi: 10.1090/S0025-5718-2013-02723-8.] and [M. Vohralík and M. F. Wheeler, “A posteriori
+error estimates, stopping criteria, and adaptivity for two-phase flows,” Comput Geosci,
+vol. 17, no. 5, pp. 789–812, Oct. 2013, doi: 10.1007/s10596-013-9356-0.]. The pressure
+reconstruction reuses code of Jhabriel Valera [J. Varela, C. E. Schaerer, and E.
+Keilegavlen, “A linear potential reconstruction technique based on Raviart-Thomas basis
+functions for cell-centered finite volume approximations to the Darcy problem,”
+Proceeding Series of the Brazilian Society of Computational and Applied Mathematics,
+vol. 11, no. 1, Art. no. 1, Jan. 2025, doi: 10.5540/03.2025.011.01.0332.]
+
+- Implements functions to calculate global and complimentary pressure, equilibrate
+  fluxes, and post-process and reconstruct pressures. 
+- Guaranted error estimates
+- Decomposition of the error into discretization, homotopy continuation, and
+  linearization error
+
+#### Adaptive Homotopy Continuation
+
 
 #### Neural networks
 Neural networks from `Pytorch` can be included as `ad.Function` into the PorePy `ad`
@@ -22,17 +53,8 @@ neural network into a function. This acts like the functions in `ad.functions`.
 Some artificial data for rel. perm. and cap. pressure functions is provided, as well as
 simple neural networks and a training function. 
 
-#### Homotopy Continuation
-
-#### A posteriori error estimates
-- Equilibrated flux and pressure reconstructions. Based on Jhabriel Valera's
-  (unpublished) work.
-- Error estimates.
-
 # TODO
-- We **always** work on only one subdomain. Remove all ``for`` loops through subdomains.
-- Often we call ``pp.shift_solution_values`` even though this is not necessary!
-- Rename every method and attribute that contains ``continuation`` to ``hc`` to make
-  things more readable!
-- Add keywords_only to all dataclasses!
-- Make use of protocols and ``@typing.override`` everywhere.
+- Remove calls to ``pp.shift_solution_values`` after nonlinear/hc convergence, where it
+  is not necessary!
+- Thoroughly evaluate whether classes should be subclasses or mixins.
+- Make things faster.

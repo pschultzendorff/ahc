@@ -32,6 +32,8 @@ Model description:
     - Corey with power 2.
 - Capillary pressure model:
     - Brooks-Corey
+- Time step size is kept constant s.t. the discretization error varies only with grid
+  size.
 
 """
 
@@ -40,7 +42,6 @@ import json
 import logging
 import os
 import pathlib
-import random
 import shutil
 import warnings
 from collections import defaultdict
@@ -51,19 +52,20 @@ import numpy as np
 import porepy as pp
 from numba import config
 from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
-from tpf.spe10.model import SPE10
+from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     FEET,
     GLOBAL_PRESSURE,
     PSI,
 )
+from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsEst
 
 # region SETUP
 
 # Disable numba JIT for debugging.
-config.DISABLE_JIT = False
+# config.DISABLE_JIT = False
 
 # Limit number of threads for NREC.
 N_THREADS = "4"
@@ -76,10 +78,6 @@ os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
 np.seterr(all="raise")
 warnings.filterwarnings("default")
 
-# Fix seed for reproducability.
-random.seed(0)
-np.random.seed(0)
-
 # Setup logging.
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -91,9 +89,8 @@ logger.setLevel(logging.INFO)
 
 
 class SPE10Newton(
-    # SPE10:
-    SPE10,
-    # Two phase flow with estimators:
+    IterationExportingMixin,
+    SPE10Mixin,
     TwoPhaseFlowErrorEstimate,
 ): ...  # type: ignore
 
@@ -104,15 +101,10 @@ class SPE10Newton(
 spe10_layer: int = 80
 
 params = {
-    # Base folder and file name. These will get changed by
-    # ``ConvergenceAnalysisExtended``.
-    "file_name": "setup",
     "progressbars": True,
     # Model:
     "formulation": "fractional_flow",
-    "material_constants": {
-        "solid": pp.SolidConstants({"porosity": 0.3, "permeability": 1e-15}),
-    },
+    "material_constants": {},
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
@@ -122,13 +114,9 @@ params = {
     # Nonlinear params:
     "nonlinear_solver_statistics": SolverStatisticsEst,
     "nonlinear_solver": pp.NewtonSolver,
-    # Nonlinear params:
     "max_iterations": 20,
     "nl_convergence_tol": 1e-5,
-    "nl_divergence_tol": 1e15,
-    # "nl_convergence_tol": 1e-10
-    # * 10000
-    # * PSI,  # Scale the nonlinear tolerance by pressure values
+    "nl_divergence_tol": 1e30,
 }
 
 cell_sizes: list[float] = [600 * FEET / 30]
@@ -143,7 +131,8 @@ rel_perm_constants_list: list[dict[str, Any]] = [
     },
 ]
 cap_press_constants_list: list[dict[str, Any]] = [
-    {"model": "linear", "entry_pressure": 5 * PSI},
+    {"model": None},
+    {"model": "linear", "linear_param": 80 * PSI},  # 5.516 bar at s_w = 0.2.
 ]
 
 
@@ -162,7 +151,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
     filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "newton_adaptive_ts"
+        / "newton_3_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
@@ -177,12 +166,9 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         {
             # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
-                schedule=np.array([0, 10 * pp.DAY]),  # 5 days
-                dt_init=0.5 * pp.DAY,  # Initial time step size in days.
-                constant_dt=False,
-                dt_min_max=(1e-3 * pp.DAY, 1.5 * pp.DAY),
-                recomp_factor=0.1,
-                recomp_max=5,
+                schedule=np.array([0, 3.0 * pp.DAY]),  # 5 days
+                dt_init=1.0 * pp.DAY,  # Time step size in days.
+                constant_dt=True,
             ),
             "folder_name": foldername,
             "file_name": filename,
@@ -208,7 +194,7 @@ for i, (rp_model, cp_model) in enumerate(
     filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "newton_adaptive_ts"
+        / "newton_short"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
@@ -220,10 +206,15 @@ for i, (rp_model, cp_model) in enumerate(
     residual_and_flux_est: list[float] = []
     glob_nonconformity_est: list[float] = []
     compl_nonconformity_est: list[float] = []
-    fig, ax = plt.subplots()
+    global_energy_norm: list[float] = []
+
+    fig1, ax1 = plt.subplots()
+    fig2, ax2 = plt.subplots()
 
     for n, time_step in enumerate(history_list):
         residual_and_flux_est.extend(time_step["residual_and_flux_est"])
+        global_energy_norm.extend(time_step["global_energy_norm"])
+
         # Transform list of dicts to dict containing two lists.
         converted_nonconformity_est = defaultdict(list)
         for nonconformity in time_step["nonconformity_est"]:
@@ -240,21 +231,39 @@ for i, (rp_model, cp_model) in enumerate(
         try:
             next_time: float = history_list[n + 1]["current time"]
             if time < next_time:
-                ax.axvline(x=len(residual_and_flux_est), color="gray", linestyle="--")
+                ax1.axvline(x=len(residual_and_flux_est), color="gray", linestyle="--")
         except IndexError:
             pass
 
-    ax.semilogy(residual_and_flux_est, label="Residual and flux estimator")
-    ax.semilogy(glob_nonconformity_est, label="Global pressure nonconformity estimator")
-    ax.semilogy(
+    ax1.semilogy(residual_and_flux_est, label="Residual and flux estimator")
+    ax1.semilogy(
+        glob_nonconformity_est, label="Global pressure nonconformity estimator"
+    )
+    ax1.semilogy(
         compl_nonconformity_est, label="Complimentary pressure nonconformity estimator"
     )
-    ax.set_xlabel("Nonlinear iteration (over multiple time steps)")
-    ax.set_ylabel("Estimator")
-    ax.set_title(f"Discretization estimator")
-    # ax.set_ylim([5e-4, 1e3])
-    ax.legend()
-    plt.show()
-    fig.savefig(foldername / "solver_convergence.png")
+    ax1.set_xlabel("Nonlinear iteration (over multiple time steps)")
+    ax1.set_ylabel("Estimator value")
+    ax1.set_title(f"Discretization estimators")
+    ax1.legend()
+    fig1.savefig(foldername / "estimators.png")
+
+    ax2.semilogy(
+        np.array(glob_nonconformity_est) / np.array(global_energy_norm),
+        label="Relative global pressure nonconformity estimator",
+    )
+    ax2.semilogy(
+        np.array(residual_and_flux_est) / np.array(global_energy_norm),
+        label="Relative residual and flux estimator",
+    )
+    ax2.semilogy(
+        np.array(compl_nonconformity_est) / np.array(global_energy_norm),
+        label="Relative complimentary pressure nonconformity estimator",
+    )
+    ax2.set_xlabel("Nonlinear iteration (over multiple time steps)")
+    ax2.set_ylabel("Relative estimator value")
+    ax2.set_title(f"Relative discretization estimators")
+    ax2.legend()
+    fig2.savefig(foldername / "relative_estimators.png")
 
 # endregion

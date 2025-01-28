@@ -13,10 +13,12 @@ import torch
 def fix_seeds(id: int = 0) -> None:
     random.seed(id)
     np.random.seed(id)
+    # FIXME Is this up to date?
     torch.manual_seed(id)
 
 
 def fix_generator_seed_torch(id: int = 0) -> torch.Generator:
+    # FIXME Is this up to date?
     g = torch.Generator()
     g.manual_seed(id)
     return g
