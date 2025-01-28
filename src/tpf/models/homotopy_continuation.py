@@ -140,13 +140,14 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
                 error estimate.
 
         """
-        _, g_data = self.mdg.subdomains(return_data=True)[0]
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
         fv_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs", g_data, iterate_index=0
+            f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
         )
         fv_goal_rel_perm_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs", g_data, iterate_index=0
+            f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs",
+            self.g_data,
+            iterate_index=0,
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
@@ -167,14 +168,14 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
         )
         pp.shift_solution_values(
             f"{flux_name}_C_estimate",
-            g_data,
+            self.g_data,
             pp.ITERATE_SOLUTIONS,
             len(self.iterate_indices),
         )
         pp.set_solution_values(
             f"{flux_name}_C_estimate",
             integral.elementwise,
-            g_data,
+            self.g_data,
             iterate_index=0,
         )
 
@@ -192,13 +193,12 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
                 error estimate.
 
         """
-        _, g_data = self.mdg.subdomains(return_data=True)[0]
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
         fv_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs", g_data, iterate_index=0
+            f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
         )
         fv_equilibrated_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_equilibrated_RT0_coeffs", g_data, iterate_index=0
+            f"{flux_name}_flux_equilibrated_RT0_coeffs", self.g_data, iterate_index=0
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
@@ -219,14 +219,14 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
         )
         pp.shift_solution_values(
             f"{flux_name}_L_estimate",
-            g_data,
+            self.g_data,
             pp.ITERATE_SOLUTIONS,
             len(self.iterate_indices),
         )
         pp.set_solution_values(
             f"{flux_name}_L_estimate",
             integral.elementwise,
-            g_data,
+            self.g_data,
             iterate_index=0,
         )
 
@@ -241,7 +241,6 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
         return 3 * residual_estimate + sum(nonconformity_estimates)
 
     def global_hc_est(self) -> float:
-        _, g_data = self.mdg.subdomains(return_data=True)[0]
         estimators: dict[str, float] = {}
         for flux_name in ["total", "wetting_from_ff"]:
             # Satisfy mypy.
@@ -251,11 +250,11 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
             self.local_hc_est(flux_name)
             # Load spatial integral from current time step.
             integral_C_new: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_C_estimate", g_data, iterate_index=0
+                f"{flux_name}_C_estimate", self.g_data, iterate_index=0
             )
             # Load spatial integral from previous time step.
             integral_C_old: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_C_estimate", g_data, time_step_index=0
+                f"{flux_name}_C_estimate", self.g_data, time_step_index=0
             )
             # Calculate global values at current and previous time step.
             # NOTE The values stored were the squares of the elementwise norms, hence we
@@ -272,7 +271,6 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
         return 3 * sum(estimators.values())
 
     def global_linearization_est(self) -> float:
-        _, g_data = self.mdg.subdomains(return_data=True)[0]
         estimators: dict[str, float] = {}
         for flux_name in ["total", "wetting_from_ff"]:
             # Satisfy mypy.
@@ -282,11 +280,11 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
             self.local_linearization_est(flux_name)
             # Load spatial integral from current time step.
             integral_L_new: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_L_estimate", g_data, iterate_index=0
+                f"{flux_name}_L_estimate", self.g_data, iterate_index=0
             )
             # Load spatial integral from previous time step.
             integral_L_old: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_L_estimate", g_data, time_step_index=0
+                f"{flux_name}_L_estimate", self.g_data, time_step_index=0
             )
             # Calculate global values at current and previous time step.
             # NOTE The values stored were the squares of the elementwise norms, hence we
@@ -320,8 +318,6 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
         if self.params.get("hc_fast_evaluation", True):
             return 0.0
         else:
-            _, g_data = self.mdg.subdomains(return_data=True)[0]
-
             estimators: dict[str, float] = {}
             for flux_name in ["total", "wetting_from_ff"]:
                 # Satisfy mypy.
@@ -331,11 +327,11 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
                 self.local_residual_est(flux_name)
                 # Load spatial integrals from current time step.
                 integral_R_new: np.ndarray = pp.get_solution_values(
-                    f"{flux_name}_R_estimate", g_data, iterate_index=0
+                    f"{flux_name}_R_estimate", self.g_data, iterate_index=0
                 )
                 # Load spatial integrals from previous time step.
                 integral_R_old: np.ndarray = pp.get_solution_values(
-                    f"{flux_name}_R_estimate", g_data, time_step_index=0
+                    f"{flux_name}_R_estimate", self.g_data, time_step_index=0
                 )
                 # Calculate global values at current and previous time step.
                 # NOTE The values stored were the squares of the elementwise norms, hence we
@@ -427,16 +423,15 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
 
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
-        g = self.mdg.subdomains()[0]
         self.equation_system.set_variable_values(
-            np.full(g.num_cells * 2, 0.0),
+            np.full(self.g.num_cells * 2, 0.0),
             [self.wetting.p, self.nonwetting.p],
             time_step_index=0,
             hc_index=0,
             iterate_index=0,
         )
         self.equation_system.set_variable_values(
-            np.full(g.num_cells * 2, 0.5),
+            np.full(self.g.num_cells * 2, 0.5),
             [self.wetting.s, self.nonwetting.s],
             time_step_index=0,
             hc_index=0,
@@ -491,24 +486,23 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
             )
 
         # Shift reconstructions and estimates to the next time step.
-        g_data = self.mdg.subdomains(return_data=True)[0][1]
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
             ["postprocessed_coeffs", "reconstructed_coeffs", "NC_estimate"],
         ):
             pp.shift_solution_values(
                 f"{pressure_key}_{specifier}",
-                g_data,
+                self.g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             pressure_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{specifier}", g_data, hc_index=0
+                f"{pressure_key}_{specifier}", self.g_data, hc_index=0
             )
             pp.set_solution_values(
                 f"{pressure_key}_{specifier}",
                 pressure_values,
-                g_data,
+                self.g_data,
                 time_step_index=0,
             )
         for flux_name, estimate_name in itertools.product(
@@ -517,15 +511,18 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
         ):
             pp.shift_solution_values(
                 f"{flux_name}_{estimate_name}",
-                g_data,
+                self.g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             flux_values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{estimate_name}", g_data, hc_index=0
+                f"{flux_name}_{estimate_name}", self.g_data, hc_index=0
             )
             pp.set_solution_values(
-                f"{flux_name}_{estimate_name}", flux_values, g_data, time_step_index=0
+                f"{flux_name}_{estimate_name}",
+                flux_values,
+                self.g_data,
+                time_step_index=0,
             )
         for energy_norm_term in [
             "energy_norm_saturation_part",
@@ -534,15 +531,15 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
         ]:
             pp.shift_solution_values(
                 energy_norm_term,
-                g_data,
+                self.g_data,
                 pp.TIME_STEP_SOLUTIONS,
                 len(self.time_step_indices),
             )
             local_term: np.ndarray = pp.get_solution_values(
-                energy_norm_term, g_data, hc_index=0
+                energy_norm_term, self.g_data, hc_index=0
             )
             pp.set_solution_values(
-                energy_norm_term, local_term, g_data, time_step_index=0
+                energy_norm_term, local_term, self.g_data, time_step_index=0
             )
 
     def after_hc_failure(self) -> None:
@@ -746,22 +743,21 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
         )
 
         # Reconstructions and estimates.
-        g_data = self.mdg.subdomains(return_data=True)[0][1]
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
             ["postprocessed_coeffs", "reconstructed_coeffs", "NC_estimate"],
         ):
             pp.shift_solution_values(
                 f"{pressure_key}_{specifier}",
-                g_data,
+                self.g_data,
                 pp.HC_ITERATE_SOLUTIONS,
                 len(self.hc_indices),
             )
             pressure_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{specifier}", g_data, iterate_index=0
+                f"{pressure_key}_{specifier}", self.g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{specifier}", pressure_values, g_data, hc_index=0
+                f"{pressure_key}_{specifier}", pressure_values, self.g_data, hc_index=0
             )
         for flux_name, estimate_name in itertools.product(
             ["total", "wetting_from_ff"],
@@ -769,15 +765,15 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
         ):
             pp.shift_solution_values(
                 f"{flux_name}_{estimate_name}",
-                g_data,
+                self.g_data,
                 pp.HC_ITERATE_SOLUTIONS,
                 len(self.hc_indices),
             )
             flux_values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{estimate_name}", g_data, iterate_index=0
+                f"{flux_name}_{estimate_name}", self.g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{flux_name}_{estimate_name}", flux_values, g_data, hc_index=0
+                f"{flux_name}_{estimate_name}", flux_values, self.g_data, hc_index=0
             )
         for energy_norm_term in [
             "energy_norm_saturation_part",
@@ -786,14 +782,16 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
         ]:
             pp.shift_solution_values(
                 energy_norm_term,
-                g_data,
+                self.g_data,
                 pp.HC_ITERATE_SOLUTIONS,
                 len(self.hc_indices),
             )
             local_term: np.ndarray = pp.get_solution_values(
-                energy_norm_term, g_data, iterate_index=0
+                energy_norm_term, self.g_data, iterate_index=0
             )
-            pp.set_solution_values(energy_norm_term, local_term, g_data, hc_index=0)
+            pp.set_solution_values(
+                energy_norm_term, local_term, self.g_data, hc_index=0
+            )
 
         # Adapt decay rate based on number of nonlinear iterations.
         self.compute_hc_decay(
@@ -884,21 +882,20 @@ class SolutionStrategyEstHC(  # type: ignore
     @typing.override
     def initialize_estimate_vals(self) -> None:
         super().initialize_estimate_vals()
-        sd, g_data = self.mdg.subdomains(return_data=True)[0]
         # Initialize time step values for local estimators.
         for flux_name in ["total", "wetting_from_ff"]:
             pp.set_solution_values(
                 f"{flux_name}_C_estimate",
-                np.zeros(sd.num_cells),
-                g_data,
+                np.zeros(self.g.num_cells),
+                self.g_data,
                 time_step_index=0,
                 hc_index=0,
                 iterate_index=0,
             )
             pp.set_solution_values(
                 f"{flux_name}_L_estimate",
-                np.zeros(sd.num_cells),
-                g_data,
+                np.zeros(self.g.num_cells),
+                self.g_data,
                 time_step_index=0,
                 hc_index=0,
                 iterate_index=0,
@@ -917,43 +914,26 @@ class SolutionStrategyEstHC(  # type: ignore
         else:
             time_step_index = None
 
-        g, g_data = self.mdg.subdomains(return_data=True)[0]
-
         # Switch rel. perm. to goal rel. perm, calculate fluxes, and switch back.
         self.hc_rel_perm_toggle = False
 
-        for flux_name in [
+        for flux_name, flux_eq in zip([
             "total",
             "wetting_from_ff",
             "total_by_t_mobility",
             "total_times_fractional_flow",
-        ]:
-            if flux_name == "total":
-                flux: np.ndarray = self.total_flux(g).value(self.equation_system)
-            elif flux_name == "wetting_from_ff":
-                flux = self.wetting_flux_from_fractional_flow(g).value(
-                    self.equation_system
-                )
-            elif flux_name == "total_by_t_mobility":
-                flux = (self.total_flux(g) / self.total_mobility(g)).value(
-                    self.equation_system
-                )
-            elif flux_name == "total_times_fractional_flow":
-                flux = (
-                    self.total_flux(g)
-                    / self.total_mobility(g)
-                    * self.phase_mobility(g, self.wetting)
-                ).value(self.equation_system)
+        ], [self.total_flux_eq, self.wetting_flux_from_ff_eq, self.total_flux_by_total_mobility_eq, self.total_flux_times_fractional_flow_eq]):
+                flux: np.ndarray = self.equation_system.assemble(evaluate_jacobian=False, equations=[flux_eq])
             pp.shift_solution_values(
                 f"{flux_name}_flux_wrt_goal_rel_perm",
-                g_data,
+                self.g_data,
                 pp.ITERATE_SOLUTIONS,
                 max_index=len(self.iterate_indices),
             )
             pp.set_solution_values(
                 f"{flux_name}_flux_wrt_goal_rel_perm",
                 flux,
-                g_data,
+                self.g_data,
                 time_step_index=time_step_index,
                 iterate_index=0,
             )
@@ -1015,10 +995,13 @@ class SolutionStrategyEstHC(  # type: ignore
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             # Satisfy mypy.
             pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
-
-            self.reconstruct_pressure_vohralik(
+            self.postprocess_pressure_vohralik(
                 pressure_key,
                 flux_specifier="_wrt_goal_rel_perm",
+                prepare_simulation=prepare_simulation,
+            )
+            self.reconstruct_pressure_vohralik(
+                pressure_key,
                 prepare_simulation=prepare_simulation,
             )
 
@@ -1045,17 +1028,16 @@ class DataSavingHC(DataSavingEst):
         if (time_step_index is not None and self.time_manager.time_index > 0) or (
             iterate_index is not None
         ):
-            g, g_data = self.mdg.subdomains(return_data=True)[0]
             for flux_name, est_name in itertools.product(
                 ["total", "wetting_from_ff"], ["C_estimate", "L_estimate"]
             ):
                 data.append(
                     (
-                        g,
+                        self.g,
                         f"{flux_name}_{est_name}",
                         pp.get_solution_values(
                             f"{flux_name}_{est_name}",
-                            g_data,
+                            self.g_data,
                             time_step_index=time_step_index,
                             iterate_index=iterate_index,
                         ),

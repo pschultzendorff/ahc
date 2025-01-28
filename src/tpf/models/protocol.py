@@ -37,7 +37,7 @@ else:
 
     class TPFProtocol(PorePyModel):
 
-        # Variables
+        # Variables & equations
         primary_pressure_var: str
         """Name of primary pressure variable. Normally provided by a mixin of instance
         :class:`VariablesTPF`.
@@ -54,8 +54,28 @@ else:
 
         """
         secondary_saturation_var: str
-        """Name of secondary saturation variable. Normally provided by a mixin of instance
-        :class:`VariablesTPF`.
+        """Name of secondary saturation variable. Normally provided by a mixin of
+        instance :class:`VariablesTPF`.
+
+        """
+        flow_equation: str
+        """Flow equation. Normally provided by a mixin of instance
+        :class:`EquationsTPF`.
+
+        """
+        transport_equation: str
+        """Transport equation. Normally provided by a mixin of instance
+        :class:`EquationsTPF`.
+
+        """
+        secondary_pressure_eq: str
+        """Secondary pressure equation. Normally provided by a mixin of instance
+        :class:`EquationsTPF`.
+
+        """
+        secondary_saturation_eq: str
+        """Secondary saturation equation. Normally provided by a mixin of instance
+        :class:`EquationsTPF`.
 
         """
 
@@ -81,6 +101,11 @@ else:
         """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
 
         nonlinear_solver_statistics: SolverStatisticsTPF
+
+        g: pp.Grid
+        """Single subdomain."""
+        g_data: dict
+        """Single subdomain data dictionarys."""
 
         @property
         def uses_hc(self) -> bool:
@@ -280,6 +305,11 @@ else:
             """Phase flux bc values on Neumann boundaries."""
             ...
 
+        # SolutionStrategyTPF attributes and methods:
+        def assemble_residual(self) -> np.ndarray:
+            """Assemble the residual."""
+            ...
+
     class HCProtocol(Protocol):
 
         _rel_perm_constants_1: RelPermConstants
@@ -364,6 +394,27 @@ else:
 
     class ReconstructionProtocol(Protocol):
 
+        total_flux_eq: str
+        """Total flux equation. Normally provided by a mixin of instance
+        :class:`SolutionStrategyReconstruction`.
+
+        """
+        wetting_flux_from_ff_eq: str
+        """Wetting flux equation. Normally provided by a mixin of instance
+        :class:`SolutionStrategyReconstruction`.
+
+        """
+        total_flux_by_total_mobility_eq: str
+        """Total flux by total mobility equation. Normally provided by a mixin of
+        instance :class:`SolutionStrategyReconstruction`.
+
+        """
+        total_flux_times_fractional_flow_eq: str
+        """Total flux times fractional flow equation. Normally provided by a mixin of
+        instance :class:`SolutionStrategyReconstruction`.
+
+        """
+
         quadpy_elements: np.ndarray
         """Grid cells in quadpy format."""
 
@@ -427,16 +478,30 @@ else:
             """Setup pressure reconstruction."""
             ...
 
-        def reconstruct_pressure_vohralik(
+        def postprocess_pressure_vohralik(
             self,
             pressure_key: PRESSURE_KEY,
             flux_specifier: str = "",
             prepare_simulation: bool = False,
         ) -> None:
-            """Reconstruct pressure as elementwise P2 polynomials."""
+            """Postprocess pressure into elementwise P2 polynomials."""
+            ...
+
+        def reconstruct_pressure_vohralik(
+            self,
+            pressure_key: PRESSURE_KEY,
+            prepare_simulation: bool = False,
+        ) -> None:
+            r"""Reconstruct pressures in :math:`H^1_0(\Omega)` by applying the Oswald
+            interpolator."""
             ...
 
         # EquilibratedFluxMixin attributes and methods:
+
+        def setup_flux_equilibration(self) -> None:
+            """Setup flux equilibration."""
+            ...
+
         def equilibrate_flux_during_Newton(
             self,
             flux_name: Literal["total", "wetting_from_ff"],
@@ -467,6 +532,10 @@ else:
             ...
 
         # SolutionStrategyReconstructionsMixin attributes and methods:
+        def set_equations_for_additional_vars(self) -> None:
+            """Set equations for additional variables."""
+            ...
+
         def eval_val_and_jac_fluxes(self, prepare_simulation: bool = False) -> None:
             """Evaluate residual and Jacobian of fluxes to be equilibrated."""
             ...

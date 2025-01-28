@@ -29,19 +29,23 @@ class RelPermConstants:
     model: REL_PERM_MODEL = "linear"
     """The relative permeability model."""
 
-    n1: int = 1
+    n1: float = 1
     """Model parameter for the Brooks-Corey model."""
-    n2: int = 1
+    n2: float = 1
     """Model parameter for the Brooks-Corey model."""
-    n3: int = 1
+    n3: float = 1
     """Model parameter for the Brooks-Corey model."""
+    n_b: float = 1
+    """Model parameter for the Brooks-Corey-Burdine and Brooks-Corey-Mualem models."""
+    eta: float = 1
+    """Model parameter for the Brooks-Corey-Mualem models."""
     power: int = 2
     """Model parameter for the Corey and linear models."""
     linear_param_w: float = 1.0
     """Model parameter for the Corey and linear models."""
     linear_param_n: float = 1.0
     """Model parameter for the Corey and linear models."""
-    kappa_g: float = 1.0
+    kappa: float = 1.0
     """Model parameter for the van Genuchten model."""
     n_g: float = 1.0
     """Model parameter for the van Genuchten model."""
@@ -57,12 +61,29 @@ class RelPermConstants:
     def __post_init__(self) -> None:
         if not self.is_rel_perm_model(self.model):
             raise ValueError("Invalid relative permeability model.")
-        if self.model == "van Genuchten-Burdine":
-            self.m_g: float = 1 - 1 / self.n_g
+        elif self.model == "Brooks-Corey-Burdine":
+            self.n1 = 2.0
+            self.n2 = 1.0 + 2.0 / self.n_b
+            self.n3 = 1.0
+            logger.info(
+                "Brooks-Corey-Burdine model is used. Adjusting parameters to n1"
+                + f" = {self.n1}, n2 = {self.n2}, n3 = {self.n3}."
+            )
+        elif self.model == "Brooks-Corey-Mualem":
+            self.n1 = self.eta
+            self.n2 = 1.0 + 1.0 / self.n_b
+            self.n3 = 2.0
+            logger.info(
+                f"Brooks-Corey-Mualem model is used. Adjusting parameters to n1"
+                + f" = {self.n1}, n2 = {self.n2}, n3 = {self.n3}."
+            )
+
+        elif self.model == "van Genuchten-Burdine":
+            self.m_g = 1 - 1 / self.n_g
             logger.info(
                 f"van Genuchten-Burdine model is used. Adjusting m_g to {self.m_g}."
             )
-        if self.model == "van Genuchten-Mualem":
+        elif self.model == "van Genuchten-Mualem":
             self.m_g = 1 - 2 / self.n_g
             logger.info(
                 f"van Genuchten-Mualem model is used. Adjusting m_g to {self.m_g}."
@@ -203,7 +224,7 @@ class RelativePermeability(TPFProtocol):
 
         elif rel_perm_constants.model == "van Genuchten-Mualem":
             if phase.name == self.wetting.name:
-                rel_perm = s_phase ** pp.ad.Scalar(rel_perm_constants.kappa_g) * (
+                rel_perm = s_phase ** pp.ad.Scalar(rel_perm_constants.kappa) * (
                     pp.ad.Scalar(1)
                     - (
                         pp.ad.Scalar(1)
@@ -212,7 +233,7 @@ class RelativePermeability(TPFProtocol):
                     ** pp.ad.Scalar(rel_perm_constants.m_g)
                 ) ** pp.ad.Scalar(2)
             elif phase.name == self.nonwetting.name:
-                rel_perm = s_phase ** pp.ad.Scalar(rel_perm_constants.kappa_g) * (
+                rel_perm = s_phase ** pp.ad.Scalar(rel_perm_constants.kappa) * (
                     pp.ad.Scalar(1)
                     - s_w_normalized ** pp.ad.Scalar(1 / rel_perm_constants.m_g)
                 ) ** pp.ad.Scalar(rel_perm_constants.m_g * 2)
@@ -315,7 +336,7 @@ class RelativePermeability(TPFProtocol):
         elif rel_perm_constants.model == "van Genuchten-Mualem":
             if phase.name == self.wetting.name:
                 rel_perm = (
-                    s_phase**rel_perm_constants.kappa_g
+                    s_phase**rel_perm_constants.kappa
                     * (
                         1
                         - (1 - s_phase ** (1 / rel_perm_constants.m_g))
@@ -324,7 +345,7 @@ class RelativePermeability(TPFProtocol):
                     ** 2
                 )
             elif phase.name == self.nonwetting.name:
-                rel_perm = s_phase**rel_perm_constants.kappa_g * (
+                rel_perm = s_phase**rel_perm_constants.kappa * (
                     1 - s_w_normalized ** (1 / rel_perm_constants.m_g)
                 ) ** (rel_perm_constants.m_g * 2)
 

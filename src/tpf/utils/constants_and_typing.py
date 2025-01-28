@@ -7,6 +7,8 @@ NONWETTING: PHASENAME = "nonwetting"
 
 REL_PERM_MODEL = Literal[
     "Brooks-Corey",
+    "Brooks-Corey-Burdine",
+    "Brooks-Corey-Mualem",
     "Corey",
     "power",
     "linear",

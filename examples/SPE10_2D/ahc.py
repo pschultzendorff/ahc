@@ -65,10 +65,6 @@ config.DISABLE_JIT = True
 np.seterr(all="raise")
 warnings.filterwarnings("default")
 
-# Fix seed for reproducability.
-random.seed(0)
-np.random.seed(0)
-
 # Setup logging.
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -78,47 +74,8 @@ logger.setLevel(logging.INFO)
 # region MODEL
 
 
-class ModifiedSolutionStrategyMixin:
-
-    mdg: pp.MixedDimensionalGrid
-    wetting: FluidPhase
-    nonwetting: FluidPhase
-    corner_cell_ids: Callable[[pp.Grid], list[int]]
-    equation_system: pp.EquationSystem
-
-    def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation.
-
-        The corner cells get prescibed the right values immediately. Inside the
-        reservoir, the initial pressure is higher. The initial saturation is set to the
-        residual wetting saturation + 0.1 inside the reservoir.
-
-        """
-        g: pp.Grid = self.mdg.subdomains()[0]
-
-        initial_pressure = np.full(g.num_cells, INITIAL_PRESSURE * PSI)
-        initial_saturation = np.full(g.num_cells, INITIAL_SATURATION)
-        self.equation_system.set_variable_values(
-            np.concatenate([initial_pressure, initial_pressure]),
-            [self.wetting.p, self.nonwetting.p],
-            time_step_index=0,
-            hc_index=0,
-            iterate_index=0,
-        )
-        self.equation_system.set_variable_values(
-            np.concatenate([initial_saturation, 1 - initial_saturation]),
-            [self.wetting.s, self.nonwetting.s],
-            time_step_index=0,
-            hc_index=0,
-            iterate_index=0,
-        )
-
-
 class SPE10HC(
-    ModifiedSolutionStrategyMixin,
-    # SPE10:
-    SPE10,
-    # Two phase flow with HC:
+    SPE10Mixin,
     TwoPhaseFlowHC,
 ): ...  # type: ignore
 
@@ -128,16 +85,11 @@ class SPE10HC(
 # region RUN
 spe10_layer: int = 80
 
-params = {
-    # Base folder and file name. These will get changed by
-    # ``ConvergenceAnalysisExtended``.
-    "file_name": "setup",
+params: dict[str, Any] = {
     "progressbars": True,
     # Model:
     "formulation": "fractional_flow",
-    "material_constants": {
-        "solid": pp.SolidConstants({"porosity": 0.3, "permeability": 1e-15}),
-    },
+    "material_constants": {},
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
@@ -160,56 +112,55 @@ params = {
     "hc_error_ratio": 0.01,
     "nl_error_ratio": 0.01,
     # Nonlinear params:
-    "max_iterations": 10,
+    "max_iterations": 20,
     "nl_convergence_tol": 1e-5,
-    "nl_divergence_tol": 1e15,
+    "nl_divergence_tol": 1e30,
 }
 
-cell_size: float = 600 * FEET / 30
+cell_sizes: list[float] = [600 * FEET / 30, 600 * FEET / 60, 600 * FEET / 120]
 rel_perm_constants_list_1: list[dict[str, Any]] = [
     {
         "model": "linear",
-        "limit": True,
-        "linear_param_w": 1,
-        "linear_param_n": 1,
+        "limit": False,
     },
 ]
 rel_perm_constants_list_2: list[dict[str, Any]] = [
     {
         "model": "Brooks-Corey",
-        "limit": True,
+        "limit": False,
         "n1": 2,
         "n2": 2,  # 1 + 2/n_b
         "n3": 1,
     },
+    {"model": "Corey", "limit": False, "power": 2},
+    {"model": "Corey", "limit": False, "power": 3},
+    {"model": "van Genuchten-Burdine", "limit": False, "n_g": -1.0},
 ]
 
 cap_press_constants_list: list[dict[str, Any]] = [
-    {"model": "linear", "entry_pressure": 5 * PSI},
+    {"model": None},
+    {"model": "linear", "linear_param": 5 * PSI},  # 0.5 bar at s_w = 0.2.
 ]
 
 
-for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
+for i, (cell_size, rp_model_1, rp_model_2, cp_model) in enumerate(
     itertools.product(
-        rel_perm_constants_list_1, rel_perm_constants_list_2, cap_press_constants_list
+        cell_sizes[:2],
+        rel_perm_constants_list_1,
+        [rel_perm_constants_list_2[1]],
+        [cap_press_constants_list[0]],
     )
 ):
-    logger.info(
-        f"Run {i + 1} of {len(rel_perm_constants_list_1) *  len(rel_perm_constants_list_2)* len(cap_press_constants_list)}"
-    )
+    logger.info(f"Varying cell sizes. Run {i + 1} of {len(cell_sizes)}")
     logger.info(
         f"Cell size: {cell_size:.2f}, RP model 1: {rp_model_1['model']}, RP model 2: {rp_model_2['model']}, CP model: {cp_model['model']}"
     )
-
-    # We have the file name both in the folder name and the filename to make
-    # distinguishing different runs in ParaView easier.
-    filename: str = (
-        f"rp1_{rp_model_1['model']} rp2_{rp_model_2['model']}_cp_{cp_model['model']}"
-    )
+    filename: str = f"cellsz_{int(cell_size)}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "adaptive homotopy continuation"
-        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
+        / "ahc"
+        / "varying_cell_sizes"
+        / f"lay_{spe10_layer}_rp1_{rp_model_1['model']}_rp2_{rp_model_2['model']}_cp._{cp_model['model']}"
         / filename
     )
 
@@ -223,9 +174,68 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
         {
             # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
-                schedule=np.array([0, 10 * pp.DAY]),  # 5 days
-                dt_init=0.5 * pp.DAY,  # Time step size in days.
-                constant_dt=True,
+                schedule=np.array([0.0, 10.0 * pp.DAY]),
+                dt_init=10 * pp.DAY,
+                constant_dt=False,
+                dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
+                recomp_factor=0.1,
+                recomp_max=5,
+            ),
+            "folder_name": foldername,
+            "file_name": filename,
+            "solver_statistics_file_name": foldername / "solver_statistics.json",
+            "meshing_arguments": {"cell_size": cell_size},
+            "rel_perm_constants": {"model_1": rp_model_1, "model_2": rp_model_2},
+            "cap_press_constants": cp_model,
+        }
+    )
+    model = SPE10HC(params)
+    try:
+        pp.run_time_dependent_model(model=model, params=params)
+    except Exception as error:
+        logger.error(f"Model {model} failed with error: {error}")
+
+for i, (cell_size, rp_model_1, rp_model_2, cp_model) in enumerate(
+    itertools.product(
+        [cell_sizes[0]],
+        rel_perm_constants_list_1,
+        rel_perm_constants_list_2,
+        [cap_press_constants_list[0]],
+    )
+):
+    logger.info(
+        f"Varying rel. perm. models. Run {i + 1} of {len(rel_perm_constants_list_2)}."
+    )
+
+    if rp_model_2["model"] == "Corey":
+        filename = f"rp1_{rp_model_1['model']}_rp2_{rp_model_2['model']}_power_{rp_model_2['power']}"
+    else:
+        filename = f"rp1_{rp_model_1['model']}_rp2_{rp_model_2['model']}"
+
+    foldername = (
+        pathlib.Path(__file__).parent
+        / "ahc"
+        / "varying_rel_perm_models"
+        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}_cp._{cp_model['model']}"
+        / filename
+    )
+
+    try:
+        shutil.rmtree(foldername)
+    except Exception:
+        pass
+    foldername.mkdir(parents=True)
+
+    params.update(
+        {
+            # Reinitialize the time manager for each run.
+            "time_manager": pp.TimeManager(
+                schedule=np.array([0.0, 10.0 * pp.DAY]),
+                dt_init=10 * pp.DAY,
+                constant_dt=False,
+                dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
+                recomp_factor=0.1,
+                recomp_max=5,
             ),
             "folder_name": foldername,
             "file_name": filename,
@@ -251,6 +261,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
         rel_perm_constants_list_1, rel_perm_constants_list_2, cap_press_constants_list
     )
 ):
+    continue
     filename: str = (
         f"rp1_{rp_model_1['model']} rp2_{rp_model_2['model']}_cp_{cp_model['model']}"
     )

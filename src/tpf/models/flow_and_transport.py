@@ -445,41 +445,63 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
         except:
             ValueError("Equations not found.")
 
-        g = self.mdg.subdomains()[0]
-
         # Spatial discretization operators.
-        div = pp.ad.Divergence([g])
+        div = pp.ad.Divergence([self.g])
 
         # Time derivatives.
         dt_s = pp.ad.time_derivatives.dt(self.wetting.s, self.ad_time_step)
 
         # Ad source.
-        source_ad_w = pp.ad.DenseArray(self.phase_fluid_source(g, self.wetting))
-        source_ad_t = pp.ad.DenseArray(self.total_fluid_source(g))
+        source_ad_w = pp.ad.DenseArray(self.phase_fluid_source(self.g, self.wetting))
+        source_ad_t = pp.ad.DenseArray(self.total_fluid_source(self.g))
 
         # Ad parameters.
-        porosity_ad = pp.ad.DenseArray(self.porosity(g))
+        porosity_ad = pp.ad.DenseArray(self.porosity(self.g))
 
         # Ad equations
         if self.formulation == "fractional_flow":
             # NOTE For ``flux_t``, the total mobility is already included.
-            flux_t = self.total_flux(g)
+            flux_t = self.total_flux(self.g)
             wetting_flux_from_fractional_flow: pp.ad.Operator = (
-                self.wetting_flux_from_fractional_flow(g)
+                self.wetting_flux_from_fractional_flow(self.g)
             )
 
             flow_equation = div @ flux_t - source_ad_t
             transport_equation = (
-                porosity_ad * (self.volume_integral(dt_s, [g], 1))
+                porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
                 + div @ wetting_flux_from_fractional_flow
                 - source_ad_w
             )
-        flow_equation.set_name("Flow equation")
-        transport_equation.set_name("Transport equation")
+
+        self.flow_equation = "Flow equation"
+        self.transport_equation = "Transport equation"
+
+        flow_equation.set_name(self.flow_equation)
+        transport_equation.set_name(self.transport_equation)
 
         # Update the equation list.
-        self.equation_system.set_equation(flow_equation, [g], {"cells": 1})
-        self.equation_system.set_equation(transport_equation, [g], {"cells": 1})
+        self.equation_system.set_equation(flow_equation, [self.g], {"cells": 1})
+        self.equation_system.set_equation(transport_equation, [self.g], {"cells": 1})
+
+        # Secondary variables.
+        if self.formulation == "fractional_flow":
+            secondary_pressure: pp.ad.Operator = self.nonwetting.p - self.cap_press(
+                self.wetting.s
+            )
+            secondary_saturation: pp.ad.Operator = pp.ad.Scalar(1) - self.wetting.s
+
+            self.secondary_pressure_eq = "Secondary pressure equation"
+            self.secondary_saturation_eq = "Secondary saturation equation"
+
+            secondary_pressure.set_name(self.secondary_pressure_eq)
+            secondary_saturation.set_name(self.secondary_saturation_eq)
+
+            self.equation_system.set_equation(
+                secondary_pressure, [self.g], {"cells": 1}
+            )
+            self.equation_system.set_equation(
+                secondary_saturation, [self.g], {"cells": 1}
+            )
 
     def _error_function_deriv(self) -> pp.ad.Operator:
         """Returns the derivative of the error function w.r.t. the saturation.
@@ -1017,6 +1039,8 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self.set_materials()
         self.set_geometry()
 
+        self.g, self.g_data = self.mdg.subdomains(return_data=True)[0]
+
         # Exporter initialization must be done after grid creation,
         # but prior to data initialization.
         self.set_solver_statistics()
@@ -1053,9 +1077,9 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         """
         super().set_discretization_parameters()
-        g, g_data = self.mdg.subdomains(return_data=True)[0]
+
         # Boundary conditions and parameters.
-        perm = self.permeability(g)
+        perm = self.permeability(self.g)
         # Different treatment for scalar and tensor permeability.
         if isinstance(perm, np.ndarray):
             diffusivity = pp.SecondOrderTensor(perm)
@@ -1064,18 +1088,18 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         # all_bf, *_ = self._domain_boundary_sides(sd)
         # Parameters that are not used for discretization.
         pp.initialize_data(
-            g,
-            g_data,
+            self.g,
+            self.g_data,
             self.flux_key,
             {
-                "bc": self.bc_type(g),
+                "bc": self.bc_type(self.g),
                 "second_order_tensor": diffusivity,
-                "ambient_dimension": g.dim,
+                "ambient_dimension": self.g.dim,
                 # We initialize the Darcy flux to one just s.t.
                 # ``Upwind.discretize()`` can be called. This does not need to be
                 # updated, as only ``Upwind.bound_transport_neu()`` is used, which
                 # does not depend on the Darcy flux.
-                "darcy_flux": np.ones(g.num_faces),
+                "darcy_flux": np.ones(self.g.num_faces),
             },
         )
 
@@ -1090,19 +1114,19 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         # Update Darcy fluxes for both phases.
         for phase in self.phases.values():
             try:
-                phase_potential: np.ndarray = self.phase_potential(g, phase).value(
+                phase_potential: np.ndarray = self.phase_potential(self.g, phase).value(
                     self.equation_system
                 )
             except KeyError:
                 # When initializing the simulation, the phase potentials cannot be
                 # computed. Use unit values for the potential.
-                phase_potential = np.ones(g.num_faces)
+                phase_potential = np.ones(self.g.num_faces)
             pp.initialize_data(
-                g,
-                g_data,
+                self.g,
+                self.g_data,
                 phase.mobility_key,
                 {
-                    "bc": self.bc_type(g),
+                    "bc": self.bc_type(self.g),
                     # We initialize the Darcy flux to unit values just s.t.
                     # ``Upwind.discretize()`` can be called.
                     "darcy_flux": phase_potential,
@@ -1128,15 +1152,14 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
     @typing.override
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
-        g = self.mdg.subdomains()[0]
         self.equation_system.set_variable_values(
-            np.full(g.num_cells * 2, 0.0),
+            np.full(self.g.num_cells * 2, 0.0),
             [self.wetting.p, self.nonwetting.p],
             time_step_index=0,
             iterate_index=0,
         )
         self.equation_system.set_variable_values(
-            np.full(g.num_cells * 2, 0.5),
+            np.full(self.g.num_cells * 2, 0.5),
             [self.wetting.s, self.nonwetting.s],
             time_step_index=0,
             iterate_index=0,
@@ -1149,7 +1172,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self.equation_system.discretize()
         if self.formulation == "fractional_flow":
             for phase in self.phases.values():
-                phase_potential = self.phase_potential(self.mdg.subdomains()[0], phase)
+                phase_potential = self.phase_potential(self.g, phase)
                 phase_potential.discretize(self.mdg)
         logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
@@ -1161,7 +1184,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         if self.formulation == "fractional_flow":
             # TODO Is it necessary to rediscretize phase_potential operators?
             for phase in self.phases.values():
-                phase_potential = self.phase_potential(self.mdg.subdomains()[0], phase)
+                phase_potential = self.phase_potential(self.g, phase)
                 phase_potential.discretize(self.mdg)
         logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
@@ -1183,11 +1206,18 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         """
         t_0 = time.time()
-        if self._use_ad:
-            self.linear_system = self.equation_system.assemble(
-                variables=[self.primary_saturation_var, self.primary_pressure_var]
-            )
+        self.linear_system = self.equation_system.assemble(
+            equations=[self.flow_equation, self.transport_equation],
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+        )
         logger.debug(f"Assembled linear system in {time.time() - t_0:.2e} seconds")
+
+    def assemble_residual(self) -> np.ndarray:
+        """Assemble the residual."""
+        return self.equation_system.assemble(
+            evaluate_jacobian=False,
+            equations=[self.flow_equation, self.transport_equation],
+        )
 
     # region NONLINEAR LOOP
     @typing.override
@@ -1204,15 +1234,6 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self.equation_system.set_variable_values(
             assembled_variables, iterate_index=0, additive=False
         )
-        if self._appleyard_chopping:
-            raise NotImplementedError(
-                "Appleyard chopping is not implemented for two-phase flow."
-            )
-            # self._prev_saturation: np.ndarray = (
-            #     self.equation_system.get_variable_values(
-            #         variables=[self.primary_saturation_var], time_step_index=0
-            #     )
-            # )
 
     @typing.override
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
@@ -1225,11 +1246,20 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             nonlinear_increment: The new solution, as computed by the non-linear solver.
 
         """
+        if self._appleyard_chopping:
+            raise NotImplementedError(
+                "Appleyard chopping is not implemented for two-phase flow."
+            )
+            # self._prev_saturation: np.ndarray = (
+            #     self.equation_system.get_variable_values(
+            #         variables=[self.primary_saturation_var], time_step_index=0
+            #     )
+            # )
         # Update primary variables.
         self.equation_system.shift_iterate_values(max_index=len(self.iterate_indices))
         self.equation_system.set_variable_values(
             values=nonlinear_increment,
-            variables=[self.primary_pressure_var, self.primary_saturation_var],
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
             additive=True,
             iterate_index=0,
         )
@@ -1238,22 +1268,14 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
     def eval_secondary_variables(self) -> None:
         """Evaluate and update secondary variables."""
-        if self.formulation == "fractional_flow":
-            secondary_pressure = self.equation_system.get_variables(
-                variables=[self.primary_pressure_var]
-            )[0] - self.cap_press(
-                self.equation_system.get_variables(
-                    variables=[self.primary_saturation_var]
-                )[0]
-            )
-        secondary_saturation = (
-            pp.ad.Scalar(1)
-            - self.equation_system.get_variables(
-                variables=[self.primary_saturation_var]
-            )[0]
+        # Take the negative of the assembled values, as ``equation_system.assemble``
+        # returns the negative of the RHS.
+        secondary_pressure_sol = -self.equation_system.assemble(
+            evaluate_jacobian=False, equations=[self.secondary_pressure_eq]
         )
-        secondary_pressure_sol = secondary_pressure.value(self.equation_system)
-        secondary_saturation_sol = secondary_saturation.value(self.equation_system)
+        secondary_saturation_sol = -self.equation_system.assemble(
+            evaluate_jacobian=False, equations=[self.secondary_saturation_eq]
+        )
         #  Since the values were computed with the additive value of the primary
         #  pressure and saturation variable, we set ``additive=False``.
         self.equation_system.set_variable_values(
@@ -1404,12 +1426,13 @@ class DataSavingTPF(TPFProtocol, pp.DataSavingMixin):
             data.append((var.domain[0], var.name, values))
 
         # Add secondary variables/derived quantities.
-        g: pp.Grid = self.mdg.subdomains()[0]
         data.append(
             (
-                g,
+                self.g,
                 "specific_volume",
-                self._evaluate_and_scale(g, "specific_volume", f"m^{self.nd - g.dim}"),
+                self._evaluate_and_scale(
+                    self.g, "specific_volume", f"m^{self.nd - self.g.dim}"
+                ),
             )
         )
 

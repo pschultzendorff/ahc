@@ -322,10 +322,9 @@ class SolutionStrategySPE10(TPFProtocol):
     def add_constant_spe10_data(self) -> None:
         """Save the SPE10 data to the exporter."""
         data: list[DataInput] = []
-        g: pp.Grid = self.mdg.subdomains()[0]
         for dim, perm in zip(["kxx", "kyy", "kzz"], self._permeability):
-            data.append((g, "permeability_" + dim, perm))
-        data.append((g, "porosity", self.porosity(g)))
+            data.append((self.g, "permeability_" + dim, perm))
+        data.append((self.g, "porosity", self.porosity(self.g)))
         self.exporter.add_constant_data(data)
 
         # For convenience, add the porosity and permeability to the iteration exporter
@@ -341,12 +340,9 @@ class SolutionStrategySPE10(TPFProtocol):
         residual wetting saturation + 0.1 inside the reservoir.
 
         """
-        g: pp.Grid = self.mdg.subdomains()[0]
-        # corner_cell_ids: list[np.intp] = self.corner_cell_ids(g)
-
-        initial_pressure = np.full(g.num_cells, INITIAL_PRESSURE)
+        initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
         # initial_pressure[corner_cell_ids] = BHP
-        initial_saturation = np.full(g.num_cells, INITIAL_SATURATION)
+        initial_saturation = np.full(self.g.num_cells, INITIAL_SATURATION)
         # initial_saturation[corner_cell_ids] = 1 - self.wetting.residual_saturation
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),

@@ -46,6 +46,7 @@ import numpy as np
 import porepy as pp
 from numba import config
 from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
+from tpf.models.flow_and_transport import TwoPhaseFlow
 from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import FEET, PSI
 from tpf.viz.iteration_exporting import IterationExportingMixin
@@ -70,7 +71,8 @@ warnings.filterwarnings("default")
 
 # Setup logging.
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+# NOTE Logging creates a small overhead. To gain some speedup, set the level to WARNING.
+logger.setLevel(logging.WARNING)
 
 # endregion
 
@@ -100,7 +102,7 @@ params = {
     "formulation": "fractional_flow",
     "material_constants": {},
     "rel_perm_constants": {"model": "linear", "limit": False},
-    "cap_press_constants": {"model": "linear", "linear_param": 810 * PSI},
+    "cap_press_constants": {"model": "linear", "linear_param": 0.1 * PSI},
     "time_manager": pp.TimeManager(
         schedule=np.array([0, 1.0 * pp.DAY]),
         dt_init=1.0 * pp.DAY,
@@ -126,7 +128,7 @@ except Exception:
 foldername.mkdir(parents=True)
 
 tracer = VizTracer(
-    min_duration=1e5,  # μs
+    min_duration=1e3,  # μs
     ignore_c_function=True,
     ignore_frozen=True,
 )

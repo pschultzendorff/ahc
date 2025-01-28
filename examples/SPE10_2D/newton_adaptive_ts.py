@@ -88,7 +88,6 @@ logger.setLevel(logging.INFO)
 
 
 class SPE10Newton(
-    IterationExportingMixin,
     SPE10Mixin,
     TwoPhaseFlowErrorEstimate,
 ): ...  # type: ignore
@@ -99,7 +98,7 @@ class SPE10Newton(
 # region RUN
 spe10_layer: int = 80
 
-params = {
+params: dict[str, Any] = {
     "progressbars": True,
     # Model:
     "formulation": "fractional_flow",
@@ -118,40 +117,99 @@ params = {
     "nl_divergence_tol": 1e30,
 }
 
-cell_sizes: list[float] = [600 * FEET / 30]
+cell_sizes: list[float] = [600 * FEET / 30, 600 * FEET / 60, 600 * FEET / 120]
 rel_perm_constants_list: list[dict[str, Any]] = [
-    {"model": "linear", "limit": False},
-    {
-        "model": "Brooks-Corey",
-        "limit": True,
-        "n1": 2,
-        "n2": 2,  # 1 + 2/n_b
-        "n3": 1,
-    },
+    # {"model": "linear", "limit": False},
+    # {
+    #     "model": "Brooks-Corey",
+    #     "limit": False,
+    #     "n1": 2,
+    #     "n2": 2,  # 1 + 2/n_b
+    #     "n3": 1,
+    # },
+    {"model": "Corey", "limit": False, "power": 2},
+    {"model": "Corey", "limit": False, "power": 3},
+    # {"model": "van Genuchten-Burdine", "limit": False, "n_g": -1.0},
 ]
 cap_press_constants_list: list[dict[str, Any]] = [
-    # {"model": None},
-    {"model": "linear", "linear_param": 7.25 * PSI},  # 0.5 bar at s_w = 0.2.
+    {"model": None},
+    {"model": "linear", "linear_param": 5 * PSI},  # 0.5 bar at s_w = 0.2.
 ]
 
 
 for i, (cell_size, rp_model, cp_model) in enumerate(
-    itertools.product(cell_sizes, rel_perm_constants_list, cap_press_constants_list)
-):
-    logger.info(
-        f"Run {i + 1} of {len(cell_sizes) * len(rel_perm_constants_list) * len(cap_press_constants_list)}"
+    itertools.product(
+        cell_sizes[2:], [rel_perm_constants_list[1]], [cap_press_constants_list[0]]
     )
+):
+    continue
+    logger.info(f"Varying cell sizes. Run {i + 1} of {len(cell_sizes)}.")
     logger.info(
-        f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}"
+        f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}."
     )
 
-    # We have the file name both in the folder name and the filename to make
-    # distinguishing different runs in ParaView easier.
-    filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
+    filename: str = f"cellsz_{int(cell_size)}"
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
         / "newton_adaptive_ts"
-        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
+        / "varying_cell_sizes"
+        / f"lay_{spe10_layer}_rp_{rp_model['model']}_cp._{cp_model['model']}"
+        / filename
+    )
+
+    try:
+        shutil.rmtree(foldername)
+    except Exception:
+        pass
+    foldername.mkdir(parents=True)
+
+    params.update(
+        {
+            # Reinitialize the time manager for each run.
+            "time_manager": pp.TimeManager(
+                schedule=np.array([0.0, 10.0 * pp.DAY]),
+                dt_init=10 * pp.DAY,
+                constant_dt=False,
+                dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
+                recomp_factor=0.1,
+                recomp_max=5,
+            ),
+            "folder_name": foldername,
+            "file_name": filename,
+            "solver_statistics_file_name": foldername / "solver_statistics.json",
+            "meshing_arguments": {"cell_size": cell_size},
+            "rel_perm_constants": rp_model,
+            "cap_press_constants": cp_model,
+        }
+    )
+    model = SPE10Newton(params)
+    try:
+        pp.run_time_dependent_model(model=model, params=params)
+    except Exception as error:
+        logger.error(f"Model {model} failed with error: {error}")
+
+
+for i, (cell_size, rp_model, cp_model) in enumerate(
+    itertools.product(
+        [cell_sizes[0]], rel_perm_constants_list, [cap_press_constants_list[0]]
+    )
+):
+    logger.info(
+        f"Varying rel. perm. models. Run {i + 1} of {len(rel_perm_constants_list)}."
+    )
+    logger.info(
+        f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}."
+    )
+
+    if rp_model["model"] == "Corey":
+        filename = f"rp_{rp_model['model']}_power_{rp_model['power']}"
+    else:
+        filename = f"rp_{rp_model['model']}"
+    foldername = (
+        pathlib.Path(__file__).parent
+        / "newton_adaptive_ts"
+        / "varying_rel_perm_models"
+        / f"lay_{spe10_layer}_cellsz_{int(cell_size)}_cp._{cp_model['model']}"
         / filename
     )
 
@@ -194,8 +252,8 @@ for i, (rp_model, cp_model) in enumerate(
     itertools.product(rel_perm_constants_list, cap_press_constants_list)
 ):
     continue
-    filename: str = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
-    foldername: pathlib.Path = (
+    filename = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
+    foldername = (
         pathlib.Path(__file__).parent
         / "newton_adaptive_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
