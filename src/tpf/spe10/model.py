@@ -13,6 +13,7 @@ from tpf.spe10.fluid_values import (
     BHP,
     INITIAL_PRESSURE,
     INITIAL_SATURATION,
+    INJECTION_RATE,
     PRODUCTION_WELL_SIZE,
     oil,
     water,
@@ -70,7 +71,7 @@ class EquationsSPE10(TPFProtocol):
         if phase.name == self.wetting.name:
             array: np.ndarray = super().phase_fluid_source(g, phase)
             array[self.center_cell_id(g)] = phase.convert_units(
-                87.5, "m^3"
+                INJECTION_RATE, "m^3"
             ) / phase.convert_units(
                 pp.DAY, "s"
             )  # 87.5 m^3/day in [m^3/s]

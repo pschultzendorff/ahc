@@ -1,7 +1,6 @@
 import logging
 import pathlib
 import zipfile
-from typing import Optional
 
 import numpy as np
 import porepy as pp
@@ -39,8 +38,8 @@ def download_spe10_data(data_dir: pathlib.Path, zip_filepath: pathlib.Path) -> N
     logger.info(f"Extracted files: {extracted_files}")
 
     # Locate the .dat files for permeability and porosity.
-    perm_file: Optional[pathlib.Path] = None
-    poro_file: Optional[pathlib.Path] = None
+    perm_file: pathlib.Path | None = None
+    poro_file: pathlib.Path | None = None
     for filename in extracted_files:
         if "perm" in filename.lower():
             perm_file = data_dir / filename
@@ -68,8 +67,8 @@ def load_spe10_data(data_dir: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
     # Ensure the destination directory exists.
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    perm_file: Optional[pathlib.Path] = None
-    poro_file: Optional[pathlib.Path] = None
+    perm_file: pathlib.Path | None = None
+    poro_file: pathlib.Path | None = None
     for filename in data_dir.iterdir():
         if "perm" in str(filename).lower():
             perm_file = data_dir / filename

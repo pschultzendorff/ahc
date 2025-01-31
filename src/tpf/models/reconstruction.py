@@ -3,14 +3,12 @@ from __future__ import annotations
 import itertools
 import logging
 import typing
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-
-# from jax import jit
-from numba import jit, njit
+from numba import njit
 from porepy.viz.exporter import DataInput
 from tpf.models.flow_and_transport import (
     DataSavingTPF,
@@ -83,7 +81,7 @@ class GlobalPressureMixin(TPFProtocol):
         self,
         s_w: np.ndarray,
         pressure_key: PRESSURE_KEY,
-        p_n: Optional[np.ndarray] = None,
+        p_n: np.ndarray | None = None,
         epsilon: float = 1e-6,
     ) -> np.ndarray:
         """Evaluate the global or complimentary pressure field for the given pressure
@@ -134,7 +132,7 @@ class GlobalPressureMixin(TPFProtocol):
 
         """
         if prepare_simulation:
-            time_step_index: Optional[int] = 0
+            time_step_index: int | None = 0
         else:
             time_step_index = None
 
@@ -333,7 +331,7 @@ class PressureReconstructionMixin(TPFProtocol):
         logger.info(f"Reconstructing {pressure_key} pressure.")
 
         if prepare_simulation:
-            time_step_index: Optional[int] = 0
+            time_step_index: int | None = 0
         else:
             time_step_index = None
 
@@ -428,7 +426,7 @@ class PressureReconstructionMixin(TPFProtocol):
 
         """
         if prepare_simulation:
-            time_step_index: Optional[int] = 0
+            time_step_index: int | None = 0
         else:
             time_step_index = None
 
@@ -594,7 +592,7 @@ class EquilibratedFluxMixin(TPFProtocol):
     def equilibrate_flux_during_Newton(
         self,
         flux_name: Literal["total", "wetting_from_ff"],
-        nonlinear_increment: Optional[np.ndarray] = None,
+        nonlinear_increment: np.ndarray | None = None,
     ) -> None:
         """Equilibrate an approximate flux solution at a given Newton iteration.
 
@@ -722,7 +720,7 @@ class EquilibratedFluxMixin(TPFProtocol):
         logger.info(f"Extending {flux_name}{flux_specifier} flux to RT0 functions.")
 
         if prepare_simulation:
-            time_step_index: Optional[int] = 0
+            time_step_index: int | None = 0
         else:
             time_step_index = None
 
@@ -1083,7 +1081,7 @@ class SolutionStrategyReconstruction(  # type: ignore
 
         """
         if prepare_simulation:
-            time_step_index: Optional[int] = 0
+            time_step_index: int | None = 0
         else:
             time_step_index = None
 
@@ -1307,21 +1305,19 @@ def linalg_solve_batch(A_elements: np.ndarray, point_val: np.ndarray) -> np.ndar
 class DataSavingReconstruction(DataSavingTPF):
 
     def _data_to_export(
-        self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
+        self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
         """Append global and complimentary pressures to the exported data."""
         data: list[DataInput] = super()._data_to_export(
             time_step_index=time_step_index,
             iterate_index=iterate_index,
         )
-        # Only export for nonzero time steps or nonlinear steps. Otherwise, this causes
-        # an error, as the function is called via
-        # ``SolutionStrategyTPF.prepare_simulation`` BEFORE the initial values are set
-        # by ``SolutionStrategyEst.prepare_simulation``.
-        if (time_step_index is not None and self.time_manager.time_index > 0) or (
-            iterate_index is not None
-        ):
-            for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+            # Before simulation, the estimates won't be set yet, due to the order of
+            # calls in :meth:`prepare_simulation`. However, after the first time step,
+            # :attr:`time_manager.time_step_index` won't be updated yet. Checking for
+            # all of this is quite convoluted. Instead we just use try-except.
+            try:
                 data.append(
                     (
                         self.g,
@@ -1334,6 +1330,8 @@ class DataSavingReconstruction(DataSavingTPF):
                         ),
                     )
                 )
+            except KeyError:
+                pass
         return data
 
 

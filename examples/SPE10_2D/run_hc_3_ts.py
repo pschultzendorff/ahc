@@ -1,4 +1,5 @@
-r"""Study homotopy continuation.
+r"""Study how the estimators evolve during a homotopy continuation loop. The simulation
+ is run for 3 time steps to study the behavior during each time step.
 
 We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
 continuation. The considered model is similar to the heterogeneous 3D models in the
@@ -24,7 +25,7 @@ Model description:
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
-    - Saturation: residual water saturation (0.2).
+    - Saturation: 0.3.
 - Rel. perm. models:
     - linear
     - Corey with power 2.
@@ -39,35 +40,27 @@ import itertools
 import json
 import logging
 import pathlib
-import random
 import shutil
 import warnings
-from typing import Any, Callable
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from numba import config
 from tpf.models.homotopy_continuation import TwoPhaseFlowHC
-from tpf.models.phase import FluidPhase
 from tpf.numerics.nonlinear.hc_solver import HCSolver
-from tpf.spe10.fluid_values import INITIAL_PRESSURE, INITIAL_SATURATION
-from tpf.spe10.model import SPE10
-from tpf.utils.constants_and_typing import FEET, PSI
+from tpf.spe10.model import SPE10Mixin
 from tpf.viz.solver_statistics import SolverStatisticsHC
 
 # region SETUP
 
 # Disable numba JIT for debugging.
-config.DISABLE_JIT = True
+# config.DISABLE_JIT = True
 
 # Catch numpy warnings.
 np.seterr(all="raise")
 warnings.filterwarnings("default")
-
-# Fix seed for reproducability.
-random.seed(0)
-np.random.seed(0)
 
 # Setup logging.
 logger = logging.getLogger()
@@ -78,47 +71,8 @@ logger.setLevel(logging.INFO)
 # region MODEL
 
 
-class ModifiedSolutionStrategyMixin:
-
-    mdg: pp.MixedDimensionalGrid
-    wetting: FluidPhase
-    nonwetting: FluidPhase
-    corner_cell_ids: Callable[[pp.Grid], list[int]]
-    equation_system: pp.EquationSystem
-
-    def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation.
-
-        The corner cells get prescibed the right values immediately. Inside the
-        reservoir, the initial pressure is higher. The initial saturation is set to the
-        residual wetting saturation + 0.1 inside the reservoir.
-
-        """
-        g: pp.Grid = self.mdg.subdomains()[0]
-
-        initial_pressure = np.full(g.num_cells, INITIAL_PRESSURE * PSI)
-        initial_saturation = np.full(g.num_cells, INITIAL_SATURATION)
-        self.equation_system.set_variable_values(
-            np.concatenate([initial_pressure, initial_pressure]),
-            [self.wetting.p, self.nonwetting.p],
-            time_step_index=0,
-            hc_index=0,
-            iterate_index=0,
-        )
-        self.equation_system.set_variable_values(
-            np.concatenate([initial_saturation, 1 - initial_saturation]),
-            [self.wetting.s, self.nonwetting.s],
-            time_step_index=0,
-            hc_index=0,
-            iterate_index=0,
-        )
-
-
 class SPE10HC(
-    ModifiedSolutionStrategyMixin,
-    # SPE10:
-    SPE10,
-    # Two phase flow with HC:
+    SPE10Mixin,
     TwoPhaseFlowHC,
 ): ...  # type: ignore
 
@@ -129,15 +83,10 @@ class SPE10HC(
 spe10_layer: int = 80
 
 params = {
-    # Base folder and file name. These will get changed by
-    # ``ConvergenceAnalysisExtended``.
-    "file_name": "setup",
     "progressbars": True,
     # Model:
     "formulation": "fractional_flow",
-    "material_constants": {
-        "solid": pp.SolidConstants({"porosity": 0.3, "permeability": 1e-15}),
-    },
+    "material_constants": {},
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
@@ -161,24 +110,17 @@ params = {
     "hc_error_ratio": 0.1,
     "nl_error_ratio": 0.05,
     # Nonlinear params:
-    "max_iterations": 10,
+    "max_iterations": 20,
     "nl_convergence_tol": 1e-5,
-    "nl_divergence_tol": 1e15,
+    "nl_divergence_tol": 1e30,
 }
 
-cell_size: float = 600 * FEET / 30
-rel_perm_constants_list_1: list[dict[str, Any]] = [
-    {
-        "model": "linear",
-        "limit": True,
-        "linear_param_w": 1,
-        "linear_param_n": 1,
-    },
-]
+cell_sizes: list[float] = [600 * FEET / 30, 600 * FEET / 60]
+rel_perm_constants_list_1: list[dict[str, Any]] = [{"model": "linear"}]
 rel_perm_constants_list_2: list[dict[str, Any]] = [
     {
         "model": "Brooks-Corey",
-        "limit": True,
+        "limit": False,
         "n1": 2,
         "n2": 2,  # 1 + 2/n_b
         "n3": 1,
@@ -186,17 +128,21 @@ rel_perm_constants_list_2: list[dict[str, Any]] = [
 ]
 
 cap_press_constants_list: list[dict[str, Any]] = [
-    {"model": "linear", "entry_pressure": 5 * PSI},
+    {"model": None},
+    {"model": "linear", "linear_param": 5 * PSI},
 ]
 
 
-for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
+for i, (cell_size, rp_model_1, rp_model_2, cp_model) in enumerate(
     itertools.product(
-        rel_perm_constants_list_1, rel_perm_constants_list_2, cap_press_constants_list
+        cell_sizes,
+        rel_perm_constants_list_1,
+        rel_perm_constants_list_2,
+        cap_press_constants_list,
     )
 ):
     logger.info(
-        f"Run {i + 1} of {len(rel_perm_constants_list_1) *  len(rel_perm_constants_list_2)* len(cap_press_constants_list)}"
+        f"Run {i + 1} of {len(cell_sizes) * len(rel_perm_constants_list_1) *  len(rel_perm_constants_list_2)* len(cap_press_constants_list)}"
     )
     logger.info(
         f"Cell size: {cell_size:.2f}, RP model 1: {rp_model_1['model']}, RP model 2: {rp_model_2['model']}, CP model: {cp_model['model']}"
@@ -205,7 +151,7 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
     # We have the file name both in the folder name and the filename to make
     # distinguishing different runs in ParaView easier.
     filename: str = (
-        f"rp1_{rp_model_1['model']} rp2_{rp_model_2['model']}_cp_{cp_model['model']}"
+        f"cellsz_{int(cell_size)}_rp1_{rp_model_1['model']} rp2_{rp_model_2['model']}_cp_{cp_model['model']}"
     )
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent

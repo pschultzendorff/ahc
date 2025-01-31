@@ -185,7 +185,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         {
             # Reinitialize the time manager for each run
             "time_manager": pp.TimeManager(
-                schedule=np.array([0, 10.0 * pp.DAY]),  # 5 days
+                schedule=np.array([0, 50.0 * pp.DAY]),  # 5 days
                 dt_init=1.0 * pp.DAY,  # Time step size in days
                 # Run with constant time step s.t. the discretization error varies only
                 # with grid size.

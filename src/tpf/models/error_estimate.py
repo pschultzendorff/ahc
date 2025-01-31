@@ -2,7 +2,7 @@ import functools
 import itertools
 import logging
 import typing
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import porepy as pp
@@ -862,23 +862,22 @@ class SolutionStrategyEst(  # type: ignore
 class DataSavingEst(DataSavingReconstruction):
 
     def _data_to_export(
-        self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
+        self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
         """Append error estimates to the exported data."""
         data: list[DataInput] = super()._data_to_export(
             time_step_index=time_step_index,
             iterate_index=iterate_index,
         )
-        # Only export for nonzero time steps or nonlinear steps. Otherwise, this causes
-        # an error, as the function is called via
-        # ``SolutionStrategyTPF.prepare_simulation`` BEFORE the initial values are set
-        # by ``SolutionStrategyEst.prepare_simulation``.
-        if (time_step_index is not None and self.time_manager.time_index > 0) or (
-            iterate_index is not None
+        for flux_name, est_name in itertools.product(
+            ["total", "wetting_from_ff"], ["R_estimate", "F_estimate"]
         ):
-            for flux_name, est_name in itertools.product(
-                ["total", "wetting_from_ff"], ["R_estimate", "F_estimate"]
-            ):
+            # Before simulation, the estimates won't be set yet, due to the order of
+            # calls in :meth:`prepare_simulation`. However, after the first time step,
+            # :attr:`time_manager.time_step_index` won't be updated yet. Checking for
+            # all of this is quite convoluted. Instead we just use try-except.
+
+            try:
                 data.append(
                     (
                         self.g,
@@ -891,7 +890,10 @@ class DataSavingEst(DataSavingReconstruction):
                         ),
                     )
                 )
-            for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+            except KeyError:
+                pass
+        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+            try:
                 data.append(
                     (
                         self.g,
@@ -904,11 +906,14 @@ class DataSavingEst(DataSavingReconstruction):
                         ),
                     )
                 )
-            for energy_norm_term in [
-                "energy_norm_saturation_part",
-                "energy_norm_global_pressure_part",
-                "energy_norm_complimentary_pressure_part",
-            ]:
+            except KeyError:
+                pass
+        for energy_norm_term in [
+            "energy_norm_saturation_part",
+            "energy_norm_global_pressure_part",
+            "energy_norm_complimentary_pressure_part",
+        ]:
+            try:
                 data.append(
                     (
                         self.g,
@@ -921,6 +926,8 @@ class DataSavingEst(DataSavingReconstruction):
                         ),
                     )
                 )
+            except KeyError:
+                pass
 
         return data
 

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
-
-import numpy as np
 import porepy as pp
 from tpf.utils.constants_and_typing import PHASENAME
 
@@ -26,7 +23,7 @@ class FluidPhase(pp.MaterialConstants):
 
     """
 
-    def __init__(self, constants: Optional[dict[str, pp.number | str]] = None):
+    def __init__(self, constants: dict[str, pp.number | str] | None = None):
         default_constants = self.default_constants
         self.verify_constants(constants, default_constants)
         if constants is not None:

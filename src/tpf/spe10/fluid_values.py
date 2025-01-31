@@ -60,3 +60,4 @@ PRODUCTION_WELL_SIZE: float = 100 * FEET
 """Size of the production wells in the corner cells. The boundary in in vicinity of the
 corners is prescribed Dirichlet conditions corresponding to a production well, i.e.,
 fixed BHP."""
+INJECTION_RATE: float = 87.5  # [m^3/day], constant water injection rate.

@@ -1,9 +1,9 @@
-r"""Study convergence of adaptive homotopy continuation on different grid sizes and with
- different rel. perm./cap. pressure models.
+r"""Study convergence of Newton on different grid sizes and with different rel.
+ perm./cap. pressure models.
 
 The following solvers are employed:
-- Adaptive homotopy continuation (AHC) with Newton.
-- Adaptive homotopy continuation (AHC) with Newton and Appleyard chopping.
+- Newton
+- Newton with Appleyard chopping
 
 We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
 continuation. The considered model is similar to the heterogeneous 3D models in the
@@ -29,7 +29,7 @@ Model description:
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
-    - Saturation: 0.3.
+    - Saturation: residual water saturation (0.2).
 - Rel. perm. models:
     - linear
     - Corey with power 2.
@@ -45,16 +45,22 @@ import os
 import pathlib
 import shutil
 import warnings
+from collections import defaultdict
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
-from tpf.models.homotopy_continuation import TwoPhaseFlowHC
-from tpf.numerics.nonlinear.hc_solver import HCSolver
+from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
+from tpf.spe10.fluid_values import INITIAL_PRESSURE
 from tpf.spe10.model import SPE10Mixin
-from tpf.utils.constants_and_typing import FEET, PSI
-from tpf.viz.solver_statistics import SolverStatisticsHC
+from tpf.utils.constants_and_typing import (
+    COMPLIMENTARY_PRESSURE,
+    FEET,
+    GLOBAL_PRESSURE,
+    PSI,
+)
+from tpf.viz.solver_statistics import SolverStatisticsEst
 
 # region SETUP
 
@@ -78,13 +84,41 @@ logger.setLevel(logging.INFO)
 
 # endregion
 
+
 # region MODEL
 
 
-class SPE10HC(
+class SPE10Newton(
     SPE10Mixin,
-    TwoPhaseFlowHC,
-): ...  # type: ignore
+    TwoPhaseFlowErrorEstimate,
+):  # type: ignore
+
+    def initial_condition(self) -> None:
+        """Set initial values for pressure and saturation.
+
+        The corner cells get prescibed the right values immediately. Inside the
+        reservoir, the initial pressure is higher. The initial saturation is set to the
+        residual wetting saturation + 0.1 inside the reservoir.
+
+        """
+        initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
+        # initial_pressure[corner_cell_ids] = BHP
+        initial_saturation = np.full(self.g.num_cells, self.wetting.residual_saturation)
+        # initial_saturation[corner_cell_ids] = 1 - self.wetting.residual_saturation
+        self.equation_system.set_variable_values(
+            np.concatenate([initial_pressure, initial_pressure]),
+            [self.wetting.p, self.nonwetting.p],
+            time_step_index=0,
+            hc_index=0,
+            iterate_index=0,
+        )
+        self.equation_system.set_variable_values(
+            np.concatenate([initial_saturation, 1 - initial_saturation]),
+            [self.wetting.s, self.nonwetting.s],
+            time_step_index=0,
+            hc_index=0,
+            iterate_index=0,
+        )
 
 
 # endregion
@@ -103,29 +137,16 @@ params: dict[str, Any] = {
     "spe10_quarter_domain": True,
     "spe10_layer": spe10_layer - 1,
     "spe10_isotropic_perm": True,
-    # HC params:
-    "nonlinear_solver_statistics": SolverStatisticsHC,
-    "nonlinear_solver": HCSolver,
-    "hc_max_iterations": 20,
-    "hc_adaptive": True,
-    # HC decay parameters.
-    "hc_constant_decay": False,
-    "hc_lambda_decay": 0.9,
-    "hc_decay_min_max": (0.1, 0.95),
-    "nl_iter_optimal_range": (4, 7),
-    "nl_iter_relax_factors": (0.7, 1.3),
-    "hc_decay_recomp_max": 5,
-    # Adaptivity parameters.
-    "hc_error_ratio": 0.1,
-    "nl_error_ratio": 0.1,
     # Nonlinear params:
+    "nonlinear_solver_statistics": SolverStatisticsEst,
+    "nonlinear_solver": pp.NewtonSolver,
     "nl_convergence_tol": 1e-5,
     "nl_divergence_tol": 1e30,
 }
 
 cell_sizes: list[float] = [600 * FEET / 30, 600 * FEET / 60, 600 * FEET / 120]
-rel_perm_constants_list_1: list[dict[str, Any]] = [{"model": "linear", "limit": False}]
-rel_perm_constants_list_2: list[dict[str, Any]] = [
+rel_perm_constants_list: list[dict[str, Any]] = [
+    {"model": "linear", "limit": False},
     {
         "model": "Brooks-Corey",
         "limit": False,
@@ -137,33 +158,32 @@ rel_perm_constants_list_2: list[dict[str, Any]] = [
     {"model": "Corey", "limit": False, "power": 3},
     {"model": "van Genuchten-Burdine", "limit": False, "n_g": -1.0},
 ]
-
 cap_press_constants_list: list[dict[str, Any]] = [
     {"model": None},
     {"model": "linear", "linear_param": 30 * PSI},
 ]
 appleyard_chopping_list: list[bool] = [False, True]
 
-for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enumerate(
+for i, (appleyard_chopping, cell_size, rp_model, cp_model) in enumerate(
     itertools.product(
         appleyard_chopping_list,
         cell_sizes[:2],
-        rel_perm_constants_list_1,
-        rel_perm_constants_list_2[1:2],
+        rel_perm_constants_list[2:3],  # Corey with power 2.
         cap_press_constants_list[0:1],
     )
 ):
-    logger.info(f"Varying cell sizes. Run {i + 1} of {len(cell_sizes)}")
+    logger.info(f"Varying cell sizes. Run {i + 1} of {len(cell_sizes)}.")
     logger.info(
-        f"Cell size: {cell_size:.2f}, RP model 1: {rp_model_1['model']}, RP model 2: {rp_model_2['model']}, CP model: {cp_model['model']}"
+        f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}."
     )
+
     filename: str = f"cellsz_{int(cell_size)}"
     appleyard_str: str = "_appleyard" if appleyard_chopping else ""
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / f"ahc{appleyard_str}"
+        / f"newton{appleyard_str}_adaptive_ts"
         / "varying_cell_sizes"
-        / f"lay_{spe10_layer}_rp1_{rp_model_1['model']}_rp2_{rp_model_2['model']}_cp._{cp_model['model']}"
+        / f"lay_{spe10_layer}_rp_{rp_model['model']}_cp._{cp_model['model']}"
         / filename
     )
 
@@ -182,8 +202,6 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
                 dt_init=10.0 * pp.DAY,
                 constant_dt=False,
                 dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
-                iter_optimal_range=(9, 12),
-                iter_relax_factors=(0.7, 1.3),
                 recomp_factor=0.1,
                 recomp_max=5,
             ),
@@ -191,30 +209,30 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
             "file_name": filename,
             "solver_statistics_file_name": foldername / "solver_statistics.json",
             "meshing_arguments": {"cell_size": cell_size},
-            "rel_perm_constants": {"model_1": rp_model_1, "model_2": rp_model_2},
+            "rel_perm_constants": rp_model,
             "cap_press_constants": cp_model,
             "nl_appleyard_chopping": appleyard_chopping,
             "max_iterations": max_iterations,
         }
     )
-    model = SPE10HC(params)
+    model = SPE10Newton(params)
     try:
         pp.run_time_dependent_model(model=model, params=params)
     except Exception as error:
         logger.error(f"Model {model} failed with error: {error}")
 
-for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enumerate(
+for i, (appleyard_chopping, cell_size, rp_model, cp_model) in enumerate(
     itertools.product(
         appleyard_chopping_list,
         cell_sizes[0:1],
-        rel_perm_constants_list_1,
-        rel_perm_constants_list_2[1:2],
+        rel_perm_constants_list[1:2],
         cap_press_constants_list,
     )
 ):
+    continue
     logger.info(f"Varying capillary pressure models. Run {i + 1} of {len(cell_sizes)}.")
     logger.info(
-        f"Cell size: {cell_size:.2f}, RP model 2: {rp_model_2['model']}, CP model: {cp_model['model']}."
+        f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}."
     )
 
     filename = f"cp._{cp_model['model']}"
@@ -223,7 +241,7 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
         pathlib.Path(__file__).parent
         / f"newton{appleyard_str}_adaptive_ts"
         / "varying_cp_models"
-        / f"cellsz{int(cell_size)}_lay_{spe10_layer}_rp1_{rp_model_1['model']}_rp2_{rp_model_2['model']}"
+        / f"cellsz{int(cell_size)}_lay_{spe10_layer}_rp_{rp_model['model']}"
         / filename
     )
 
@@ -242,8 +260,6 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
                 dt_init=10.0 * pp.DAY,
                 constant_dt=False,
                 dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
-                iter_optimal_range=(9, 12),
-                iter_relax_factors=(0.7, 1.3),
                 recomp_factor=0.1,
                 recomp_max=5,
             ),
@@ -251,43 +267,43 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
             "file_name": filename,
             "solver_statistics_file_name": foldername / "solver_statistics.json",
             "meshing_arguments": {"cell_size": cell_size},
-            "rel_perm_constants": {"model_1": rp_model_1, "model_2": rp_model_2},
+            "rel_perm_constants": rp_model,
             "cap_press_constants": cp_model,
             "nl_appleyard_chopping": appleyard_chopping,
             "max_iterations": max_iterations,
         }
     )
-
-    model = SPE10HC(params)
+    model = SPE10Newton(params)
     try:
         pp.run_time_dependent_model(model=model, params=params)
     except Exception as error:
         logger.error(f"Model {model} failed with error: {error}")
 
-for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enumerate(
+
+for i, (appleyard_chopping, cell_size, rp_model, cp_model) in enumerate(
     itertools.product(
         appleyard_chopping_list,
         cell_sizes[0:1],
-        rel_perm_constants_list_1,
-        rel_perm_constants_list_2,
+        rel_perm_constants_list,
         cap_press_constants_list[0:1],
     )
 ):
+    continue
     logger.info(
-        f"Varying rel. perm. models. Run {i + 1} of {len(rel_perm_constants_list_2)}."
+        f"Varying rel. perm. models. Run {i + 1} of {len(rel_perm_constants_list)}."
     )
     logger.info(
-        f"Cell size: {cell_size:.2f}, RP model 2: {rp_model_2['model']}, CP model: {cp_model['model']}."
+        f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}."
     )
 
-    if rp_model_2["model"] == "Corey":
-        filename = f"rp1_{rp_model_1['model']}_rp2_{rp_model_2['model']}_power_{rp_model_2['power']}"
+    if rp_model["model"] == "Corey":
+        filename = f"rp_{rp_model['model']}_power_{rp_model['power']}"
     else:
-        filename = f"rp1_{rp_model_1['model']}_rp2_{rp_model_2['model']}"
+        filename = f"rp_{rp_model['model']}"
     appleyard_str = "_appleyard" if appleyard_chopping else ""
     foldername = (
         pathlib.Path(__file__).parent
-        / f"ahc{appleyard_str}"
+        / f"newton{appleyard_str}_adaptive_ts"
         / "varying_rel_perm_models"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}_cp._{cp_model['model']}"
         / filename
@@ -308,8 +324,6 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
                 dt_init=10 * pp.DAY,
                 constant_dt=False,
                 dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
-                iter_optimal_range=(9, 12),
-                iter_relax_factors=(0.7, 1.3),
                 recomp_factor=0.1,
                 recomp_max=5,
             ),
@@ -317,14 +331,13 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
             "file_name": filename,
             "solver_statistics_file_name": foldername / "solver_statistics.json",
             "meshing_arguments": {"cell_size": cell_size},
-            "rel_perm_constants": {"model_1": rp_model_1, "model_2": rp_model_2},
+            "rel_perm_constants": rp_model,
             "cap_press_constants": cp_model,
             "nl_appleyard_chopping": appleyard_chopping,
             "max_iterations": max_iterations,
         }
     )
-
-    model = SPE10HC(params)
+    model = SPE10Newton(params)
     try:
         pp.run_time_dependent_model(model=model, params=params)
     except Exception as error:
@@ -333,38 +346,44 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
 # endregion
 
 # region PLOTTING
-for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
-    itertools.product(
-        rel_perm_constants_list_1, rel_perm_constants_list_2, cap_press_constants_list
-    )
+
+for i, (rp_model, cp_model) in enumerate(
+    itertools.product(rel_perm_constants_list, cap_press_constants_list)
 ):
     continue
-    filename: str = (
-        f"rp1_{rp_model_1['model']} rp2_{rp_model_2['model']}_cp_{cp_model['model']}"
-    )
-    foldername: pathlib.Path = (
+    filename = f"rp_{rp_model['model']}_cp._{cp_model['model']}"
+    foldername = (
         pathlib.Path(__file__).parent
-        / "adaptive homotopy continuation"
+        / "newton_adaptive_ts"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}"
         / filename
     )
     solver_statistics_file: pathlib.Path = foldername / "solver_statistics.json"
     with open(solver_statistics_file) as f:
-        history: dict[str, Any] = json.load(f)
-        history_list: list[Any] = list(history.values())[1:]
+        history = json.load(f)
+        history_list = list(history.values())[1:]
 
-    fig, ax = plt.subplots()
+    residual_and_flux_est: list[float] = []
+    glob_nonconformity_est: list[float] = []
+    compl_nonconformity_est: list[float] = []
+    global_energy_norm: list[float] = []
 
-    discretization_est: list[float] = []
-    hc_est: list[float] = []
-    linearization_est: list[float] = []
+    fig1, ax1 = plt.subplots()
+    fig2, ax2 = plt.subplots()
+
     for n, time_step in enumerate(history_list):
-        for nl_step in list(time_step.values()):
-            if isinstance(nl_step, int) or isinstance(nl_step, float):
-                continue
-            discretization_est.extend(nl_step["discretization_error_estimates"])
-            hc_est.extend(nl_step["hc_error_estimates"])
-            linearization_est.extend(nl_step["linearization_error_estimates"])
+        residual_and_flux_est.extend(time_step["residual_and_flux_est"])
+        global_energy_norm.extend(time_step["global_energy_norm"])
+
+        # Transform list of dicts to dict containing two lists.
+        converted_nonconformity_est = defaultdict(list)
+        for nonconformity in time_step["nonconformity_est"]:
+            for key, value in nonconformity.items():
+                converted_nonconformity_est[key].append(value)
+        glob_nonconformity_est.extend(converted_nonconformity_est[GLOBAL_PRESSURE])
+        compl_nonconformity_est.extend(
+            converted_nonconformity_est[COMPLIMENTARY_PRESSURE]
+        )
 
         # Draw a vertical line when the time increase in the next time step, i.e., the
         # nonlinear iterations at the current time step converged.
@@ -372,30 +391,39 @@ for i, (rp_model_1, rp_model_2, cp_model) in enumerate(
         try:
             next_time: float = history_list[n + 1]["current time"]
             if time < next_time:
-                ax.axvline(x=len(discretization_est), color="gray", linestyle="--")
+                ax1.axvline(x=len(residual_and_flux_est), color="gray", linestyle="--")
         except IndexError:
             pass
 
-    ax.semilogy(discretization_est[:100], label="Discretization estimator")
-    ax.semilogy(hc_est[:100], label="HC estimator")
-    ax.semilogy(linearization_est[:100], label="Linearization estimator")
-    ax.set_xlabel("Nonlinear iteration")
-    ax.set_ylabel("Estimator")
-    ax.set_title(f"Estimator values")
-    ax.legend()
-    plt.show()
-    fig.savefig(foldername / "solver_convergence.png")
+    ax1.semilogy(residual_and_flux_est, label="Residual and flux estimator")
+    ax1.semilogy(
+        glob_nonconformity_est, label="Global pressure nonconformity estimator"
+    )
+    ax1.semilogy(
+        compl_nonconformity_est, label="Complimentary pressure nonconformity estimator"
+    )
+    ax1.set_xlabel("Nonlinear iteration (over multiple time steps)")
+    ax1.set_ylabel("Estimator value")
+    ax1.set_title(f"Discretization estimators")
+    ax1.legend()
+    fig1.savefig(foldername / "estimators.png")
 
-    # fig, ax = plt.subplots()
-    # ax.semilogy(discretization_est[:100], label="Discretization estimator")
-    # ax.semilogy(hc_est[:100], label="HC estimator")
-    # ax.semilogy(linearization_est[:100], label="Linearization estimator")
-    # # ax.set_ylim([5e-5, 1e5])
-    # ax.set_xlabel("Nonlinear iteration")
-    # ax.set_ylabel("Estimator")
-    # ax.set_title(f"Estimator values")
-    # ax.legend()
-    # plt.show()
-    # fig.savefig(foldername / "solver_convergence_zoomed.png")
+    ax2.semilogy(
+        np.array(glob_nonconformity_est) / np.array(global_energy_norm),
+        label="Relative global pressure nonconformity estimator",
+    )
+    ax2.semilogy(
+        np.array(residual_and_flux_est) / np.array(global_energy_norm),
+        label="Relative residual and flux estimator",
+    )
+    ax2.semilogy(
+        np.array(compl_nonconformity_est) / np.array(global_energy_norm),
+        label="Relative complimentary pressure nonconformity estimator",
+    )
+    ax2.set_xlabel("Nonlinear iteration (over multiple time steps)")
+    ax2.set_ylabel("Relative estimator value")
+    ax2.set_title(f"Relative discretization estimators")
+    ax2.legend()
+    fig2.savefig(foldername / "relative_estimators.png")
 
 # endregion

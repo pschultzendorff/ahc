@@ -1,7 +1,7 @@
 import itertools
 import logging
 import typing
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import porepy as pp
@@ -70,28 +70,25 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         # is called. During runtime, ``HCProtocol`` does not have this method, hence we
         # can ignore the error. Additionally, we ignore complaints about the wrong
         # number of arguments and wrong arguemnt types.
-        if self.hc_rel_perm_toggle:
-            rel_perm_1: pp.ad.Operator = super().rel_perm(  # type: ignore
-                saturation_w,  # type: ignore
-                phase,  # type: ignore
-                rel_perm_constants=self._rel_perm_constants_1,  # type: ignore
-            )
-            rel_perm_2: pp.ad.Operator = super().rel_perm(  # type: ignore
-                saturation_w,  # type: ignore
-                phase,  # type: ignore
-                rel_perm_constants=self._rel_perm_constants_2,  # type: ignore
-            )
-            return (
-                self.nonlinear_solver_statistics.hc_lambda_ad * rel_perm_1
-                + (pp.ad.Scalar(1) - self.nonlinear_solver_statistics.hc_lambda_ad)
-                * rel_perm_2
-            )
-
-        # Return goal relative permeability.
-        else:
-            return super().rel_perm(  # type: ignore
-                saturation_w, phase, rel_perm_constants=self._rel_perm_constants_2  # type: ignore
-            )
+        rel_perm_1: pp.ad.Operator = super().rel_perm(  # type: ignore
+            saturation_w,  # type: ignore
+            phase,  # type: ignore
+            rel_perm_constants=self._rel_perm_constants_1,  # type: ignore
+        )
+        rel_perm_2: pp.ad.Operator = super().rel_perm(  # type: ignore
+            saturation_w,  # type: ignore
+            phase,  # type: ignore
+            rel_perm_constants=self._rel_perm_constants_2,  # type: ignore
+        )
+        hc_rel_perm: pp.ad.Operator = (
+            self.nonlinear_solver_statistics.hc_lambda_ad * rel_perm_1
+            + (pp.ad.Scalar(1) - self.nonlinear_solver_statistics.hc_lambda_ad)
+            * rel_perm_2
+        )
+        return (
+            self.hc_rel_perm_toggle_ad * hc_rel_perm
+            + (pp.ad.Scalar(1) - self.hc_rel_perm_toggle_ad) * rel_perm_2
+        )
 
     @typing.override
     def rel_perm_np(
@@ -99,27 +96,24 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         saturation_w: np.ndarray,
         phase: FluidPhase,
     ) -> np.ndarray:
-        if self.hc_rel_perm_toggle:
-            rel_perm_1: np.ndarray = super().rel_perm_np(  # type: ignore
-                saturation_w,  # type: ignore
-                phase,  # type: ignore
-                rel_perm_constants=self._rel_perm_constants_1,  # type: ignore
-            )
-            rel_perm_2: np.ndarray = super().rel_perm_np(  # type: ignore
-                saturation_w,  # type: ignore
-                phase,  # type: ignore
-                rel_perm_constants=self._rel_perm_constants_2,  # type: ignore
-            )
-            return (
-                self.nonlinear_solver_statistics.hc_lambda_fl * rel_perm_1
-                + (1 - self.nonlinear_solver_statistics.hc_lambda_fl) * rel_perm_2
-            )
-
-        # Return goal relative permeability.
-        else:
-            return super().rel_perm_np(  # type: ignore
-                saturation_w, phase, rel_perm_constants=self._rel_perm_constants_2  # type: ignore
-            )
+        rel_perm_1: np.ndarray = super().rel_perm_np(  # type: ignore
+            saturation_w,  # type: ignore
+            phase,  # type: ignore
+            rel_perm_constants=self._rel_perm_constants_1,  # type: ignore
+        )
+        rel_perm_2: np.ndarray = super().rel_perm_np(  # type: ignore
+            saturation_w,  # type: ignore
+            phase,  # type: ignore
+            rel_perm_constants=self._rel_perm_constants_2,  # type: ignore
+        )
+        hc_rel_perm: np.ndarray = (
+            self.nonlinear_solver_statistics.hc_lambda_fl * rel_perm_1
+            + (1 - self.nonlinear_solver_statistics.hc_lambda_fl) * rel_perm_2
+        )
+        return (
+            self.hc_rel_perm_toggle_fl * hc_rel_perm
+            + (1 - self.hc_rel_perm_toggle_fl) * rel_perm_2
+        )
 
 
 # The various protocols define different types for
@@ -375,7 +369,7 @@ class EstimatesHCMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol): 
 # ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
 # practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
 # the error.
-class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  # type: ignore
+class SolutionStrategyHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol, SolutionStrategyTPF):  # type: ignore
 
     @property
     def hc_indices(self) -> list[int]:
@@ -478,7 +472,6 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
         )
 
         self.convergence_status = True
-        self.save_data_time_step()
         # Update the time step magnitude if the dynamic scheme is used.
         if not self.time_manager.is_constant:
             self.time_manager.compute_time_step(
@@ -542,6 +535,9 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
                 energy_norm_term, local_term, self.g_data, time_step_index=0
             )
 
+        # Save only after the solutions are shifted.
+        self.save_data_time_step()
+
     def after_hc_failure(self) -> None:
         self.convergence_status = False
         self.save_data_time_step()
@@ -562,6 +558,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
     def hc_check_convergence(
         self,
         nl_is_converged: bool,
+        nl_is_diverged: bool,
         hc_params: dict[str, Any],
     ) -> tuple[bool, bool]:
         r"""Check whether the homotopy continuation is converged or diverged.
@@ -577,18 +574,46 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
 
 
         """
-        # NOTE The following does not need to be evalauted when hc_params["hc_adaptive"]
-        # is False. However, to compare HC and apdative HC, we still evaluate it.
-        hc_est: float = self.nonlinear_solver_statistics.hc_est[-1][-1]
-        discr_est: float = self.nonlinear_solver_statistics.discretization_est[-1][-1]
-
         # Divergence checks.
         if (
-            self.nonlinear_solver_statistics.hc_num_iteration == 0
-            and not nl_is_converged
-        ):
+            not nl_is_converged or nl_is_diverged
+        ) and self.nonlinear_solver_statistics.hc_num_iteration == 1:
+            # If the nonlinear solver did not converge or diverged on the first HC step,
+            # :meth:`after_hc_iteration` was already run, hence `hc_num_iteration` is
+            # updated to one and not zero.
             logger.info("Nonlinear solver did not converge on first HC step.")
             self.hc_is_diverged = True
+
+        # Convergence checks.
+        elif nl_is_converged:
+            # Adaptive stopping criterion. Check if the HC error is smaller than the
+            # discretization error.
+            if hc_params["hc_adaptive"]:
+                hc_est: float = self.nonlinear_solver_statistics.hc_est[-1][-1]
+                discr_est: float = self.nonlinear_solver_statistics.discretization_est[
+                    -1
+                ][-1]
+                if hc_est <= hc_params["hc_error_ratio"] * discr_est:
+                    logger.info(
+                        f"HC converged with HC error {hc_est} smaller than "
+                        + f" {hc_params['hc_error_ratio']}"
+                        + f" * discretization error {discr_est}. "
+                    )
+                    self.hc_is_converged = True
+            # Non-adaptive stopping criterion.
+            elif (
+                not hc_params["hc_adaptive"]
+                and self.nonlinear_solver_statistics.hc_lambda_fl
+                <= hc_params["hc_lambda_min"]
+            ):
+                logger.info(
+                    f"HC converged as HC parameter decreased below minimal value"
+                    f" {hc_params["hc_lambda_min"]}."
+                )
+                self.hc_is_converged = True
+
+        # If not converged, but maximum number of HC iterations is reached, the HC loop
+        # is diverged.
         elif (
             self.nonlinear_solver_statistics.hc_num_iteration
             >= hc_params["hc_max_iterations"]
@@ -599,34 +624,11 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
             )
             self.hc_is_diverged = True
 
-        # Adaptive stopping criterion.
-        elif hc_params["hc_adaptive"]:
-            # Check if the HC error is smaller than the discretization error.
-            if hc_est <= hc_params["hc_error_ratio"] * discr_est and nl_is_converged:
-                logger.info(
-                    f"HC converged with HC error {hc_est} smaller than "
-                    + f" {hc_params['hc_error_ratio']}"
-                    + f" * discretization error {discr_est}. "
-                )
-                self.hc_is_converged = True
-
-        # Non-adaptive stopping criterion.
-        elif (
-            not hc_params["hc_adaptive"]
-            and self.nonlinear_solver_statistics.hc_lambda_fl
-            <= hc_params["hc_lambda_min"]
-        ):
-            logger.info(
-                f"HC converged as HC parameter decreased below minimal value"
-                f" {hc_params["hc_lambda_min"]}."
-            )
-            self.hc_is_converged = True
-
         return self.hc_is_converged, self.hc_is_diverged
 
     def compute_hc_decay(
         self,
-        nl_iterations: Optional[int] = None,
+        nl_iterations: int | None = None,
         recompute_decay: bool = False,
     ) -> None:
         """Adjust the decay for the homotopy continuation parameter.
@@ -676,7 +678,6 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
             return None
         self.hc_decay *= self.nl_iter_relax_factors[1]
         self._hc_correction_based_on_hc_decay_min_max()
-        self.hc_decay = min(self.hc_decay, self.hc_decay_min_max[1])
         self.hc_decay_recomp_counter += 1
         logger.info(f"Slowing HC decay. Next decay = {self.hc_decay}.")
 
@@ -793,10 +794,12 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
                 energy_norm_term, local_term, self.g_data, hc_index=0
             )
 
-        # Adapt decay rate based on number of nonlinear iterations.
-        self.compute_hc_decay(
-            nl_iterations=self.nonlinear_solver_statistics.num_iteration
-        )
+        # Adapt decay rate based on number of nonlinear iterations. Do this only AFTER
+        # at least one succesfull decay.
+        if self.nonlinear_solver_statistics.hc_num_iteration >= 1:
+            self.compute_hc_decay(
+                nl_iterations=self.nonlinear_solver_statistics.num_iteration
+            )
 
     def after_nonlinear_failure(self) -> None:
         """Method to be called if the non-linear solver fails to converge."""
@@ -812,10 +815,8 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
             # Reset lambda and adapt decay rate.
             self.nonlinear_solver_statistics.hc_lambda_fl /= self.hc_decay
             self.compute_hc_decay(recompute_decay=True)
-
-            # Reset the initial guess for the nonlinear solver.
-            prev_solution = self.equation_system.get_variable_values(hc_index=0)
-            self.equation_system.set_variable_values(prev_solution, iterate_index=0)
+            # No need to reset the initial guess for the nonlinear solver, as this is
+            # done by :meth:`before_nonlinear_loop`. anyways.
 
     def check_convergence(
         self,
@@ -840,6 +841,8 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, SolutionStrategyTPF):  #
             # NOTE The discretization error estimate does not need to be calculated
             # at this point. After HC convergence is sufficient if we want the code
             # to be more efficient.
+            global_energy_norm=self.global_energy_norm(),
+            equilibrated_flux_mismatch=self.equilibrated_flux_mismatch(),
             discretization_est=self.global_discretization_est(),
             hc_est=hc_est,
             linearization_est=linearization_est,
@@ -876,7 +879,8 @@ class SolutionStrategyEstHC(  # type: ignore
 
     def __init__(self, params=None) -> None:
         super().__init__(params=params)
-        self.hc_rel_perm_toggle: bool = True
+        self.hc_rel_perm_toggle_fl: float = 1.0
+        self.hc_rel_perm_toggle_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
 
     # Initialize time step and iterate values for local estimators.
     @typing.override
@@ -910,20 +914,41 @@ class SolutionStrategyEstHC(  # type: ignore
 
         """
         if prepare_simulation:
-            time_step_index: Optional[int] = 0
+            time_step_index: int | None = 0
         else:
             time_step_index = None
 
-        # Switch rel. perm. to goal rel. perm, calculate fluxes, and switch back.
-        self.hc_rel_perm_toggle = False
+        # Save FV P0 pressures.
+        self.eval_glob_compl_pressure_on_domain(
+            GLOBAL_PRESSURE, prepare_simulation=prepare_simulation
+        )
+        self.eval_glob_compl_pressure_on_domain(
+            COMPLIMENTARY_PRESSURE, prepare_simulation=prepare_simulation
+        )
 
-        for flux_name, flux_eq in zip([
-            "total",
-            "wetting_from_ff",
-            "total_by_t_mobility",
-            "total_times_fractional_flow",
-        ], [self.total_flux_eq, self.wetting_flux_from_ff_eq, self.total_flux_by_total_mobility_eq, self.total_flux_times_fractional_flow_eq]):
-                flux: np.ndarray = self.equation_system.assemble(evaluate_jacobian=False, equations=[flux_eq])
+        # Switch rel. perm. to goal rel. perm, calculate fluxes, and switch back.
+        self.hc_rel_perm_toggle_fl = 0.0
+        self.hc_rel_perm_toggle_ad.set_value(self.hc_rel_perm_toggle_fl)
+
+        for flux_name, flux_eq in zip(
+            [
+                "total",
+                "wetting_from_ff",
+                "total_by_t_mobility",
+                "total_times_fractional_flow",
+            ],
+            [
+                self.total_flux_eq,
+                self.wetting_flux_from_ff_eq,
+                self.total_flux_by_total_mobility_eq,
+                self.total_flux_times_fractional_flow_eq,
+            ],
+        ):
+            # Take the negative of the values since ``equation_system.assemble`` returns the
+            # negative of the RHS.
+            flux: np.ndarray = -self.equation_system.assemble(
+                evaluate_jacobian=False, equations=[flux_eq]
+            )
             pp.shift_solution_values(
                 f"{flux_name}_flux_wrt_goal_rel_perm",
                 self.g_data,
@@ -937,7 +962,9 @@ class SolutionStrategyEstHC(  # type: ignore
                 time_step_index=time_step_index,
                 iterate_index=0,
             )
-        self.hc_rel_perm_toggle = True
+
+        self.hc_rel_perm_toggle_fl = 1.0
+        self.hc_rel_perm_toggle_ad.set_value(self.hc_rel_perm_toggle_fl)
 
     @typing.override
     def postprocess_solution(
@@ -1005,13 +1032,11 @@ class SolutionStrategyEstHC(  # type: ignore
                 prepare_simulation=prepare_simulation,
             )
 
-        self.equilibrated_flux_mismatch()
-
 
 class DataSavingHC(DataSavingEst):
 
     def _data_to_export(
-        self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
+        self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
         """Append the continuation and linearization error estimates to the exported
         data.
@@ -1021,16 +1046,14 @@ class DataSavingHC(DataSavingEst):
             time_step_index=time_step_index,
             iterate_index=iterate_index,
         )
-        # Only export for nonzero time steps or nonlinear steps. Otherwise, this causes
-        # an error, as the function is called via
-        # ``SolutionStrategyTPF.prepare_simulation`` BEFORE the initial values are set
-        # by ``SolutionStrategyEst.prepare_simulation``.
-        if (time_step_index is not None and self.time_manager.time_index > 0) or (
-            iterate_index is not None
+        for flux_name, est_name in itertools.product(
+            ["total", "wetting_from_ff"], ["C_estimate", "L_estimate"]
         ):
-            for flux_name, est_name in itertools.product(
-                ["total", "wetting_from_ff"], ["C_estimate", "L_estimate"]
-            ):
+            # Before simulation, the estimates won't be set yet, due to the order of
+            # calls in :meth:`prepare_simulation`. However, after the first time step,
+            # :attr:`time_manager.time_step_index` won't be updated yet. Checking for
+            # all of this is quite convoluted. Instead we just use try-except.
+            try:
                 data.append(
                     (
                         self.g,
@@ -1043,6 +1066,8 @@ class DataSavingHC(DataSavingEst):
                         ),
                     )
                 )
+            except KeyError:
+                pass
         return data
 
 

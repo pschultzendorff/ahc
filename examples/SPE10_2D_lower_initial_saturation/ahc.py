@@ -29,7 +29,7 @@ Model description:
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
-    - Saturation: 0.3.
+    - Saturation: residual water saturation (0.2).
 - Rel. perm. models:
     - linear
     - Corey with power 2.
@@ -52,6 +52,7 @@ import numpy as np
 import porepy as pp
 from tpf.models.homotopy_continuation import TwoPhaseFlowHC
 from tpf.numerics.nonlinear.hc_solver import HCSolver
+from tpf.spe10.fluid_values import INITIAL_PRESSURE
 from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import FEET, PSI
 from tpf.viz.solver_statistics import SolverStatisticsHC
@@ -84,7 +85,34 @@ logger.setLevel(logging.INFO)
 class SPE10HC(
     SPE10Mixin,
     TwoPhaseFlowHC,
-): ...  # type: ignore
+):  # type: ignore
+
+    def initial_condition(self) -> None:
+        """Set initial values for pressure and saturation.
+
+        The corner cells get prescibed the right values immediately. Inside the
+        reservoir, the initial pressure is higher. The initial saturation is set to the
+        residual wetting saturation + 0.1 inside the reservoir.
+
+        """
+        initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
+        # initial_pressure[corner_cell_ids] = BHP
+        initial_saturation = np.full(self.g.num_cells, self.wetting.residual_saturation)
+        # initial_saturation[corner_cell_ids] = 1 - self.wetting.residual_saturation
+        self.equation_system.set_variable_values(
+            np.concatenate([initial_pressure, initial_pressure]),
+            [self.wetting.p, self.nonwetting.p],
+            time_step_index=0,
+            hc_index=0,
+            iterate_index=0,
+        )
+        self.equation_system.set_variable_values(
+            np.concatenate([initial_saturation, 1 - initial_saturation]),
+            [self.wetting.s, self.nonwetting.s],
+            time_step_index=0,
+            hc_index=0,
+            iterate_index=0,
+        )
 
 
 # endregion
@@ -149,7 +177,7 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
         appleyard_chopping_list,
         cell_sizes[:2],
         rel_perm_constants_list_1,
-        rel_perm_constants_list_2[1:2],
+        rel_perm_constants_list_2[1:2], # Corey with power 2.
         cap_press_constants_list[0:1],
     )
 ):
@@ -305,7 +333,7 @@ for i, (appleyard_chopping, cell_size, rp_model_1, rp_model_2, cp_model) in enum
             # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
                 schedule=np.array([0.0, 10.0 * pp.DAY]),
-                dt_init=10 * pp.DAY,
+                dt_init=10.0 * pp.DAY,
                 constant_dt=False,
                 dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
                 iter_optimal_range=(9, 12),

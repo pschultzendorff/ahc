@@ -39,14 +39,15 @@ class HCSolver:
         self.params["progress_bar_position"] += 1
         self.nonlinear_solver = pp.NewtonSolver(self.params)
 
-    def solve(self, model: HCProtocol) -> bool:
+    def solve(self, model: HCProtocol) -> tuple[bool, bool]:
         """Solve the nonlinaer problem using the homotopy continuation (HC) algorithm.
 
         Parameters:
             model: The model instance specifying the problem to be solved.
 
         Returns:
-            bool: ``True`` if the HC algorithm is converged.
+            is_converged: ``True`` if the HC algorithm is converged.
+            is_diverged: ``True`` if the HC algorithm is diverged.
 
         """
         model.hc_is_converged = False
@@ -57,11 +58,7 @@ class HCSolver:
             model.before_hc_iteration()
             nl_is_converged, nl_is_diverged = self.nonlinear_solver.solve(model)
             model.after_hc_iteration()
-            # Only check for hc_convergence if the nonlinear solver converged.
-            # Otherwise, we might run into problems where some statistics are not set
-            # due to the model failing during a Newton iteration.
-            if not nl_is_diverged:
-                model.hc_check_convergence(nl_is_converged, self.params)
+            model.hc_check_convergence(nl_is_converged, nl_is_diverged, self.params)
 
         # Redirect the root logger, s.t. no logger interferes with the progressbars.
         with logging_redirect_tqdm([logging.root]):
@@ -97,4 +94,4 @@ class HCSolver:
             else:
                 model.after_hc_failure()
         hc_progressbar.close()
-        return model.hc_is_converged
+        return model.hc_is_converged, model.hc_is_diverged

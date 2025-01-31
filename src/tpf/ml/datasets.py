@@ -18,7 +18,7 @@ noise can even be structured (e.g., only apply to some part saturations etc.).
 """
 
 from collections.abc import Iterator
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal
 
 import torch
 import torch.nn as nn
@@ -37,7 +37,7 @@ class DatasetWithNoise(torch.utils.data.Dataset):
             "power_w",
             "power_n",
         ] = "Brooks-Corey_w",
-        model_params: Optional[dict] = None,
+        model_params: dict | None = None,
         mean: float = 1.5,
         std: float = 1.5,
         biased_noise: bool = False,
@@ -131,7 +131,7 @@ class IterableDatasetWithNoise(torch.utils.data.IterableDataset):
             "power_w",
             "power_n",
         ] = "Brooks-Corey-W",
-        model_params: Optional[dict] = None,
+        model_params: dict | None = None,
         mean: float = 1.5,
         std: float = 1.5,
     ) -> None:
@@ -176,7 +176,7 @@ class RelPermW_BrooksCorey(nn.Module):
 
     """
 
-    def __init__(self, params: Optional[dict] = None) -> None:  #
+    def __init__(self, params: dict | None = None) -> None:  #
         super().__init__()
         if params is None:
             params = {}
@@ -205,7 +205,7 @@ class RelPermN_BrooksCorey(nn.Module):
 
     """
 
-    def __init__(self, params: Optional[dict] = None) -> None:  #
+    def __init__(self, params: dict | None = None) -> None:  #
         super().__init__()
         if params is None:
             params = {}
@@ -236,7 +236,7 @@ class RelPermW_Corey(nn.Module):
 
     """
 
-    def __init__(self, params: Optional[dict] = None) -> None:  #
+    def __init__(self, params: dict | None = None) -> None:  #
         super().__init__()
         if params is None:
             params = {}
@@ -264,7 +264,7 @@ class RelPermN_Corey(nn.Module):
 
     """
 
-    def __init__(self, params: Optional[dict] = None) -> None:  #
+    def __init__(self, params: dict | None = None) -> None:  #
         super().__init__()
         if params is None:
             params = {}
@@ -286,7 +286,7 @@ class RelPermN_Corey(nn.Module):
 class CapPress_BrooksCorey(nn.Module):
     """Calculates capillary pressure with the Brooks-Corey model."""
 
-    def __init__(self, params: Optional[dict] = None) -> None:  #
+    def __init__(self, params: dict | None = None) -> None:  #
         super().__init__()
         if params is None:
             params = {}

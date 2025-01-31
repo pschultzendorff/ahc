@@ -1,7 +1,7 @@
 import json
 import typing
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import porepy as pp
 
@@ -18,8 +18,8 @@ class SolverStatisticsTPF(pp.SolverStatistics):
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: Optional[float] = None,
-        residual_norm: Optional[float] = None,
+        nonlinear_increment_norm: float | None = None,
+        residual_norm: float | None = None,
         **kwargs,
     ) -> None:
         """Log errors produced from convergence criteria.
@@ -82,8 +82,8 @@ class SolverStatisticsRec(SolverStatisticsTPF):
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: Optional[float] = None,
-        residual_norm: Optional[float] = None,
+        nonlinear_increment_norm: float | None = None,
+        residual_norm: float | None = None,
         **kwargs,
     ) -> None:
         if "equilibrated_flux_mismatch" in kwargs:
@@ -138,8 +138,8 @@ class SolverStatisticsEst(SolverStatisticsRec):
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: Optional[float] = None,
-        residual_norm: Optional[float] = None,
+        nonlinear_increment_norm: float | None = None,
+        residual_norm: float | None = None,
         **kwargs,
     ) -> None:
         if (
@@ -195,7 +195,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
 
 
 @dataclass
-class SolverStatisticsHC(SolverStatisticsRec):
+class SolverStatisticsHC(SolverStatisticsTPF):
     hc_lambda_fl: float = 1.0
     """Homotopy continuation lambda."""
     hc_lambda_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
@@ -237,19 +237,31 @@ class SolverStatisticsHC(SolverStatisticsRec):
     inner list are non-linear iterations.
 
     """
+    global_energy_norm: list[list[float]] = field(default_factory=list)
+    """List of global energy norms for each non-linear iteration."""
+    equilibrated_flux_mismatch: list[list[dict[str, float]]] = field(
+        default_factory=list
+    )
+    """List of mismatches of equilibrated fluxes for each non-linear iteration."""
 
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: Optional[float] = None,
-        residual_norm: Optional[float] = None,
+        nonlinear_increment_norm: float | None = None,
+        residual_norm: float | None = None,
         **kwargs,
     ) -> None:
         if (
-            "discretization_est" in kwargs
+            "global_energy_norm" in kwargs
+            and "equilibrated_flux_mismatch" in kwargs
+            and "discretization_est" in kwargs
             and "hc_est" in kwargs
             and "linearization_est" in kwargs
         ):
+            self.global_energy_norm[-1].append(kwargs["global_energy_norm"])
+            self.equilibrated_flux_mismatch[-1].append(
+                kwargs["equilibrated_flux_mismatch"]
+            )
             self.discretization_est[-1].append(kwargs["discretization_est"])
             self.hc_est[-1].append(kwargs["hc_est"])
             self.linearization_est[-1].append(kwargs["linearization_est"])
@@ -269,6 +281,8 @@ class SolverStatisticsHC(SolverStatisticsRec):
         self.discretization_est.append([])
         self.hc_est.append([])
         self.linearization_est.append([])
+        self.global_energy_norm.append([])
+        self.equilibrated_flux_mismatch.append([])
 
     def hc_reset(self) -> None:
         """Reset the homotopy continuation statistics object at the start of a new
@@ -281,6 +295,8 @@ class SolverStatisticsHC(SolverStatisticsRec):
         self.discretization_est.clear()
         self.hc_est.clear()
         self.linearization_est.clear()
+        self.global_energy_norm.clear()
+        self.equilibrated_flux_mismatch.clear()
 
         self.hc_num_iteration = 0
         self.hc_lambda_fl = 1.0
@@ -311,8 +327,10 @@ class SolverStatisticsHC(SolverStatisticsRec):
                     "discretization_error_estimates": de,
                     "hc_error_estimates": hce,
                     "linearization_error_estimates": le,
+                    "global_energy_norm": gen,
+                    "equilibrated_flux_mismatch": efm,
                 }
-                for i, (n, nin, rn, de, hce, le) in enumerate(
+                for i, (n, nin, rn, de, hce, le, gen, efm) in enumerate(
                     zip(
                         self.nums_iteration,
                         self.nonlinear_increment_norms_hc,
@@ -320,6 +338,8 @@ class SolverStatisticsHC(SolverStatisticsRec):
                         self.discretization_est,
                         self.hc_est,
                         self.linearization_est,
+                        self.global_energy_norm,
+                        self.equilibrated_flux_mismatch,
                     )
                 )
             }
@@ -328,6 +348,7 @@ class SolverStatisticsHC(SolverStatisticsRec):
                     "time step index": self.time_step_index,
                     "current time": self.time,
                     "time step size": self.time_step_size,
+                    "hc_lambdas": self.hc_lambdas,
                     "hc_num_iterations": self.hc_num_iteration,
                 }
             )

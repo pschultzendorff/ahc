@@ -1,6 +1,9 @@
-r"""Study how the estimators evolve during a Newton loop. The simulation is run for 3
- time steps to study the behavior during each time step.
+r"""Study convergence of Newton on different grid sizes and with different rel.
+ perm./cap. pressure models.
 
+The following solvers are employed:
+- Newton
+- Newton with Appleyard chopping
 
 We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
 continuation. The considered model is similar to the heterogeneous 3D models in the
@@ -26,7 +29,7 @@ Model description:
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
-    - Saturation: residual water saturation (0.2).
+    - Saturation: 0.3.
 - Rel. perm. models:
     - linear
     - Corey with power 2.
@@ -40,7 +43,6 @@ import json
 import logging
 import os
 import pathlib
-import random
 import shutil
 import warnings
 from collections import defaultdict
@@ -49,7 +51,6 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
-from numba import config
 from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
 from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import (
@@ -58,7 +59,6 @@ from tpf.utils.constants_and_typing import (
     GLOBAL_PRESSURE,
     PSI,
 )
-from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsEst
 
 # region SETUP
@@ -112,46 +112,48 @@ params: dict[str, Any] = {
     # Nonlinear params:
     "nonlinear_solver_statistics": SolverStatisticsEst,
     "nonlinear_solver": pp.NewtonSolver,
-    "max_iterations": 20,
     "nl_convergence_tol": 1e-5,
     "nl_divergence_tol": 1e30,
 }
 
 cell_sizes: list[float] = [600 * FEET / 30, 600 * FEET / 60, 600 * FEET / 120]
 rel_perm_constants_list: list[dict[str, Any]] = [
-    # {"model": "linear", "limit": False},
-    # {
-    #     "model": "Brooks-Corey",
-    #     "limit": False,
-    #     "n1": 2,
-    #     "n2": 2,  # 1 + 2/n_b
-    #     "n3": 1,
-    # },
+    {"model": "linear", "limit": False},
+    {
+        "model": "Brooks-Corey",
+        "limit": False,
+        "n1": 2,
+        "n2": 2,  # 1 + 2/n_b
+        "n3": 1,
+    },
     {"model": "Corey", "limit": False, "power": 2},
     {"model": "Corey", "limit": False, "power": 3},
-    # {"model": "van Genuchten-Burdine", "limit": False, "n_g": -1.0},
+    {"model": "van Genuchten-Burdine", "limit": False, "n_g": -1.0},
 ]
 cap_press_constants_list: list[dict[str, Any]] = [
     {"model": None},
-    {"model": "linear", "linear_param": 5 * PSI},  # 0.5 bar at s_w = 0.2.
+    {"model": "linear", "linear_param": 30 * PSI},
 ]
+appleyard_chopping_list: list[bool] = [False, True]
 
-
-for i, (cell_size, rp_model, cp_model) in enumerate(
+for i, (appleyard_chopping, cell_size, rp_model, cp_model) in enumerate(
     itertools.product(
-        cell_sizes[2:], [rel_perm_constants_list[1]], [cap_press_constants_list[0]]
+        appleyard_chopping_list,
+        cell_sizes[:2],
+        rel_perm_constants_list[1:2],
+        cap_press_constants_list[0:1],
     )
 ):
-    continue
     logger.info(f"Varying cell sizes. Run {i + 1} of {len(cell_sizes)}.")
     logger.info(
         f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}."
     )
 
     filename: str = f"cellsz_{int(cell_size)}"
+    appleyard_str: str = "_appleyard" if appleyard_chopping else ""
     foldername: pathlib.Path = (
         pathlib.Path(__file__).parent
-        / "newton_adaptive_ts"
+        / f"newton{appleyard_str}_adaptive_ts"
         / "varying_cell_sizes"
         / f"lay_{spe10_layer}_rp_{rp_model['model']}_cp._{cp_model['model']}"
         / filename
@@ -163,12 +165,13 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         pass
     foldername.mkdir(parents=True)
 
+    max_iterations: int = 50 if appleyard_chopping else 20
     params.update(
         {
             # Reinitialize the time manager for each run.
             "time_manager": pp.TimeManager(
                 schedule=np.array([0.0, 10.0 * pp.DAY]),
-                dt_init=10 * pp.DAY,
+                dt_init=10.0 * pp.DAY,
                 constant_dt=False,
                 dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
                 recomp_factor=0.1,
@@ -180,6 +183,65 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
             "meshing_arguments": {"cell_size": cell_size},
             "rel_perm_constants": rp_model,
             "cap_press_constants": cp_model,
+            "nl_appleyard_chopping": appleyard_chopping,
+            "max_iterations": max_iterations,
+        }
+    )
+    model = SPE10Newton(params)
+    try:
+        pp.run_time_dependent_model(model=model, params=params)
+    except Exception as error:
+        logger.error(f"Model {model} failed with error: {error}")
+
+for i, (appleyard_chopping, cell_size, rp_model, cp_model) in enumerate(
+    itertools.product(
+        appleyard_chopping_list,
+        cell_sizes[0:1],
+        rel_perm_constants_list[1:2],
+        cap_press_constants_list,
+    )
+):
+    logger.info(f"Varying capillary pressure models. Run {i + 1} of {len(cell_sizes)}.")
+    logger.info(
+        f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}."
+    )
+
+    filename = f"cp._{cp_model['model']}"
+    appleyard_str = "_appleyard" if appleyard_chopping else ""
+    foldername = (
+        pathlib.Path(__file__).parent
+        / f"newton{appleyard_str}_adaptive_ts"
+        / "varying_cp_models"
+        / f"cellsz{int(cell_size)}_lay_{spe10_layer}_rp_{rp_model['model']}"
+        / filename
+    )
+
+    try:
+        shutil.rmtree(foldername)
+    except Exception:
+        pass
+    foldername.mkdir(parents=True)
+
+    max_iterations if appleyard_chopping else 20
+    params.update(
+        {
+            # Reinitialize the time manager for each run.
+            "time_manager": pp.TimeManager(
+                schedule=np.array([0.0, 10.0 * pp.DAY]),
+                dt_init=10.0 * pp.DAY,
+                constant_dt=False,
+                dt_min_max=(1e-3 * pp.DAY, 10.0 * pp.DAY),
+                recomp_factor=0.1,
+                recomp_max=5,
+            ),
+            "folder_name": foldername,
+            "file_name": filename,
+            "solver_statistics_file_name": foldername / "solver_statistics.json",
+            "meshing_arguments": {"cell_size": cell_size},
+            "rel_perm_constants": rp_model,
+            "cap_press_constants": cp_model,
+            "nl_appleyard_chopping": appleyard_chopping,
+            "max_iterations": max_iterations,
         }
     )
     model = SPE10Newton(params)
@@ -189,9 +251,12 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         logger.error(f"Model {model} failed with error: {error}")
 
 
-for i, (cell_size, rp_model, cp_model) in enumerate(
+for i, (appleyard_chopping, cell_size, rp_model, cp_model) in enumerate(
     itertools.product(
-        [cell_sizes[0]], rel_perm_constants_list, [cap_press_constants_list[0]]
+        appleyard_chopping_list,
+        cell_sizes[0:1],
+        rel_perm_constants_list,
+        cap_press_constants_list[0:1],
     )
 ):
     logger.info(
@@ -205,9 +270,10 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         filename = f"rp_{rp_model['model']}_power_{rp_model['power']}"
     else:
         filename = f"rp_{rp_model['model']}"
+    appleyard_str = "_appleyard" if appleyard_chopping else ""
     foldername = (
         pathlib.Path(__file__).parent
-        / "newton_adaptive_ts"
+        / f"newton{appleyard_str}_adaptive_ts"
         / "varying_rel_perm_models"
         / f"lay_{spe10_layer}_cellsz_{int(cell_size)}_cp._{cp_model['model']}"
         / filename
@@ -219,6 +285,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
         pass
     foldername.mkdir(parents=True)
 
+    max_iterations = 50 if appleyard_chopping else 20
     params.update(
         {
             # Reinitialize the time manager for each run.
@@ -236,6 +303,8 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
             "meshing_arguments": {"cell_size": cell_size},
             "rel_perm_constants": rp_model,
             "cap_press_constants": cp_model,
+            "nl_appleyard_chopping": appleyard_chopping,
+            "max_iterations": max_iterations,
         }
     )
     model = SPE10Newton(params)

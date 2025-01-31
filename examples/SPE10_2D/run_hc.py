@@ -24,7 +24,7 @@ Model description:
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
-    - Saturation: residual water saturation (0.2).
+    - Saturation: 0.3.
 - Rel. perm. models:
     - linear
     - Corey with power 2.

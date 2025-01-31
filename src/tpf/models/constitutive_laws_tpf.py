@@ -2,11 +2,10 @@ import logging
 import typing
 from dataclasses import dataclass
 from functools import partial
-from typing import Literal, Optional, TypeGuard
+from typing import Literal, TypeGuard
 
 import numpy as np
 import porepy as pp
-from numba import jit, njit
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.ad.functions import minimum
@@ -104,7 +103,7 @@ class RelativePermeability(TPFProtocol):
         )
 
     def _rel_perm_linear_param(
-        self, phase: FluidPhase, rel_perm_constants: Optional[RelPermConstants] = None
+        self, phase: FluidPhase, rel_perm_constants: RelPermConstants | None = None
     ) -> pp.ad.Scalar:
         if rel_perm_constants is None:
             rel_perm_constants = self._rel_perm_constants
@@ -121,7 +120,7 @@ class RelativePermeability(TPFProtocol):
         self,
         phase: FluidPhase,
         limit: Literal["min", "max"],
-        rel_perm_constants: Optional[RelPermConstants] = None,
+        rel_perm_constants: RelPermConstants | None = None,
     ) -> float:
         if rel_perm_constants is None:
             rel_perm_constants = self._rel_perm_constants
@@ -142,7 +141,7 @@ class RelativePermeability(TPFProtocol):
         self,
         saturation_w: pp.ad.Operator,
         phase: FluidPhase,
-        rel_perm_constants: Optional[RelPermConstants] = None,
+        rel_perm_constants: RelPermConstants | None = None,
     ) -> pp.ad.Operator:
         r"""Phase relative permeability.
 
@@ -283,7 +282,7 @@ class RelativePermeability(TPFProtocol):
         self,
         saturation_w: np.ndarray,
         phase: FluidPhase,
-        rel_perm_constants: Optional[RelPermConstants] = None,
+        rel_perm_constants: RelPermConstants | None = None,
     ) -> np.ndarray:
         r"""Phase relative permeability for :class:`~numpy.ndarray`.
 
@@ -405,7 +404,7 @@ class CapPressConstants:
             raise ValueError("Invalid capillary pressure model.")
 
     @staticmethod
-    def is_cap_press_model(model: Optional[str]) -> TypeGuard[CAP_PRESS_MODEL]:
+    def is_cap_press_model(model: str | None) -> TypeGuard[CAP_PRESS_MODEL]:
         return model in typing.get_args(CAP_PRESS_MODEL)
 
 
@@ -428,7 +427,7 @@ class CapillaryPressure(TPFProtocol):
     def cap_press(
         self,
         saturation_w: pp.ad.Operator,
-        cap_press_constants: Optional[CapPressConstants] = None,
+        cap_press_constants: CapPressConstants | None = None,
     ) -> pp.ad.Operator:
         r"""Capillary pressure function.
 
@@ -502,7 +501,7 @@ class CapillaryPressure(TPFProtocol):
     def cap_press_np(
         self,
         saturation_w: np.ndarray,
-        cap_press_constants: Optional[CapPressConstants] = None,
+        cap_press_constants: CapPressConstants | None = None,
     ) -> np.ndarray:
         r"""Capillary pressure function for saturations of type :class:`~numpy.ndarray`.
 
@@ -557,7 +556,7 @@ class CapillaryPressure(TPFProtocol):
     def cap_press_deriv(
         self,
         saturation_w: pp.ad.Operator,
-        cap_press_constants: Optional[CapPressConstants] = None,
+        cap_press_constants: CapPressConstants | None = None,
     ) -> pp.ad.Operator:
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
@@ -599,7 +598,7 @@ class CapillaryPressure(TPFProtocol):
     def cap_press_deriv_np(
         self,
         saturation_w: np.ndarray,
-        cap_press_constants: Optional[CapPressConstants] = None,
+        cap_press_constants: CapPressConstants | None = None,
     ) -> np.ndarray:
         r"""Capillary pressure derivative for saturation of type
          :class:`~numpy.ndarray`.

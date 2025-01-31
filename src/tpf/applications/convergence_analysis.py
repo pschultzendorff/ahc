@@ -99,7 +99,7 @@ class ConvergenceAnalysisExtended(ConvergenceAnalysis):
     def export_results_to_json(
         self,
         list_of_results: list,
-        variables_to_export: Optional[list[str]] = None,
+        variables_to_export: list[str] | None = None,
         file_name="convergence_analysis.json",
     ) -> None:
         """Write errors into a ``json`` file. Changed from the super function s.t.
@@ -371,8 +371,8 @@ def plot_convergence_for_timestep(
     filename: str = "convergence",
     refinement_level: int = 0,
     time_step: int = 1,
-    additional_keys: Optional[list] = None,
-    additional_data: Optional[dict[str, Any]] = None,
+    additional_keys: list | None = None,
+    additional_data: dict[str, Any | None] = None,
 ):
     """Plot convergence for a given refinement level and time step.
 

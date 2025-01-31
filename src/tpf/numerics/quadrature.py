@@ -1,6 +1,6 @@
 import abc
 import logging
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal
 
 import numpy as np
 import porepy as pp
@@ -168,9 +168,7 @@ class BaseScheme(abc.ABC):
         self._reference_volume_setter(reference_volume)
 
     @abc.abstractmethod
-    def _reference_volume_setter(
-        self, reference_volume: Optional[float] = None
-    ) -> None:
+    def _reference_volume_setter(self, reference_volume: float | None = None) -> None:
         pass
 
     @property
@@ -183,7 +181,7 @@ class BaseScheme(abc.ABC):
 
     @abc.abstractmethod
     def _reference_points_setter(
-        self, reference_points: Optional[np.ndarray] = None
+        self, reference_points: np.ndarray | None = None
     ) -> None:
         pass
 
@@ -196,7 +194,7 @@ class BaseScheme(abc.ABC):
         self._weights_setter(weights)
 
     @abc.abstractmethod
-    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+    def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         pass
 
     def integrate(
@@ -273,34 +271,32 @@ class TrapezoidRule(BaseScheme):
         """
         return elements[1, ...] - elements[0, ...]
 
-    def _reference_volume_setter(
-        self, reference_volumes: Optional[float] = None
-    ) -> None:
+    def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         """
         Set the volume of the reference element.
 
         Args:
-            reference_volumes (Optional[float]): Volume of the reference element.
+            reference_volumes (float | None): Volume of the reference element.
         """
         self._reference_volume = 1.0
 
     def _reference_points_setter(
-        self, reference_points: Optional[np.ndarray] = None
+        self, reference_points: np.ndarray | None = None
     ) -> None:
         """
         Set the points on the reference element.
 
         Args:
-            reference_points (Optional[np.ndarray]): Points on the reference element.
+            reference_points (np.ndarray | None): Points on the reference element.
         """
         self._reference_points = np.array([0, 1])
 
-    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+    def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         """
         Set the weights for the integration points.
 
         Args:
-            weights (Optional[np.ndarray]): Weights for the integration points.
+            weights (np.ndarray | None): Weights for the integration points.
         """
         self._weights = np.array([0.5, 0.5])
 
@@ -369,18 +365,16 @@ class GaussLegendreQuadrature1D(BaseScheme):
             elements[0, :, 0] <= elements[1, :, 0]
         ), "Element vertices ordered wrongly."
 
-    def _reference_volume_setter(
-        self, reference_volumes: Optional[float] = None
-    ) -> None:
+    def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         self._reference_volume = 2.0
 
     def _reference_points_setter(
-        self, reference_points: Optional[np.ndarray] = None
+        self, reference_points: np.ndarray | None = None
     ) -> None:
         """Integration points on the reference interval :math:`[-1,1]`."""
         self._reference_points = np.polynomial.legendre.leggauss(self.degree)[0]
 
-    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+    def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         r"""Integration weights on the reference interval :math:`[-1,1]`."""
         self._weights = np.polynomial.legendre.leggauss(self.degree)[1]
 
@@ -464,19 +458,17 @@ class GaussLegendreQuadrature2D(BaseScheme):
             elements[0, :, 1] <= elements[2, :, 1]
         ), "Element vertices ordered wrongly."
 
-    def _reference_volume_setter(
-        self, reference_volumes: Optional[float] = None
-    ) -> None:
+    def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         self._reference_volume = 4.0
 
     def _reference_points_setter(
-        self, reference_points: Optional[np.ndarray] = None
+        self, reference_points: np.ndarray | None = None
     ) -> None:
         points_1d = np.polynomial.legendre.leggauss(self.degree)[0]
         xv, yv = np.meshgrid(points_1d, points_1d)
         self._reference_points = np.stack((xv, yv), axis=2).reshape(self.degree**2, 2)
 
-    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+    def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         weights_1d = np.polynomial.legendre.leggauss(self.degree)[1]
         self._weights = np.outer(weights_1d, weights_1d).flatten()
 
@@ -593,13 +585,11 @@ class GaussLegendreQuadrature3D(BaseScheme):
             elements[0, :, 2] <= elements[5, :, 2]
         ), "Element vertices ordered wrongly."
 
-    def _reference_volume_setter(
-        self, reference_volumes: Optional[float] = None
-    ) -> None:
+    def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         self._reference_volume = 8.0
 
     def _reference_points_setter(
-        self, reference_points: Optional[np.ndarray] = None
+        self, reference_points: np.ndarray | None = None
     ) -> None:
         points_1d = np.polynomial.legendre.leggauss(self.degree)[0]
         xv, yv, zv = np.meshgrid(points_1d, points_1d, points_1d)
@@ -607,7 +597,7 @@ class GaussLegendreQuadrature3D(BaseScheme):
             self.degree**3, 3
         )
 
-    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+    def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         weights_1d = np.polynomial.legendre.leggauss(self.degree)[1]
         self._weights = np.outer(weights_1d, weights_1d, weights_1d).flatten()
 
@@ -673,7 +663,7 @@ class TriangleQuadrature(BaseScheme):
         self._weights_setter()
 
     def calc_affine_coefficients(
-        self, elements: np.ndarray, ref_element: Optional[np.ndarray] = None
+        self, elements: np.ndarray, ref_element: np.ndarray | None = None
     ) -> None:
         r"""Compute coefficients for affine transformation from reference element to
         goal elements.
@@ -805,13 +795,11 @@ class TriangleQuadrature(BaseScheme):
             / 2
         )
 
-    def _reference_volume_setter(
-        self, reference_volumes: Optional[float] = None
-    ) -> None:
+    def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         self._reference_volume = 0.5
 
     def _reference_points_setter(
-        self, reference_points: Optional[np.ndarray] = None
+        self, reference_points: np.ndarray | None = None
     ) -> None:
         r"""Integration points on the reference triangle :math:`\{(x,y) | 0 \leq x + y
         \leq 1\}` of area 1/2."""
@@ -837,7 +825,7 @@ class TriangleQuadrature(BaseScheme):
                 ]
             )
 
-    def _weights_setter(self, weights: Optional[np.ndarray] = None) -> None:
+    def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         if self.degree == 1:
             self._weights = np.array([1 / 2])
         elif self.degree == 2:

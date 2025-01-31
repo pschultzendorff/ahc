@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from tpf.numerics.quadrature import TriangleQuadrature
 from tpf.viz.solver_statistics import (
@@ -115,7 +115,7 @@ else:
         def normalize_saturation(
             self,
             saturation: pp.ad.Operator,
-            phase: Optional[FluidPhase] = None,
+            phase: FluidPhase | None = None,
             limit: bool = False,
             epsilon: float = 0.0,
         ) -> pp.ad.Operator:
@@ -155,7 +155,7 @@ else:
             self,
             saturation_w: pp.ad.Operator,
             phase: FluidPhase,
-            rel_perm_constants: Optional[RelPermConstants] = None,
+            rel_perm_constants: RelPermConstants | None = None,
         ) -> pp.ad.Operator:
             """Phase relative permeability. Normally provided by a mixin of instance
             :class:`RelativePermeability`.
@@ -167,7 +167,7 @@ else:
             self,
             saturation_w: np.ndarray,
             phase: FluidPhase,
-            rel_perm_constants: Optional[RelPermConstants] = None,
+            rel_perm_constants: RelPermConstants | None = None,
         ) -> np.ndarray:
             """Phase relative permeability for saturations of type
             :class:`~numpy.ndarray`. Normally provided by a mixin of instance
@@ -186,7 +186,7 @@ else:
         def cap_press(
             self,
             saturation_w: pp.ad.Operator,
-            cap_press_constants: Optional[CapPressConstants] = None,
+            cap_press_constants: CapPressConstants | None = None,
         ) -> pp.ad.Operator:
             """Capillary pressure. Normally provided by a mixin of instance
             :class:`CapillaryPressure`.
@@ -197,7 +197,7 @@ else:
         def cap_press_np(
             self,
             saturation_w: np.ndarray,
-            cap_press_constants: Optional[CapPressConstants] = None,
+            cap_press_constants: CapPressConstants | None = None,
         ) -> np.ndarray:
             """Capillary pressure for saturations of type
             :class:`~numpy.ndarray`. Normally provided by a mixin of instance
@@ -209,7 +209,7 @@ else:
         def cap_press_deriv(
             self,
             saturation_w: pp.ad.Operator,
-            cap_press_constants: Optional[CapPressConstants] = None,
+            cap_press_constants: CapPressConstants | None = None,
         ) -> pp.ad.Operator:
             """Capillary pressure derivative. Normally provided by a mixin of instance
             :class:`CapillaryPressure`.
@@ -220,7 +220,7 @@ else:
         def cap_press_deriv_np(
             self,
             saturation_w: np.ndarray,
-            cap_press_constants: Optional[CapPressConstants] = None,
+            cap_press_constants: CapPressConstants | None = None,
         ) -> np.ndarray:
             """Capillary pressure derivative for saturations of type
             :class:`~numpy.ndarray`. Normally provided by a mixin of instance
@@ -317,12 +317,19 @@ else:
         _rel_perm_constants_2: RelPermConstants
         """Relative permeability constants for the second phase."""
 
-        hc_rel_perm_toggle: bool = True
+        hc_rel_perm_toggle_fl: float
         """Toggle between homotopy continuation and goal relative permeabilities.
 
-        The default value is ``True`` to use homotopy continuation relative permeabilities.
-        Any method that changes this value, is expected to change it back to ``True`` after
+        The default value is one to use homotopy continuation relative permeabilities.
+        To toggle the target relative permeabilities, it is set value to zero. Any
+        method that changes this value, is expected to change it back to one after 
         the call.
+
+        """
+        hc_rel_perm_toggle_ad: pp.ad.Scalar
+        """Toggle between homotopy continuation and goal relative permeabilities.
+
+        Needs to be updated whenever :attr:`hc_rel_perm_toggle_fl` is changed.
 
         """
 
@@ -431,7 +438,7 @@ else:
             self,
             s_w: np.ndarray,
             pressure_key: PRESSURE_KEY,
-            p_w: Optional[np.ndarray] = None,
+            p_w: np.ndarray | None = None,
             epsilon: float = 1e-6,
         ) -> np.ndarray:
             """Evaluate the global or complimentary pressure field for the given pressure
@@ -505,7 +512,7 @@ else:
         def equilibrate_flux_during_Newton(
             self,
             flux_name: Literal["total", "wetting_from_ff"],
-            nonlinear_increment: Optional[np.ndarray] = None,
+            nonlinear_increment: np.ndarray | None = None,
         ) -> None:
             """Equilibrate an approximate flux solution at a given Newton iteration."""
             ...
@@ -626,8 +633,8 @@ else:
 
         def _data_to_export(
             self,
-            time_step_index: Optional[int] = None,
-            iterate_index: Optional[int] = None,
+            time_step_index: int | None = None,
+            iterate_index: int | None = None,
         ) -> list[DataInput]:
             """Private function to allow easy coexistence of ``data_to_export`` and
             ``data_to_export_iteration``

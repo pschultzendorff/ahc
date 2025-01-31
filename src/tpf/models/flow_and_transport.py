@@ -40,7 +40,7 @@ import logging
 import time
 import typing
 from functools import partial
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import porepy as pp
@@ -437,7 +437,7 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
         return np.full(g.num_cells, self.solid.porosity())
 
     @typing.override
-    def set_equations(self, equation_names: Optional[dict[str, str]] = None) -> None:
+    def set_equations(self, equation_names: dict[str, str | None] = None) -> None:
         """Define equations."""
         try:
             self.equation_system.remove_equation("Flow equation")
@@ -552,7 +552,7 @@ class VariablesTPF(TPFProtocol, pp.VariableMixin):
     def normalize_saturation(
         self,
         saturation: pp.ad.Operator,
-        phase: Optional[FluidPhase] = None,
+        phase: FluidPhase | None = None,
         limit: bool = False,
         epsilon: float = 0.0,
     ) -> pp.ad.Operator:
@@ -902,10 +902,8 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
 class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
     @typing.override
-    def __init__(self, params: Optional[dict]) -> None:
+    def __init__(self, params: dict | None) -> None:
         super().__init__(params)
-        if params is None:
-            params = {}
 
         self.formulation: Literal["fractional_flow"] = self.params.get(
             "formulation", "fractional_flow"
@@ -960,7 +958,9 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         """
         self._max_delta_s_per_ts: float = 0.2
-        self._appleyard_chopping: bool = False
+        self._nl_appleyard_chopping: bool = self.params.get(
+            "nl_appleyard_chopping", False
+        )
         """Chop local saturation changes per nonlinear iteration that are larger than
         :math:`0.2`.
 
@@ -1246,15 +1246,10 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             nonlinear_increment: The new solution, as computed by the non-linear solver.
 
         """
-        if self._appleyard_chopping:
-            raise NotImplementedError(
-                "Appleyard chopping is not implemented for two-phase flow."
+        if self._nl_appleyard_chopping:
+            nonlinear_increment[: self.g.num_cells] = np.clip(
+                nonlinear_increment[: self.g.num_cells], -0.2, 0.2
             )
-            # self._prev_saturation: np.ndarray = (
-            #     self.equation_system.get_variable_values(
-            #         variables=[self.primary_saturation_var], time_step_index=0
-            #     )
-            # )
         # Update primary variables.
         self.equation_system.shift_iterate_values(max_index=len(self.iterate_indices))
         self.equation_system.set_variable_values(
@@ -1400,7 +1395,7 @@ class DataSavingTPF(TPFProtocol, pp.DataSavingMixin):
         return self._data_to_export(iterate_index=0)
 
     def _data_to_export(
-        self, time_step_index: Optional[int] = None, iterate_index: Optional[int] = None
+        self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
         """Return data to be exported.
 

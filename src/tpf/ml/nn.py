@@ -1,7 +1,5 @@
 """Example neural network classes that can be wrapped and used in PorePy."""
 
-from typing import Optional
-
 import torch
 import torch.nn as nn
 
@@ -9,7 +7,7 @@ import torch.nn as nn
 class BaseNN(nn.Module):
     """Base nn with one input and one output. Depth can be chosen."""
 
-    def __init__(self, params: Optional[dict] = None) -> None:
+    def __init__(self, params: dict | None = None) -> None:
         super().__init__()
         if params is None:
             params = {}
