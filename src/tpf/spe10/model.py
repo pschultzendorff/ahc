@@ -342,9 +342,7 @@ class SolutionStrategySPE10(TPFProtocol):
 
         """
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
-        # initial_pressure[corner_cell_ids] = BHP
         initial_saturation = np.full(self.g.num_cells, INITIAL_SATURATION)
-        # initial_saturation[corner_cell_ids] = 1 - self.wetting.residual_saturation
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),
             [self.wetting.p, self.nonwetting.p],

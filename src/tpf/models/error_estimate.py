@@ -22,6 +22,11 @@ from tpf.utils.constants_and_typing import (
 
 logger = logging.getLogger(__name__)
 
+# If the local estimators are very small (~1e-160), taking a square during their
+# computation will result in an underflow error. These errors should NOT be raised.
+# Treating the local estimators as zero is fine.
+np.seterr(under="ignore")
+
 
 class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
     """Methods to equilibrate fluxes during the Newton iteration.
@@ -498,14 +503,15 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             f"{GLOBAL_PRESSURE}_postprocessed_coeffs", self.g_data, iterate_index=0
         )
         perm: np.ndarray | dict[str, np.ndarray] = self.permeability(self.g)
-        rel_perms: dict[str, np.ndarray] = {}
+        phase_mobilities: dict[str, np.ndarray] = {}
         for phase in self.phases.values():
-            rel_perms[phase.name] = self.rel_perm(self.wetting.s, phase).value(
-                self.equation_system
+            # TODO Have this as part of the equation system. Possibly face rel. perms?
+            phase_mobilities[phase.name] = (  # type: ignore
+                self.rel_perm(self.wetting.s, phase).value(self.equation_system)
+                / phase.viscosity
             )
         total_mobility: np.ndarray = (
-            rel_perms[self.wetting.name] / self.wetting.viscosity
-            + rel_perms[self.nonwetting.name] / self.nonwetting.viscosity
+            phase_mobilities[self.wetting.name] + phase_mobilities[self.nonwetting.name]
         )
 
         def integrand_1(
@@ -513,10 +519,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         ) -> np.ndarray:
             r"""
             Returns:
-                integrand: :math:`|\kappa \nabla P(x)|^2.
+                integrand: :math:`|\kappa \lambda_t \nabla P(x)|^2.
 
             """
-            nonlocal global_pressure_coeffs, perm
+            nonlocal global_pressure_coeffs, perm, total_mobility
             # Calculate the potential directly from the coefficients.
             pressure_potential_x: np.ndarray = (
                 2 * x[..., 0] * global_pressure_coeffs[..., 0][None, ...]
@@ -563,7 +569,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         # Complimentary pressure term.
         # complimentary_pressure_coeffs: np.ndarray = pp.get_solution_values(
-        #     f"{COMPLIMENTARY_PRESSURE}_postprocessed_coeffs", g_data, iterate_index=0
+        #     f"{COMPLIMENTARY_PRESSURE}_postprocessed_coeffs", self.g_data, iterate_index=0
         # )
 
         # def integrand_2(
@@ -571,19 +577,67 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # ) -> np.ndarray:
         #     r"""
         #     Returns:
-        #         integrand: :math:`Q(x)^2`.
+        #         integrand: :math:`|\kappa (\lambda_w \nabla P(x) + \nabla Q(x))|^2.
 
         #     """
-        #     nonlocal complimentary_pressure_coeffs
-        #     integrand_squareroot: np.ndarray = (
-        #         complimentary_pressure_coeffs[..., 0] * x[..., 0] ** 2
-        #         + complimentary_pressure_coeffs[..., 1] * x[..., 0] * x[..., 1]
-        #         + complimentary_pressure_coeffs[..., 2] * x[..., 0]
-        #         + complimentary_pressure_coeffs[..., 3] * x[..., 1] ** 2
-        #         + complimentary_pressure_coeffs[..., 4] * x[..., 1]
-        #         + complimentary_pressure_coeffs[..., 5]
+        #     nonlocal global_pressure_coeffs, complimentary_pressure_coeffs, perm, total_mobility, phase_mobilities
+        #     # Calculate the potential directly from the coefficients.
+        #     global_pressure_potential_x: np.ndarray = (
+        #         2 * x[..., 0] * global_pressure_coeffs[..., 0][None, ...]
+        #         + x[..., 1] * global_pressure_coeffs[..., 1][None, ...]
+        #         + global_pressure_coeffs[..., 2][None, ...]
         #     )
-        #     return integrand_squareroot**2
+        #     global_pressure_potential_y: np.ndarray = (
+        #         2 * x[..., 1] * global_pressure_coeffs[..., 3][None, ...]
+        #         + x[..., 0] * global_pressure_coeffs[..., 1][None, ...]
+        #         + global_pressure_coeffs[..., 4][None, ...]
+        #     )
+        #     global_pressure_potential: np.ndarray = np.stack(
+        #         [global_pressure_potential_x, global_pressure_potential_y], axis=-1
+        #     )
+        #     complimentary_pressure_potential_x: np.ndarray = (
+        #         2 * x[..., 0] * complimentary_pressure_coeffs[..., 0][None, ...]
+        #         + x[..., 1] * complimentary_pressure_coeffs[..., 1][None, ...]
+        #         + complimentary_pressure_coeffs[..., 2][None, ...]
+        #     )
+        #     complimentary_pressure_potential_y: np.ndarray = (
+        #         2 * x[..., 1] * complimentary_pressure_coeffs[..., 3][None, ...]
+        #         + x[..., 0] * complimentary_pressure_coeffs[..., 1][None, ...]
+        #         + complimentary_pressure_coeffs[..., 4][None, ...]
+        #     )
+        #     complimentary_pressure_potential: np.ndarray = np.stack(
+        #         [
+        #             complimentary_pressure_potential_x,
+        #             complimentary_pressure_potential_y,
+        #         ],
+        #         axis=-1,
+        #     )
+
+        #     # Different treatment for scalar and tensor permeabilities.
+        #     if isinstance(perm, np.ndarray):
+        #         global_pressure_potential *= perm[None, :, None]
+        #         complimentary_pressure_coeffs *= perm[None, :, None]
+        #     elif len(perm) == 1:
+        #         global_pressure_potential *= perm["kxx"][None, :, None]
+        #         complimentary_pressure_potential *= perm["kxx"][None, :, None]
+        #     elif len(perm) == 2:
+        #         # TODO Fix this for tensor permeabilities.
+        #         # Perm has form ``{"kxx": np.ndarray, "kyy": np.ndarray, ...}``.
+        #         # pressure_potential_times_mobility: np.ndarray = (
+        #         #     total_mobility[None, :, None] * pressure_potential
+        #         #     if pressure_key == GLOBAL_PRESSURE
+        #         #     else pressure_potential
+        #         # )
+        #         # fluxes.append()
+        #         ...
+        #     else:
+        #         raise ValueError(
+        #             "Permeability must be scalar or tensor with zero"
+        #             + " values off the diagonal."
+        #         )
+        #     global_pressure_potential *= total_mobility[None, :, None]
+        #     global_pressure_potential *= total_mobility[None, :, None]
+        #     return pressure_potential[..., 0] ** 2 + pressure_potential[..., 1] ** 2
 
         # complimentary_pressure_term: Integral = self.quadrature_estimate.integrate(
         #     integrand_2,

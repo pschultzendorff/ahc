@@ -1,5 +1,6 @@
 import json
 import typing
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -128,6 +129,15 @@ class SolverStatisticsRec(SolverStatisticsTPF):
 
 @dataclass
 class SolverStatisticsEst(SolverStatisticsRec):
+    """
+
+    Note: Things may not be logged correctly during a Newton loop if a
+    `FloatingPointError` occurs during computation of the qantities to log in
+    :meth:`model.check_convergence`. In this case, `NewtonSolver` catches the error and
+    :meth:`model.after_nonlinear_failure` is called without logging the quantities.
+
+    """
+
     residual_and_flux_est: list[float] = field(default_factory=list)
     """List of residual and flux error estimates for each non-linear iteration."""
     nonconformity_est: list[dict[str, float]] = field(default_factory=list)
@@ -194,6 +204,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
                 json.dump(data, file, indent=4)
 
 
+# Important to subclass SolverStatisticsTPF and not SolverStatisticsEst.
 @dataclass
 class SolverStatisticsHC(SolverStatisticsTPF):
     hc_lambda_fl: float = 1.0
@@ -274,9 +285,15 @@ class SolverStatisticsHC(SolverStatisticsTPF):
         Newton loop.
 
         """
-        self.nums_iteration.append(self.num_iteration)
-        self.nonlinear_increment_norms_hc.append(self.nonlinear_increment_norms)
-        self.residual_norms_hc.append(self.residual_norms)
+        # Do no append empty Newton loop data at the start of a new time step.
+        if self.hc_num_iteration > 0:
+            self.nums_iteration.append(self.num_iteration)
+            # Append a deep copy of the lists; otherwise only a reference to the mutable
+            # object is appended.
+            self.nonlinear_increment_norms_hc.append(
+                deepcopy(self.nonlinear_increment_norms)
+            )
+            self.residual_norms_hc.append(deepcopy(self.residual_norms))
         super().reset()
         self.discretization_est.append([])
         self.hc_est.append([])
@@ -317,6 +334,14 @@ class SolverStatisticsHC(SolverStatisticsTPF):
 
             # Append data.
             ind: int = len(data) + 1
+
+            if self.hc_num_iteration > 0:
+                # :meth:`reset` is called at the start of each Newton loop, so we have to
+                # append some of the last Newton loop data.
+                self.nums_iteration.append(self.num_iteration)
+                self.nonlinear_increment_norms_hc.append(self.nonlinear_increment_norms)
+                self.residual_norms_hc.append(self.residual_norms)
+
             # The data is organized into dictionaries for each hc step. Each hc step
             # contains lists with values for all Newton steps.
             data[ind] = {
@@ -348,8 +373,11 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                     "time step index": self.time_step_index,
                     "current time": self.time,
                     "time step size": self.time_step_size,
-                    "hc_lambdas": self.hc_lambdas,
-                    "hc_num_iterations": self.hc_num_iteration,
+                    # Do not log the latest hc iteration, since it wasn't solved in a
+                    # Newton loop. This is because :meth:`after_hc_iteration` is called
+                    # before :meth:`after_hc_convergence/failure`
+                    "hc_lambdas": self.hc_lambdas[:-1],
+                    "hc_num_iterations": self.hc_num_iteration - 1,
                 }
             )
             # Save to file

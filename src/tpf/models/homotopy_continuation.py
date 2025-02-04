@@ -29,11 +29,15 @@ from tpf.numerics.quadrature import Integral
 from tpf.utils.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     GLOBAL_PRESSURE,
-    PHASENAME,
     PRESSURE_KEY,
 )
 
 logger = logging.getLogger(__name__)
+
+# If the local estimators are very small (~1e-160), taking a square during their
+# computation will result in an underflow error. These errors should NOT be raised.
+# Treating the local estimators as zero is fine.
+np.seterr(under="ignore")
 
 
 # ``HCProtocol`` and ``TPFProtocol`` define different types for
@@ -837,6 +841,8 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol, 
         # is False. However, to compare HC and apdative HC, we still evaluate it.
         hc_est: float = self.global_hc_est()
         linearization_est: float = self.global_linearization_est()
+        if diverged:
+            pass
         self.nonlinear_solver_statistics.log_error(
             # NOTE The discretization error estimate does not need to be calculated
             # at this point. After HC convergence is sufficient if we want the code
@@ -849,8 +855,18 @@ class SolutionStrategyHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol, 
         )
 
         # Adaptive stopping criterion.
-        if nl_params["hc_adaptive"]:
-            if linearization_est <= nl_params["nl_error_ratio"] * hc_est:
+        if not diverged and nl_params["hc_adaptive"]:
+            nonlinear_increment_norm: float = self.compute_nonlinear_increment_norm(
+                nonlinear_increment
+            )
+
+            # If Newton diverges, the estimators lose their meaning and the adaptive
+            # criterion might incorrectly stop the HC loop. Hence, we check that the
+            # nonlinear increment norm is not too large.
+            if (
+                linearization_est <= nl_params["nl_error_ratio"] * hc_est
+                and nonlinear_increment_norm <= nl_params["hc_nl_convergence_tol"]
+            ):
                 logger.info(
                     f"Linearization error {linearization_est} smaller than"
                     + f" {nl_params['nl_error_ratio']} * HC error {hc_est}."
