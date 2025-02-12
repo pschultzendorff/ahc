@@ -1,25 +1,157 @@
+"""This module defines a model for the 10th SPE Comparative Solution Project (SPE10), case
+2A.
+
+[M. A. Christie and M. J. Blunt, “Tenth SPE Comparative Solution Project: A
+Comparison of Upscaling Techniques,” SPE Reservoir Evaluation & Engineering, vol. 4, no.
+04, pp. 308–317, Aug. 2001, doi: 10.2118/72469-PA.]
+
+https://www.spe.org/web/csp/datasets/set02.htm
+
+Additionally, the module provides util functions to download and prepare geometric data
+for the model.
+
+"""
+
+import logging
 import pathlib
-import typing
 import warnings
-from typing import Callable
+import zipfile
+from typing import Any, Callable
 
 import numpy as np
 import porepy as pp
-import tpf
+import requests
 from porepy.viz.exporter import DataInput
+from tpf.derived_models.fluid_values import oil as _oil
+from tpf.derived_models.fluid_values import water as _water
+from tpf.derived_models.utils import center_cell_id, corner_faces_id
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
-from tpf.spe10.fluid_values import (
-    BHP,
-    INITIAL_PRESSURE,
-    INITIAL_SATURATION,
-    INJECTION_RATE,
-    PRODUCTION_WELL_SIZE,
-    oil,
-    water,
+from tpf.utils.constants_and_typing import FEET, NONWETTING, PSI, WETTING
+
+logger = logging.getLogger(__name__)
+
+DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent / "spe10_data"
+ZIP_FILENAME: str = "por_perm_case2a.zip"
+URL: str = "https://www.spe.org/web/csp/datasets/por_perm_case2a.zip"
+
+# region MODEL_PARAMETERS
+WIDTH: float = 1200 * FEET
+HEIGHT: float = 2200 * FEET
+
+INITIAL_PRESSURE: float = 6000 * PSI  # [psi], initial pressure.
+INITIAL_SATURATION: float = 0.3  # [-], initial saturation.
+
+water: dict[str, Any] = _water.copy()
+water.update(
+    {
+        "residual_saturation": 0.2,  # [-], residual saturation.
+    }
 )
-from tpf.spe10.geometry import X_LENGTH, Y_LENGTH, load_spe10_data
-from tpf.utils.constants_and_typing import FEET, NONWETTING, WETTING
+oil: dict[str, Any] = _oil.copy()
+oil.update(
+    {
+        "residual_saturation": 0.2,  # [-], residual saturation.
+    }
+)
+
+BHP: float = 4000 * PSI  # [psi], bottom hole pressure.
+PRODUCTION_WELL_SIZE: float = 100 * FEET
+"""Size of the production wells in the corner cells. The boundary in in vicinity of the
+corners is prescribed Dirichlet conditions corresponding to a production well, i.e.,
+fixed BHP."""
+INJECTION_RATE: float = 87.5  # [m^3/day], constant water injection rate.
+
+# endregion
+
+
+def download_spe10_data(
+    data_dir: pathlib.Path, zip_filepath: pathlib.Path = DATA_DIR / ZIP_FILENAME
+) -> None:
+    """Download the SPE10porosity and permeability data, and store them
+    locally."""
+    # Ensure the destination directory exists.
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Download the ZIP file.
+    logger.info(f"Downloading dataset from {URL}")
+    response = requests.get(URL)
+    response.raise_for_status()
+
+    with zip_filepath.open("wb") as f:
+        f.write(response.content)
+    logger.info("Download completed.")
+
+    # Extract the ZIP file.
+    extracted_files: list[str] = []
+    with zipfile.ZipFile(zip_filepath, "r") as zip_ref:
+        zip_ref.extractall(data_dir)
+        extracted_files = zip_ref.namelist()
+    logger.info(f"Extracted files: {extracted_files}")
+
+    # Locate the .dat files for permeability and porosity.
+    perm_file: pathlib.Path | None = None
+    poro_file: pathlib.Path | None = None
+    for filename in extracted_files:
+        if "perm" in filename.lower():
+            perm_file = data_dir / filename
+        elif "phi" in filename.lower():
+            poro_file = data_dir / filename
+
+    if perm_file is None or poro_file is None:
+        raise FileNotFoundError(
+            "Could not locate permeability or porosity data files in the downloaded"
+            + " contents."
+        )
+
+    zip_filepath.unlink()
+    logger.info("Downloaded files cleaned up.")
+
+
+def load_spe10_data(data_dir: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
+    """Load the SPE10data into :class:`~numpy.ndarray`.
+
+    Returns:
+        tuple: A tuple containing:
+            - np.ndarray: Permeability data array.
+            - np.ndarray: Porosity data array.
+
+    """
+    # Ensure the destination directory exists.
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    perm_file: pathlib.Path | None = None
+    poro_file: pathlib.Path | None = None
+
+    # In lieu of a goto statement, run the following loop at maximum twice.
+    i: int = 0
+    while True:
+        for filename in data_dir.iterdir():
+            if "perm" in str(filename).lower():
+                perm_file = data_dir / filename
+            elif "phi" in str(filename).lower():
+                poro_file = data_dir / filename
+        if perm_file is None or poro_file is None:
+            if i >= 1:
+                raise FileNotFoundError(
+                    "Permeability and porosity data files not found. Perhaps, they were"
+                    + " not downloaded correctly."
+                )
+            logger.info(
+                "Permeability and porosity data files not found. Downloading..."
+            )
+            download_spe10_data(data_dir)
+        else:
+            break
+        i += 1
+
+    logger.info("Loading permeability and porosity data.")
+    perm_data = np.loadtxt(str(perm_file)).reshape(3, 85, 220, 60)  # unit: [mD]
+    # Convert permeability to m^2.
+    perm_data *= pp.MILLIDARCY
+    poro_data = np.loadtxt(str(poro_file)).reshape(85, 220, 60)  # unit: [-]
+
+    return perm_data, poro_data
 
 
 class EquationsSPE10(TPFProtocol):
@@ -62,15 +194,12 @@ class EquationsSPE10(TPFProtocol):
         Five-spot setup. Water (wetting) injection in the center, oil (nonwetting)
         production in the four corners.
 
-        NOTE: This is the average value per grid cell, i.e., it gets scaled with the
-        cell volume in the equation.
-
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
         if phase.name == self.wetting.name:
             array: np.ndarray = super().phase_fluid_source(g, phase)
-            array[self.center_cell_id(g)] = phase.convert_units(
+            array[center_cell_id(g)] = phase.convert_units(
                 INJECTION_RATE, "m^3"
             ) / phase.convert_units(
                 pp.DAY, "s"
@@ -79,120 +208,8 @@ class EquationsSPE10(TPFProtocol):
         elif phase.name == self.nonwetting.name:
             return super().phase_fluid_source(g, phase)
 
-    @staticmethod
-    def center_cell_id(g: pp.Grid) -> np.intp:
-        """Identify the center cell of the grid.
-
-        Parameters:
-            g: Grid.
-
-        Returns:
-            corner: Index of the center cell.
-
-        """
-        # Ignore z-values of the grid.
-        cell_centers = g.cell_centers[:2, :]
-        min_x, min_y = np.min(cell_centers, axis=1)
-        max_x, max_y = np.max(cell_centers, axis=1)
-        center = np.argmin(
-            np.sum(
-                (
-                    cell_centers
-                    - np.array([[(max_x - min_x) / 2], [(max_y - min_y) / 2]])
-                )
-                ** 2,
-                axis=0,
-            )
-        )
-        return center
-
-    @staticmethod
-    def corner_faces_id(g: pp.Grid, height: float, width: float) -> np.ndarray:
-        """Identify the boundary faces in the corners of the grid corresponding to
-        production wells.
-
-        Parameters:
-            g: Grid.
-
-        Returns:
-            corners: Indices of the boundary faces in the corners.
-
-        """
-        # Ignore z-values of the grid.
-        boundary_faces: np.ndarray = g.get_boundary_faces()
-        boundary_face_centers: np.ndarray = g.face_centers[:2, boundary_faces]
-        # Find indices of faces in the corners.
-        indices: list[np.ndarray] = []
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] == 0,
-                    boundary_face_centers[1] <= PRODUCTION_WELL_SIZE,
-                ),
-            )
-        )
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] == 0,
-                    boundary_face_centers[1] >= height - PRODUCTION_WELL_SIZE,
-                )
-            )
-        )
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] == width,
-                    boundary_face_centers[1] <= PRODUCTION_WELL_SIZE,
-                )
-            )
-        )
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] == width,
-                    boundary_face_centers[1] >= height - PRODUCTION_WELL_SIZE,
-                )
-            )
-        )
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] <= PRODUCTION_WELL_SIZE,
-                    boundary_face_centers[1] == 0,
-                )
-            )
-        )
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] >= width - PRODUCTION_WELL_SIZE,
-                    boundary_face_centers[1] == 0,
-                )
-            )
-        )
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] <= PRODUCTION_WELL_SIZE,
-                    boundary_face_centers[1] == height,
-                )
-            )
-        )
-        indices.append(
-            np.argwhere(
-                np.logical_and(
-                    boundary_face_centers[0] >= width - PRODUCTION_WELL_SIZE,
-                    boundary_face_centers[1] == height,
-                )
-            )
-        )
-        return boundary_faces[np.concatenate(indices).flatten()]
-
 
 class ModifiedBoundarySPE10(TPFProtocol):
-
-    corner_faces_id: Callable[[pp.Grid, float, float], np.ndarray]
 
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann).
@@ -201,12 +218,12 @@ class ModifiedBoundarySPE10(TPFProtocol):
         a pressure explicitely, which acts as a Dirichlet condition.
 
         """
-        height: float = (
-            (Y_LENGTH / 2) if self.params["spe10_quarter_domain"] else Y_LENGTH
+        height: float = (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
+        width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
+        corner_faces: np.ndarray = corner_faces_id(
+            g, height, width, PRODUCTION_WELL_SIZE
         )
-        width: float = X_LENGTH / 2 if self.params["spe10_quarter_domain"] else X_LENGTH
-        corner_faces_id: np.ndarray = self.corner_faces_id(g, height, width)
-        return pp.BoundaryCondition(g, corner_faces_id, "dir")
+        return pp.BoundaryCondition(g, corner_faces, "dir")
 
     def _bc_dirichlet_pressure_values(
         self, g: pp.Grid, phase: FluidPhase
@@ -219,14 +236,14 @@ class ModifiedBoundarySPE10(TPFProtocol):
         """
         if phase == self.nonwetting:
             height: float = (
-                Y_LENGTH / 2 if self.params["spe10_quarter_domain"] else Y_LENGTH
+                HEIGHT / 2 if self.params["spe10_quarter_domain"] else HEIGHT
             )
-            width: float = (
-                X_LENGTH / 2 if self.params["spe10_quarter_domain"] else X_LENGTH
+            width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
+            corner_faces: np.ndarray = corner_faces_id(
+                g, height, width, PRODUCTION_WELL_SIZE
             )
-            corner_faces_id: np.ndarray = self.corner_faces_id(g, height, width)
             bc: np.ndarray = np.zeros(g.num_faces)
-            bc[corner_faces_id] = BHP
+            bc[corner_faces] = phase.convert_units(BHP, "kg*m^-1*s^-2")
             return bc
         else:
             raise NotImplementedError(
@@ -259,8 +276,6 @@ class SolutionStrategySPE10(TPFProtocol):
 
     """
 
-    corner_cell_ids: Callable[[pp.Grid], list[np.intp]]
-
     def set_phases(self) -> None:
         self.phases: dict[str, FluidPhase] = {}
         for phase_name, constants in zip([WETTING, NONWETTING], [water, oil]):
@@ -282,17 +297,19 @@ class SolutionStrategySPE10(TPFProtocol):
             g (pp.Grid): Grid to load the data for.
 
         Raises:
-            ValueError: If the cell size is larger than the SPE10 model cell size.
+            NotImplementedError: If the cell size is larger than the SPE10 model cell
+                size.
 
         """
+        # Get model parameters and throw some warnings/errors for the user.
         cell_size = self.params["meshing_arguments"]["cell_size"]
         assert isinstance(cell_size, float)
         if cell_size > 20 * FEET:
-            raise ValueError(
+            raise NotImplementedError(
                 "The cell size is larger than the SPE10 model cell size. "
                 + "This is not supported yet."
             )
-        layer: int = self.params.get("spe10_layer", 1)
+        layer: int = self.params.get("spe10_layer", 1) - 1
         isotropic_perm: bool = self.params.get("spe10_isotropic_perm", True)
         for param_name, value in zip(
             ["spe10_layer", "spe10_isotropic_perm"], [layer, isotropic_perm]
@@ -323,7 +340,7 @@ class SolutionStrategySPE10(TPFProtocol):
     def add_constant_spe10_data(self) -> None:
         """Save the SPE10 data to the exporter."""
         data: list[DataInput] = []
-        for dim, perm in zip(["kxx", "kyy", "kzz"], self._permeability):
+        for dim, perm in self.permeability(self.g).items():
             data.append((self.g, "permeability_" + dim, perm))
         data.append((self.g, "porosity", self.porosity(self.g)))
         self.exporter.add_constant_data(data)
@@ -334,13 +351,7 @@ class SolutionStrategySPE10(TPFProtocol):
             self.iteration_exporter.add_constant_data(data)
 
     def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation.
-
-        The corner cells get prescibed the right values immediately. Inside the
-        reservoir, the initial pressure is higher. The initial saturation is set to the
-        residual wetting saturation + 0.1 inside the reservoir.
-
-        """
+        """Set initial values for pressure and saturation."""
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
         initial_saturation = np.full(self.g.num_cells, INITIAL_SATURATION)
         self.equation_system.set_variable_values(
@@ -389,48 +400,50 @@ class ModelGeometrySPE10(TPFProtocol):
         if quarter_domain:
             bounding_box: dict[str, pp.number] = {
                 "xmin": 0,
-                "xmax": X_LENGTH / 2,
+                "xmax": WIDTH / 2,
                 "ymin": 0,
-                "ymax": Y_LENGTH / 2,
+                "ymax": HEIGHT / 2,
             }
         else:
             bounding_box = {
                 "xmin": 0,
-                "xmax": X_LENGTH,
+                "xmax": WIDTH,
                 "ymin": 0,
-                "ymax": Y_LENGTH,
+                "ymax": HEIGHT,
             }
         self._domain = pp.Domain(bounding_box)
 
     def set_fractures(self) -> None:
-        # Use fractures as constraints to ensure that the grid is conforming to the well
-        # boundaries.
+        """Use fractures as constraints to ensure that the grid is conforming at the
+        well boundaries.
+
+        """
         self._fractures = [
             pp.LineFracture(
-                np.array([[0, X_LENGTH], [PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE]])
+                np.array([[0, WIDTH], [PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE]])
             ),
             pp.LineFracture(
                 np.array(
                     [
-                        [0, X_LENGTH],
+                        [0, WIDTH],
                         [
-                            Y_LENGTH - PRODUCTION_WELL_SIZE,
-                            Y_LENGTH - PRODUCTION_WELL_SIZE,
+                            HEIGHT - PRODUCTION_WELL_SIZE,
+                            HEIGHT - PRODUCTION_WELL_SIZE,
                         ],
                     ]
                 )
             ),
             pp.LineFracture(
-                np.array([[PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE], [0, Y_LENGTH]])
+                np.array([[PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE], [0, HEIGHT]])
             ),
             pp.LineFracture(
                 np.array(
                     [
                         [
-                            X_LENGTH - PRODUCTION_WELL_SIZE,
-                            X_LENGTH - PRODUCTION_WELL_SIZE,
+                            WIDTH - PRODUCTION_WELL_SIZE,
+                            WIDTH - PRODUCTION_WELL_SIZE,
                         ],
-                        [0, Y_LENGTH],
+                        [0, HEIGHT],
                     ]
                 )
             ),
