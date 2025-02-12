@@ -144,12 +144,6 @@ class GlobalPressureMixin(TPFProtocol):
             [self.wetting.s], iterate_index=0
         )
         p_vals: np.ndarray = self.eval_glob_compl_pressure(s_w, pressure_key, p_n=p_n)
-        pp.shift_solution_values(
-            name=pressure_key,
-            data=self.g_data,
-            location=pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
         pp.set_solution_values(
             name=pressure_key,
             values=p_vals,
@@ -387,12 +381,6 @@ class PressureReconstructionMixin(TPFProtocol):
         s[:, 5] = p_cc - integral.elementwise / self.g.cell_volumes
 
         # Store post-processed but not reconstructed pressure at the nodes.
-        pp.shift_solution_values(
-            f"{pressure_key}_postprocessed_coeffs",
-            self.g_data,
-            pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
         pp.set_solution_values(
             f"{pressure_key}_postprocessed_coeffs",
             s,
@@ -554,12 +542,6 @@ class PressureReconstructionMixin(TPFProtocol):
             [point_val, point_coo, coeffs_reconstructed_pressure],
             ["point_val", "point_coo", "coeffs"],
         ):
-            pp.shift_solution_values(
-                f"{pressure_key}_reconstructed_{name}",
-                self.g_data,
-                pp.ITERATE_SOLUTIONS,
-                max_index=len(self.iterate_indices),
-            )
             pp.set_solution_values(
                 f"{pressure_key}_reconstructed_{name}",
                 value,
@@ -597,11 +579,18 @@ class EquilibratedFluxMixin(TPFProtocol):
         """Equilibrate an approximate flux solution at a given Newton iteration.
 
         We assume the following sub-dictionaries to be present in the data dictionary:
-            iterate_dictionary, storing all parameters.
+            ``iterate_dictionary``, storing all parameters.
                 Stored in ``data[pp.ITERATE_SOLUTIONS]``.
 
-        The following entries in iterate_dictionary will be shifted and updated:
-            - {flux_name}_flux_equilibrated, storing the equilibrated flux.
+        We assume the following entries to be present in ``iterate_dictionary` at
+        ``iterate_index`` 1!!!
+            - ``{flux_name}_flux``, storing the flux value from the previous nonlinear
+              iteration.
+            - ``{flux_name}_flux_jacobian``, storing the Jacobian of the flux value from
+              the previous nonlinear iteration.
+
+        The following entries in ``iterate_dictionary` will be updated:
+            - ``{flux_name}_flux_equilibrated``, storing the equilibrated flux.
 
         Parameters:
             flux_field: Name flux field to be equilibrated.
@@ -615,6 +604,11 @@ class EquilibratedFluxMixin(TPFProtocol):
             None
 
         """
+        if self._nl_appleyard_chopping and nonlinear_increment is None:
+            raise ValueError(
+                "The non-chopped nonlinear increment vector has to be provided when"
+                + " Newton is run with Appleyard chopping."
+            )
         # The functions ``DarcyFluxes.total_flux`` and ``DarcyFluxes.phase_flux``
         # incorporate bc values, hence ``d[f"{flux_name}_flux"]`` includes bc
         # values when set by ``eval_additional_vars`` and hence we do not need to care
@@ -631,6 +625,9 @@ class EquilibratedFluxMixin(TPFProtocol):
         if nonlinear_increment is None:
             # NOTE The variables are retrieved in the same order as in the Jacobian
             # construction.
+            # NOTE This requires the variables to be shifted at each nonlinear
+            # iteration. By default, this happens in
+            # :meth:`SolutionStrategyTPF.after_nonlinear_iteration`
             var_val: np.ndarray = self.equation_system.get_variable_values(
                 [self.primary_saturation_var, self.primary_pressure_var],
                 iterate_index=1,
@@ -646,13 +643,6 @@ class EquilibratedFluxMixin(TPFProtocol):
         # On Neumann boundaries, the equilibrated flux is set to the boundary value.
         # is_dir: np.ndarray = self.g_data[pp.PARAMETERS][self.flux_key]["bc"].is_dir
         # equilibrated_flux[is_dir] = 0
-
-        pp.shift_solution_values(
-            f"{flux_name}_flux_equilibrated",
-            self.g_data,
-            pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
         pp.set_solution_values(
             f"{flux_name}_flux_equilibrated",
             equilibrated_flux,
@@ -746,12 +736,6 @@ class EquilibratedFluxMixin(TPFProtocol):
             )
 
         # Store coefficients in the data dictionary.
-        pp.shift_solution_values(
-            f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
-            self.g_data,
-            pp.ITERATE_SOLUTIONS,
-            max_index=len(self.iterate_indices),
-        )
         pp.set_solution_values(
             f"{flux_name}_flux{flux_specifier}_RT0_coeffs",
             coeffs,
@@ -776,21 +760,6 @@ class EquilibratedFluxMixin(TPFProtocol):
         Instead, save it to the equation system and just reevaluate.
 
         """
-        # TEST -> Local mass conservation
-        # Check if mass conservation is satisfied on a cell basis, in order to do
-        # this, we check on a local basis, if the divergence of the flux equals
-        # the sum of internal and external source terms
-        # full_flux_local_div = (sign_normals_cell * flux[faces_cell]).sum(axis=1)
-        # external_src = d[pp.PARAMETERS][self.kw]["source"]
-        # np.testing.assert_allclose(
-        #     full_flux_local_div,
-        #     external_src + mortar_jump,
-        #     rtol=1e-6,
-        #     atol=1e-3,
-        #     err_msg="Error estimates only valid for local mass-conservative methods.",
-        # )
-        # END OF TEST
-
         # Spatial discretization operators.
         div = pp.ad.Divergence([self.g])
 
@@ -846,115 +815,21 @@ class EquilibratedFluxMixin(TPFProtocol):
         }
 
 
-# This could also be a mixin, but by subclassing ``SolutionStrategyTPF``, we avoid
-# having to pay attention to the order of the different solution strategy classes.
-# ``TPFProtocol`` and ``pp.SolutionStrategy`` define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
-class SolutionStrategyReconstruction(  # type: ignore
-    ReconstructionProtocol,
-    SolutionStrategyTPF,
-):
+class EquationsRecMixin(TPFProtocol):
 
-    @property
-    @typing.override
-    def iterate_indices(self) -> np.ndarray:
-        """Indices for storing iterate solutions. To equilibrate the fluxes, the
-        previous iterate has to be stored."""
-        return np.array([0, 1])
+    def set_equations(self) -> None:
+        """Set additional equations needed for reconstructions.
 
-    @typing.override
-    def prepare_simulation(self) -> None:
-        """Set up reconstructions after setting up the base simulation."""
-        super().prepare_simulation()
-
-        # Setup reconstructions
-        self.setup_glob_compl_pressure()
-        self.setup_pressure_reconstruction()
-        self.setup_flux_equilibration()
-        self.set_equations_for_additional_vars()
-
-        # Initialize fluxes, global, and complimentary pressure from the initial data of
-        # the problem.
-        self.eval_val_and_jac_fluxes(prepare_simulation=True)
-        self.eval_additional_vars(prepare_simulation=True)
-        self.set_boundary_pressures()
-        self.postprocess_solution(
-            np.zeros(self.g.num_cells * 2), prepare_simulation=True
-        )
-
-    @typing.override
-    def before_nonlinear_iteration(self) -> None:
-        """
-
-        Note: In comparison to the base implementation, the pressure potentials are not
-        updated here, but in :meth:`after_nonlinear_iteration`. This is done s.t. the
-        total and wetting flux needed for flux equilibration and pressure reconstruction
-        are evaluated with the correct upwind values without too much hassle. Similarly,
-        the operators are rediscretized after the nonlinear iteration.
+        The following equations are set:
+        - Total flux
+        - Wetting flux
+        - Total flux divided by total mobility
+        - Total flux times fractional flow
+        The former two are required to equilbirate fluxes while the latter two are
+        required to post-process pressures into elementwise P2 polynomials.
 
         """
-        pass
-
-    @typing.override
-    def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
-        super().after_nonlinear_iteration(nonlinear_increment)
-        # Update pressure potentials.
-        self.set_discretization_parameters()
-        # Re-discretize nonlinear terms. If none have been added to
-        # self.nonlinear_discretizations, this will be a no-op.
-        self.rediscretize()
-
-        # Now, the fluxes can be evaluated with the new upwinded mobilities.
-        self.eval_val_and_jac_fluxes()
-        self.eval_additional_vars()
-        self.postprocess_solution(nonlinear_increment)
-
-    @typing.override
-    def check_convergence(
-        self,
-        nonlinear_increment: np.ndarray,
-        residual: np.ndarray,
-        reference_residual: np.ndarray,
-        nl_params: dict[str, Any],
-    ) -> tuple[bool, bool]:
-        converged, diverged = super().check_convergence(
-            nonlinear_increment, residual, reference_residual, nl_params
-        )
-        equilibrated_flux_mismatch: dict[str, float] = self.equilibrated_flux_mismatch()
-        self.nonlinear_solver_statistics.log_error(
-            nonlinear_increment_norm=None,
-            residual_norm=None,
-            equilibrated_flux_mismatch=equilibrated_flux_mismatch,
-        )
-        return converged, diverged
-
-    @typing.override
-    def after_nonlinear_convergence(self) -> None:
-        super().after_nonlinear_convergence()
-        # Shift pressures, postprocessinself.g, and reconstructions to the next time step.
-        for pressure_key, specifier in itertools.product(
-            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["", "_postprocessed_coeffs", "_reconstructed_coeffs"],
-        ):
-            pp.shift_solution_values(
-                f"{pressure_key}{specifier}",
-                self.g_data,
-                pp.TIME_STEP_SOLUTIONS,
-                len(self.time_step_indices),
-            )
-            values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}{specifier}", self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}{specifier}",
-                values,
-                self.g_data,
-                time_step_index=0,
-            )
-
-    def set_equations_for_additional_vars(self) -> None:
+        super().set_equations()
         total_flux: pp.ad.Operator = self.total_flux(self.g)
         wetting_flux_from_fractional_flow: pp.ad.Operator = (
             self.wetting_flux_from_fractional_flow(self.g)
@@ -992,6 +867,120 @@ class SolutionStrategyReconstruction(  # type: ignore
             total_flux_times_fractional_flow, [self.g], {"faces": 1}
         )
 
+
+# This could also be a mixin, but by subclassing ``SolutionStrategyTPF``, we avoid
+# having to pay attention to the order of the different solution strategy classes.
+# ``TPFProtocol`` and ``pp.SolutionStrategy`` define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class SolutionStrategyRec(  # type: ignore
+    ReconstructionProtocol,
+    SolutionStrategyTPF,
+):
+
+    @property
+    @typing.override
+    def iterate_indices(self) -> np.ndarray:
+        """Indices for storing iterate solutions. To equilibrate the fluxes, the
+        previous iterate has to be stored."""
+        return np.array([0, 1])
+
+    @typing.override
+    def prepare_simulation(self) -> None:
+        """Set up reconstructions after setting up the base simulation."""
+        super().prepare_simulation()
+
+        # Setup reconstructions
+        self.setup_glob_compl_pressure()
+        self.setup_pressure_reconstruction()
+        self.setup_flux_equilibration()
+
+        # Initialize fluxes, global, and complimentary pressure from the initial data of
+        # the problem.
+        self.eval_val_and_jac_fluxes(prepare_simulation=True)
+        self.eval_additional_vars(prepare_simulation=True)
+        self.set_boundary_pressures()
+        self.postprocess_solution(
+            np.zeros(self.g.num_cells * 2), prepare_simulation=True
+        )
+
+    @typing.override
+    def before_nonlinear_iteration(self) -> None:
+        """
+
+        Note: In comparison to the base implementation, the pressure potentials are not
+        updated here, but in :meth:`after_nonlinear_iteration`. This is done s.t. the
+        total and wetting flux needed for flux equilibration and pressure reconstruction
+        are evaluated with the correct upwind values without too much hassle. Similarly,
+        the operators are rediscretized after the nonlinear iteration.
+
+        """
+        pass
+
+    @typing.override
+    def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
+        super().after_nonlinear_iteration(nonlinear_increment)
+        # Update pressure potentials.
+        self.set_discretization_parameters()
+        # Re-discretize nonlinear terms. If none have been added to
+        # self.nonlinear_discretizations, this will be a no-op.
+        self.rediscretize()
+
+        # Now, the fluxes can be evaluated with the new upwinded mobilities.
+        self.eval_val_and_jac_fluxes()
+        self.eval_additional_vars()
+
+        # When Newton is run with Appleyard chopping, the non-chopped nonlinear
+        # increment has to be used to equilibrate the fluxes.
+        if self._nl_appleyard_chopping:
+            if hasattr(self, "non_chopped_nonlinear_increment"):
+                nonlinear_increment = self.non_chopped_nonlinear_increment
+            else:
+                raise AttributeError(
+                    "The non-chopped nonlinear increment vector has to be stored when"
+                    + " Newton is run with Appleyard chopping."
+                )
+
+        self.postprocess_solution(nonlinear_increment)
+
+    @typing.override
+    def check_convergence(
+        self,
+        nonlinear_increment: np.ndarray,
+        residual: np.ndarray,
+        reference_residual: np.ndarray,
+        nl_params: dict[str, Any],
+    ) -> tuple[bool, bool]:
+        converged, diverged = super().check_convergence(
+            nonlinear_increment, residual, reference_residual, nl_params
+        )
+        equilibrated_flux_mismatch: dict[str, float] = self.equilibrated_flux_mismatch()
+        self.nonlinear_solver_statistics.log_error(
+            nonlinear_increment_norm=None,
+            residual_norm=None,
+            equilibrated_flux_mismatch=equilibrated_flux_mismatch,
+        )
+        return converged, diverged
+
+    @typing.override
+    def after_nonlinear_convergence(self) -> None:
+        super().after_nonlinear_convergence()
+        # Save time step values for pressures, postprocessings, and reconstructions.
+        for pressure_key, specifier in itertools.product(
+            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
+            ["", "_postprocessed_coeffs", "_reconstructed_coeffs"],
+        ):
+            values: np.ndarray = pp.get_solution_values(
+                f"{pressure_key}{specifier}", self.g_data, iterate_index=0
+            )
+            pp.set_solution_values(
+                f"{pressure_key}{specifier}",
+                values,
+                self.g_data,
+                time_step_index=0,
+            )
+
     def eval_val_and_jac_fluxes(self, prepare_simulation: bool = False) -> None:
         """Evaluate residual and Jacobian of fluxes to be equilibrated.
 
@@ -1009,8 +998,6 @@ class SolutionStrategyReconstruction(  # type: ignore
                 If True, values are additionally saved at `iterate_index = 1`.
 
         """
-        # Multiply Jacobians with the the following matrix, s.t., the Jacobian is
-        # only w.r.t. the primary variables.
         for flux_name, flux_eq in zip(
             ["total", "wetting_from_ff"],
             [self.total_flux_eq, self.wetting_flux_from_ff_eq],
@@ -1023,6 +1010,8 @@ class SolutionStrategyReconstruction(  # type: ignore
             # negative of the RHS.
             val *= -1
 
+            # For flux equilibration, the values at the previous iteration are required,
+            # hence they are shifted.
             pp.shift_solution_values(
                 f"{flux_name}_flux",
                 self.g_data,
@@ -1041,28 +1030,29 @@ class SolutionStrategyReconstruction(  # type: ignore
                 pp.ITERATE_SOLUTIONS,
                 max_index=len(self.iterate_indices),
             )
+            # ``jac`` is an ``sps.spmatrix``, which mypy complains about.
             pp.set_solution_values(
                 f"{flux_name}_flux_jacobian",
-                jac,
+                jac,  # type: ignore
                 self.g_data,
                 iterate_index=0,
             )
-        if prepare_simulation:
-            # If called during initialization, save the initial values as both the
-            # current and previous iterate solution. This is needed s.t. the flux can be
-            # equilibrated.
-            pp.set_solution_values(
-                flux_name,
-                val,
-                self.g_data,
-                iterate_index=0,
-            )
-            pp.set_solution_values(
-                f"{flux_name}_jacobian",
-                jac,
-                self.g_data,
-                iterate_index=1,
-            )
+            if prepare_simulation:
+                # If called during initialization, save the initial values as both the
+                # current and previous iterate solution. This is needed s.t. the flux
+                # can be equilibrated.
+                pp.set_solution_values(
+                    flux_name,
+                    val,
+                    self.g_data,
+                    iterate_index=1,
+                )
+                pp.set_solution_values(
+                    f"{flux_name}_jacobian",
+                    jac,  # type: ignore
+                    self.g_data,
+                    iterate_index=1,
+                )
 
     @typing.override
     def eval_additional_vars(self, prepare_simulation: bool = False) -> None:
@@ -1093,10 +1083,9 @@ class SolutionStrategyReconstruction(  # type: ignore
             COMPLIMENTARY_PRESSURE, prepare_simulation=prepare_simulation
         )
 
-        # Calculate fluxes divided by mobilities. These are needed for pressure
-        # post-processing.
-        # Take the negative of the values since ``equation_system.assemble`` returns the
-        # negative of the RHS.
+        # Calculate fluxes for pressure post-processing.
+        # NOTE Take the negative of the values since ``equation_system.assemble``
+        # returns the negative of the RHS.
         total_flux_by_total_mobility: np.ndarray = -self.equation_system.assemble(
             evaluate_jacobian=False, equations=[self.total_flux_by_total_mobility_eq]
         )
@@ -1132,6 +1121,7 @@ class SolutionStrategyReconstruction(  # type: ignore
             # in the pressure reconstruction.
             self.extend_fv_fluxes(
                 flux_name,
+                prepare_simulation=prepare_simulation,
             )
 
             # Equilibration can only be run during Newton.
@@ -1302,7 +1292,7 @@ def linalg_solve_batch(A_elements: np.ndarray, point_val: np.ndarray) -> np.ndar
     return ret
 
 
-class DataSavingReconstruction(DataSavingTPF):
+class DataSavingRec(DataSavingTPF):
 
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
@@ -1343,7 +1333,8 @@ class TwoPhaseFlowReconstruction(  # type: ignore
     GlobalPressureMixin,
     PressureReconstructionMixin,
     EquilibratedFluxMixin,
-    SolutionStrategyReconstruction,
-    DataSavingReconstruction,
+    EquationsRecMixin,
+    SolutionStrategyRec,
+    DataSavingRec,
     TwoPhaseFlow,
 ): ...  # type: ignore

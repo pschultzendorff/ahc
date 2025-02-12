@@ -51,7 +51,6 @@ from tpf.models.protocol import TPFProtocol
 from tpf.numerics.ad.functions import ad_pow as ad_pow
 from tpf.numerics.ad.functions import minimum
 from tpf.utils.constants_and_typing import NONWETTING, WETTING
-from tpf.viz.diagnostics import SaveDataTPF
 
 logger = logging.getLogger(__name__)
 
@@ -405,7 +404,7 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
             integrated over the cell volume in the equation.
 
         """
-        return sum(
+        return sum(  # type: ignore
             [self.phase_fluid_source(g, phase) for phase in self.phases.values()]
         )
 
@@ -437,7 +436,7 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
         return np.full(g.num_cells, self.solid.porosity())
 
     @typing.override
-    def set_equations(self, equation_names: dict[str, str | None] = None) -> None:
+    def set_equations(self, equation_names: dict[str, str] | None = None) -> None:
         """Define equations."""
         try:
             self.equation_system.remove_equation("Flow equation")
@@ -460,7 +459,6 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
 
         # Ad equations
         if self.formulation == "fractional_flow":
-            # NOTE For ``flux_t``, the total mobility is already included.
             flux_t = self.total_flux(self.g)
             wetting_flux_from_fractional_flow: pp.ad.Operator = (
                 self.wetting_flux_from_fractional_flow(self.g)
@@ -917,7 +915,9 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         """
 
-        # Initialize fluid phases.
+        # Initialize fluid phases. NOTE This is already done during initialization and
+        # not prepare simulation s.t. the keywords can be defined based on the phase
+        # names. See below.
         self.set_phases()
 
         # Discretizations and parameter keywords.
@@ -931,7 +931,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         # NOTE The following is only relevant when using an alternative formulation
         # for Neumann boundaries in terms of total flux and saturation values.
         # self.all_bc_dir_key: str = "all_bc_dir"
-        """Keyword to define upwind discretization with fully Dirichlet bc."""
+        # """Keyword to define upwind discretization with fully Dirichlet bc."""
 
         for phase in self.phases.values():
             setattr(phase, "mobility_key", f"{phase.name}_mobility")
@@ -943,32 +943,22 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             """
 
         # Parameters for the error function derivative:
+        # TODO Purge.
         self._yscale: float = self.params.get("yscale", 1.0)
         self._xscale: float = self.params.get("xscale", 200)
         self._offset: float = self.params.get("offset", 0.5)
 
         # Solvers:
         self._use_ad: bool = True
-
-        # Option to limit the saturation change per timestep.
-        self._limit_delta_s_per_ts: bool = False
-        """Set maximal allowed local saturation change per time step to
-        ``self._max_delta_s_per_ts``. For larger saturation changes, Newton fails and
-        the time step is recomputed.
-
-        """
-        self._max_delta_s_per_ts: float = 0.2
         self._nl_appleyard_chopping: bool = self.params.get(
             "nl_appleyard_chopping", False
         )
-        """Chop local saturation changes per nonlinear iteration that are larger than
-        :math:`0.2`.
+        """Whether to use the Appleyard chopping strategy for the nonlinear solver.
+
+        If ``True``, chop local saturation changes per nonlinear iteration that are
+        larger than :math:`0.2`.
 
         """
-
-        # Data saving.
-        self.results: list[SaveDataTPF] = []
-        """List of stored results from the convergence analysis."""
 
     @typing.override
     def _is_time_dependent(self) -> bool:
@@ -1114,7 +1104,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         # Update Darcy fluxes for both phases.
         for phase in self.phases.values():
             try:
-                phase_potential: np.ndarray = self.phase_potential(self.g, phase).value(
+                phase_potential: np.ndarray = self.phase_potential(self.g, phase).value(  # type: ignore
                     self.equation_system
                 )
             except KeyError:
@@ -1246,10 +1236,16 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             nonlinear_increment: The new solution, as computed by the non-linear solver.
 
         """
-        if self._nl_appleyard_chopping:
+        if self._nl_appleyard_chopping and self.formulation == "fractional_flow":
+            # Store the non-chopped saturation.
+            self.non_chopped_nonlinear_increment: np.ndarray = (
+                nonlinear_increment.copy()
+            )
+            # Saturation comes first in the nonlinear increment.
             nonlinear_increment[: self.g.num_cells] = np.clip(
                 nonlinear_increment[: self.g.num_cells], -0.2, 0.2
             )
+
         # Update primary variables.
         self.equation_system.shift_iterate_values(max_index=len(self.iterate_indices))
         self.equation_system.set_variable_values(
@@ -1283,48 +1279,6 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         )
 
     @typing.override
-    def after_nonlinear_convergence(self) -> None:  # type: ignore
-        """Export and move to the next time step.
-
-        When ``self._limit_delta_s_per_ts`` is true, check whether the wetting
-        saturation has changed too much.
-
-        Parameters:
-            solution: _description_
-            errors: _description_
-
-        """
-        super().after_nonlinear_convergence()
-        # If the saturation changes to much, decrease the time step and calculate again.
-        if self._limit_delta_s_per_ts:
-            new_saturation: np.ndarray = self.equation_system.get_variable_values(
-                variables=[self.primary_saturation_var], iterate_index=0
-            )
-            if (
-                np.max(
-                    np.abs(
-                        new_saturation
-                        - self.equation_system.get_variables(
-                            variables=[self.primary_saturation_var]
-                        )[0].previous_timestep()
-                    )
-                )
-                > self._max_delta_s_per_ts
-            ):
-                # This is set to false again in ``before_nonlinear_loop``.
-                # NOTE This is not a very nice solution, however, as of now I didn't
-                # find a way to pass ``recompute_solution`` to
-                # ``time_manager.compute_time_step()`` in ``run_time_dependent_model``
-                # without the code getting really messy.
-                self.time_manager._recomp_sol = True
-                self.convergence_status = False
-                logger.debug(
-                    "Saturation grew to quickly. Nonlinear solver is treated as diverged."
-                )
-                self.after_nonlinear_failure()
-                return None
-
-    @typing.override
     def check_convergence(
         self,
         nonlinear_increment: np.ndarray,
@@ -1351,6 +1305,45 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         )
 
         return converged, diverged
+
+    def compute_nonlinear_increment_norm(
+        self, nonlinear_increment: np.ndarray
+    ) -> float:
+        """Compute the norm based on the update increment for a nonlinear iteration
+
+        Note: The pressure and saturation parts can get scaled independently.
+            Depending on the simulation setup, the pressure values might be several
+            orders of magnitude larger than the saturation values.
+            Pass
+            - ``"nl_sat_increment_norm_scaling"`` to scale the saturation increment.
+            - ``"nl_press_increment_norm_scaling"`` to scale the pressure increment.
+            to the model parameters.
+
+        Parameters:
+            nonlinear_increment: Solution to the linearization.
+
+        Returns:
+            float: Update increment norm.
+
+        """
+        if self.formulation == "fractional_flow":
+            # The saturation comes first in the nonlinear increment.
+            nonlinear_increment_sat = nonlinear_increment[: self.g.num_cells]
+            nonlinear_increment_press = nonlinear_increment[self.g.num_cells :]
+            nonlinear_increment_sat_norm = np.linalg.norm(nonlinear_increment_sat) / (
+                self.params.get("nl_sat_increment_norm_scaling", 1.0)
+            )
+            nonlinear_increment_press_norm = np.linalg.norm(
+                nonlinear_increment_press
+            ) / (self.params.get("nl_press_increment_norm_scaling", 1.0))
+            return np.sqrt(
+                nonlinear_increment_sat_norm**2 + nonlinear_increment_press_norm**2
+            ) / np.sqrt(nonlinear_increment.size)
+        # For other formulations, keep the PorePy default.
+        else:
+            return np.linalg.norm(nonlinear_increment) / np.sqrt(
+                nonlinear_increment.size
+            )
 
     # endregion
 

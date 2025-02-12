@@ -102,6 +102,9 @@ else:
 
         nonlinear_solver_statistics: SolverStatisticsTPF
 
+        _nl_appleyard_chopping: bool
+        """Whether to use the Appleyard chopping strategy for the nonlinear solver."""
+
         g: pp.Grid
         """Single subdomain."""
         g_data: dict
@@ -363,6 +366,14 @@ else:
             """Estimate for global discretization error."""
             ...
 
+        def global_spatial_est(self) -> float:
+            """Estimate for global spatial discretization error."""
+            ...
+
+        def global_temp_est(self) -> float:
+            """Estimate for global temporal discretization error."""
+            ...
+
         def global_hc_est(self) -> float:
             """Estimate for global homotopy continuation error."""
             ...
@@ -386,6 +397,7 @@ else:
         def hc_check_convergence(
             self,
             nl_is_converged: bool,
+            nl_is_diverged: bool,
             hc_params: dict[str, Any],
         ) -> tuple[bool, bool]:
             """Check if homotopy continuation has converged."""
@@ -438,7 +450,7 @@ else:
             self,
             s_w: np.ndarray,
             pressure_key: PRESSURE_KEY,
-            p_w: np.ndarray | None = None,
+            p_n: np.ndarray | None = None,
             epsilon: float = 1e-6,
         ) -> np.ndarray:
             """Evaluate the global or complimentary pressure field for the given pressure
@@ -615,12 +627,17 @@ else:
             """Sum local nonconformity estimators and integrate in time."""
             ...
 
-        # SolutionStrategyEstimatesMixin attributes and methods:
-        def initialize_estimate_vals(self) -> None:
-            """Initialize time step values for reconstructed pressures and equilibrated
-            fluxes.
+        def global_discretization_est(self) -> float:
+            """Estimate for global discretization error."""
+            ...
 
-            """
+        def global_linearization_est(self) -> float:
+            """Estimate for global linearization error."""
+            ...
+
+        # SolutionStrategyEstimatesMixin attributes and methods:
+        def set_initial_estimators(self) -> None:
+            """Initialize time step values for error estimators."""
             ...
 
     class DataSavingMixinExtendedProtocol(DataSavingProtocol):

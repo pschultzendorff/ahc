@@ -233,9 +233,14 @@ class SolverStatisticsHC(SolverStatisticsTPF):
     non-linear iterations.
 
     """
-    discretization_est: list[list[float]] = field(default_factory=list)
-    """List of list of discretization error estimates. Outer list are HC iterations,
-    inner list are non-linear iterations.
+    spatial_est: list[list[float]] = field(default_factory=list)
+    """List of list of spatial discretization error estimates. Outer list are HC
+    iterations, inner list are non-linear iterations.
+
+    """
+    temp_est: list[list[float]] = field(default_factory=list)
+    """List of list of temporal discretization error estimates. Outer list are HC
+    iterations, inner list are non-linear iterations.
 
     """
     hc_est: list[list[float]] = field(default_factory=list)
@@ -265,7 +270,8 @@ class SolverStatisticsHC(SolverStatisticsTPF):
         if (
             "global_energy_norm" in kwargs
             and "equilibrated_flux_mismatch" in kwargs
-            and "discretization_est" in kwargs
+            and "spatial_est" in kwargs
+            and "temp_est" in kwargs
             and "hc_est" in kwargs
             and "linearization_est" in kwargs
         ):
@@ -273,7 +279,8 @@ class SolverStatisticsHC(SolverStatisticsTPF):
             self.equilibrated_flux_mismatch[-1].append(
                 kwargs["equilibrated_flux_mismatch"]
             )
-            self.discretization_est[-1].append(kwargs["discretization_est"])
+            self.spatial_est[-1].append(kwargs["spatial_est"])
+            self.temp_est[-1].append(kwargs["temp_est"])
             self.hc_est[-1].append(kwargs["hc_est"])
             self.linearization_est[-1].append(kwargs["linearization_est"])
         else:
@@ -295,7 +302,8 @@ class SolverStatisticsHC(SolverStatisticsTPF):
             )
             self.residual_norms_hc.append(deepcopy(self.residual_norms))
         super().reset()
-        self.discretization_est.append([])
+        self.spatial_est.append([])
+        self.temp_est.append([])
         self.hc_est.append([])
         self.linearization_est.append([])
         self.global_energy_norm.append([])
@@ -309,8 +317,9 @@ class SolverStatisticsHC(SolverStatisticsTPF):
         self.nums_iteration.clear()
         self.nonlinear_increment_norms_hc.clear()
         self.residual_norms_hc.clear()
-        self.discretization_est.clear()
+        self.spatial_est.clear()
         self.hc_est.clear()
+        self.temp_est.clear()
         self.linearization_est.clear()
         self.global_energy_norm.clear()
         self.equilibrated_flux_mismatch.clear()
@@ -349,18 +358,20 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                     "num_iteration": n,
                     "nonlinear_increment_norms": nin,
                     "residual_norms": rn,
-                    "discretization_error_estimates": de,
+                    "spatial_error_estimates": se,
+                    "temporal_error_estimates": te,
                     "hc_error_estimates": hce,
                     "linearization_error_estimates": le,
                     "global_energy_norm": gen,
                     "equilibrated_flux_mismatch": efm,
                 }
-                for i, (n, nin, rn, de, hce, le, gen, efm) in enumerate(
+                for i, (n, nin, rn, se, te, hce, le, gen, efm) in enumerate(
                     zip(
                         self.nums_iteration,
                         self.nonlinear_increment_norms_hc,
                         self.residual_norms_hc,
-                        self.discretization_est,
+                        self.spatial_est,
+                        self.temp_est,
                         self.hc_est,
                         self.linearization_est,
                         self.global_energy_norm,
