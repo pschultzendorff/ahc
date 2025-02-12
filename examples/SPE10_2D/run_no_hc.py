@@ -7,18 +7,18 @@ X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport
    114–137, Nov. 2013, doi: 10.1016/j.jcp.2013.06.041.
 
 Model description:
-- 600x1100 ft domain (we just take a quarter of the original SPE 10th CSP domain)
+- 600x1100 ft domain (we just take a quarter of the original SPE10 domain)
 - Constant water injection in the center: 87.5 m^3/day
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
       oil saturation) in the corner cells. We do NOT use a well model.
 - Simulation time: 10 days
 - Solid properties:
-    - Porosity: Uppermost layer of the SPE 10th CSP (model 2).
-    - Permeability: Uppermost layer of the SPE 10th CSP (model 2).
+    - Porosity: Uppermost layer of the SPE10, case 2A.
+    - Permeability: Uppermost layer of the SPE10, case 2A.
 - Fluid properties:
     - Water: pp.fluid_values.water. Residual saturation is 0.2.
-    - Oil: PVT table from the SPE 10th CSP (model 2). We use the values at 8000 psi.
+    - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
@@ -42,6 +42,8 @@ from typing import Any, Callable, Optional
 import numpy as np
 import porepy as pp
 from numba import config
+from tpf.derived_models.fluid_values import oil
+from tpf.derived_models.spe10 import load_spe10_data
 from tpf.models.flow_and_transport import (
     BoundaryConditionsTPF,
     ConstitutiveLawsTPF,
@@ -51,8 +53,6 @@ from tpf.models.flow_and_transport import (
     VariablesTPF,
 )
 from tpf.models.phase import Phase, PhaseConstants
-from tpf.spe10.fluid_values import oil
-from tpf.spe10.geometry import load_spe10_data
 from tpf.utils.constants_and_typing import FEET, PSI
 
 # Disable numba JIT for debugging.
@@ -256,13 +256,7 @@ class ModifiedSolutionStrategy(SolutionStrategyTPF):
         self.save_data_time_step()
 
     def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation.
-
-        The corner cells get prescibed the right values immediately. Inside the
-        reservoir, the initial pressure is higher. The initial saturation is set to the
-        residual wetting saturation + 0.1 inside the reservoir.
-
-        """
+        """Set initial values for pressure and saturation."""
         g: pp.Grid = self.mdg.subdomains()[0]
         corner_cell_ids: list[int] = self.corner_cell_ids(g)
 
@@ -317,7 +311,7 @@ params = {
     "file_name": "setup",
     "progressbars": True,
     "nonlinear_solver_statistics": pp.SolverStatistics,
-    "spe10_layer": spe10_layer - 1,
+    "spe10_layer": spe10_layer,
     # HC params:
     "nonlinear_solver": pp.NewtonSolver,
     # Nonlinear params:

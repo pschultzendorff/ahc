@@ -1,4 +1,4 @@
-"""Two-phase flow example with homotopy continuation. Run on the SPE CSP10 dataset."""
+"""Two-phase flow example with homotopy continuation. Run on the SPE10 dataset."""
 
 import itertools
 import logging
@@ -22,7 +22,7 @@ from tpf.models.homotopy_continuation import (
     EstimatesHCMixin,
     HCSolver,
     RelativePermeabilityHC,
-    SolutionStrategyEstHC,
+    SolutionStrategyAHC,
     SolutionStrategyHCMixin,
     SolverStatisticsHC,
 )
@@ -119,7 +119,7 @@ class HCTwoPhaseFlow(
     # Homotopy continuation mixins:
     EstimatesHCMixin,
     SolutionStrategyHCMixin,
-    SolutionStrategyEstHC,
+    SolutionStrategyAHC,
     # Estimator mixins:
     ErrorEstimateMixin,
     SolutionStrategyEst,

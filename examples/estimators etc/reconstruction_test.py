@@ -25,7 +25,7 @@ from tpf.models.reconstruction import (
     EquilibratedFluxMixin,
     GlobalPressureMixin,
     PressureReconstructionMixin,
-    SolutionStrategyReconstruction,
+    SolutionStrategyRec,
 )
 
 # Disable numba JIT for debugging.
@@ -132,7 +132,7 @@ class ModifiedTwoPhaseFlow(  # type: ignore
     EquilibratedFluxMixin,
     GlobalPressureMixin,
     PressureReconstructionMixin,
-    SolutionStrategyReconstruction,
+    SolutionStrategyRec,
     TwoPhaseFlow,
 ): ...
 

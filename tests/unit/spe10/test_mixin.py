@@ -1,6 +1,6 @@
 import porepy as pp
 import pytest
-from tpf.spe10.model import EquationsSPE10
+from tpf.derived_models.spe10 import EquationsSPE10
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@ r"""Homogenous five-spot example. Study convergence of the error estimators with
  size.
 
 Model description:
-- 600x1100 ft domain (we just take a quarter of the original SPE 10th CSP domain)
+- 600x1100 ft domain (we just take a quarter of the original SPE10 domain)
 - Constant water injection in the center: 87.5 m^3/day
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
@@ -13,7 +13,7 @@ Model description:
     - Permeability: Homogenous; 1e-15 m^2.
 - Fluid properties:
     - Water: pp.fluid_values.water. Residual saturation is 0.2.
-    - Oil: PVT table from the SPE 10th CSP (model 2). We use the values at 8000 psi.
+    - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
@@ -42,9 +42,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 from numba import config
+from tpf.derived_models.spe10 import SPE10Mixin
 from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
 from tpf.models.flow_and_transport import EquationsTPF
-from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import (
     COMPLIMENTARY_PRESSURE,
     FEET,
@@ -82,8 +82,6 @@ logger.setLevel(logging.INFO)
 
 
 # region MODEL
-
-
 class HomogeneousGeometryMixin:
     """Override the heterogeneous geometry of the SPE10 model by using methods of
     ``EquationsTPF`` instead.
@@ -164,7 +162,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
     logger.info(
         f"Cell size: {cell_size:.2f}, RP model: {rp_model['model']}, CP model: {cp_model['model']}"
     )
-
+    continue
     # We have the file name both in the folder name and the filename to make
     # distinguishing different runs in ParaView easier.
     filename: str = f"cellsz_{int(cell_size)}"
@@ -346,6 +344,7 @@ ax3.set_ylabel("Relative error")
 ax3.set_title(f"Relative error estimators")
 ax3.legend()
 
+ax4.set_ylim(top=1e0)
 ax4.set_xlabel("Time (s)")
 ax4.set_ylabel("Global energy norm")
 ax4.set_title(f"Global energy")

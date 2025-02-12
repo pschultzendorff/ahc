@@ -1,6 +1,6 @@
 """Mixin to export model states at each iteration. 
 
-Functionally mostly copied from
+Mostly copied from
 https://github.com/pmgbergen/porepy/blob/develop/tutorials/exporting_models.ipynb
 and adjusted for homotopy continuation.
 

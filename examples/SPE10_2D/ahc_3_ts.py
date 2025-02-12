@@ -10,18 +10,18 @@ X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport
    114–137, Nov. 2013, doi: 10.1016/j.jcp.2013.06.041.
 
 Model description:
-- 600x1100 ft domain (we just take a quarter of the original SPE 10th CSP domain)
+- 600x1100 ft domain (we just take a quarter of the original SPE10 domain)
 - Constant water injection in the center: 87.5 m^3/day
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
       oil saturation) in the corner cells. We do NOT use a well model.
 - Simulation time: 10 days
 - Solid properties:
-    - Porosity: Uppermost layer of the SPE 10th CSP (model 2).
-    - Permeability: Uppermost layer of the SPE 10th CSP (model 2).
+    - Porosity: Uppermost layer of the SPE10, case 2A.
+    - Permeability: Uppermost layer of the SPE10, case 2A.
 - Fluid properties:
     - Water: pp.fluid_values.water. Residual saturation is 0.2.
-    - Oil: PVT table from the SPE 10th CSP (model 2). We use the values at 8000 psi.
+    - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
     - Pressure: 6000 psi
@@ -47,9 +47,9 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
-from tpf.models.homotopy_continuation import TwoPhaseFlowHC
+from tpf.derived_models.spe10 import SPE10Mixin
+from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.numerics.nonlinear.hc_solver import HCSolver
-from tpf.spe10.model import SPE10Mixin
 from tpf.utils.constants_and_typing import FEET, PSI
 from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsHC
@@ -75,7 +75,7 @@ logger.setLevel(logging.INFO)
 class SPE10HC(
     IterationExportingMixin,
     SPE10Mixin,
-    TwoPhaseFlowHC,
+    TwoPhaseFlowAHC,
 ): ...  # type: ignore
 
 
@@ -93,7 +93,7 @@ params = {
     "cap_press_constants": {},
     "grid_type": "simplex",
     "spe10_quarter_domain": True,
-    "spe10_layer": spe10_layer - 1,
+    "spe10_layer": spe10_layer,
     "spe10_isotropic_perm": True,
     # HC params:
     "nonlinear_solver_statistics": SolverStatisticsHC,
