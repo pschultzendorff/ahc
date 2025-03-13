@@ -5,15 +5,21 @@ from typing import Callable, Literal
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
+from numba import njit
 
 logger = logging.getLogger("__name__")
 
 
 class Integral:
-
     def __init__(self, values: np.ndarray) -> None:
         self.shape: tuple = values.shape
+        """Shape of the integral values. Must be ``(num_elements, dim_func)``, where
+        ``dim_func`` is the dimension of the function values that were integrated."""
+        if len(self.shape) != 2:
+            raise ValueError("Values must have shape (num_elements, dim_func).")
         self._elementwise: np.ndarray = values
+        """``shape=(num_elements, dim_func)``. Values of the integral on each
+        element."""
 
     def __add__(self, other: "Integral") -> "Integral":
         if self.shape == other.shape:
@@ -104,13 +110,6 @@ class BaseScheme(abc.ABC):
         \int_{K} f(\mathbf{v})\, d\mathbf{v} \approx \frac{|K|}{|K_{ref}|} f(\varphi(X))
         \cdot W.
 
-
-    Parameters:
-        abc: _description_
-
-    Returns:
-        _description_
-
     """
 
     _points: np.ndarray
@@ -145,6 +144,7 @@ class BaseScheme(abc.ABC):
 
     @property
     def points(self) -> np.ndarray:
+        """``shape=(num_ref_points, num_elements, dim)``"""
         return self._points
 
     @points.setter
@@ -153,6 +153,7 @@ class BaseScheme(abc.ABC):
 
     @property
     def volumes(self) -> np.ndarray:
+        """``shape=(num_elements,)``"""
         return self._volumes
 
     @volumes.setter
@@ -187,6 +188,7 @@ class BaseScheme(abc.ABC):
 
     @property
     def weights(self) -> np.ndarray:
+        """``shape=(num_ref_points,)``"""
         return self._weights
 
     @weights.setter
@@ -200,34 +202,90 @@ class BaseScheme(abc.ABC):
     def integrate(
         self,
         func: Callable[[np.ndarray], np.ndarray],
-        elements: np.ndarray,
+        elements: np.ndarray | None = None,
         recalc_points: bool = True,
         recalc_volumes: bool = True,
     ) -> Integral:
-        """
-        Evaluate the integral of a function on all elements.
+        """Evaluate the integral of a function on all elements.
 
-        Args:
-            func (Callable[[np.ndarray], np.ndarray]): Function to integrate.
-            elements (np.ndarray): Elements to integrate over.
-            recalc_points (bool): Whether to recalculate the integration points.
-            recalc_volumes (bool): Whether to recalculate the volumes.
+        Parameters:
+            func: Function to integrate. Must take an array of shape
+                ``(num_ref_points, num_elements, dim)`` as input and return an array of
+                shape ``(num_ref_points, num_elements, dim_func)``. Here, ``dim_func``
+                is the dimension of the function values. If ``dim_func`` is 1, the
+                output may have shape ``(num_ref_points, num_elements)`` instead.
+            elements: ``shape=(num_vertices, num_elements, dim)``
+                Elements to integrate over.
+            recalc_points: Whether to recalculate the integration points.
+            recalc_volumes: Whether to recalculate the volumes.
 
         Returns:
             Integral: Integral object containing the integrated values.
+
         """
-        if not hasattr(self, "_points") or recalc_points:
+        if recalc_points or not hasattr(self, "_points"):
+            if elements is None:
+                raise ValueError(
+                    "Elements must be provided for points to be recalculated."
+                )
             self.points = self.transform(elements)
 
-        if not hasattr(self, "_volumes") or recalc_volumes:
+        if recalc_volumes or not hasattr(self, "_volumes"):
+            if elements is None:
+                raise ValueError(
+                    "Elements must be provided for volumes to be recalculated."
+                )
             self.volumes = self.calc_volumes(elements)
 
         y: np.ndarray = func(self.points)
 
-        values: np.ndarray = (self.volumes / self.reference_volume) * np.tensordot(
-            self.weights, y, axes=([0], [0])
+        # If y has shape (num_ref_points, num_elements), add a dimension.
+        if y.ndim == 2:
+            y = y[..., None]
+        values: np.ndarray = self._integrate_njit(
+            y, self.weights, self.volumes, self.reference_volume
         )
+
         return Integral(values)
+
+    # When recalc_points and recalc_volumes are set to False, only this method should
+    # make use of numba as the other methods are only called once. When they are
+    # recalculated each time, ``transform`` and ``calc_volumes`` should be decorated
+    # with ``@njit`` as well.
+    # TODO How to implement conditional numba decoration?
+    # TODO Must ``func`` be decorated with ``@njit`` for this to be efficient?
+    @staticmethod
+    @njit
+    def _integrate_njit(
+        y: np.ndarray,
+        weights: np.ndarray,
+        volumes: np.ndarray,
+        reference_volume: float,
+    ) -> np.ndarray:
+        """Evaluate the integral of a function on all elements.
+
+        Parameters:
+            y: ``shape=(num_ref_points, num_elements, dim_func)``
+                Function values at integration points for all elements.
+            weights: ``shape=(num_ref_points,)``
+                Integration weights for all elements.
+            volumes: ``shape=(num_elements,)``
+                Volumes of the elements.
+            reference_volume: Volume of the reference element.
+
+        Returns:
+            values: ``shape=(num_elements, dim_func)``
+                Array containing the integrated values.
+
+        """
+        # Broadcast all arrays to 3 dimensions s.t. they can be multiplied elementwise.
+        # If this is not done, the automatic broadcasting might do weird things.
+        values: np.ndarray = (
+            volumes[..., None]
+            / reference_volume
+            * np.sum(weights[..., None, None] * y, axis=0)
+        )
+        return values
 
 
 class TrapezoidRule(BaseScheme):
@@ -239,8 +297,8 @@ class TrapezoidRule(BaseScheme):
         """
         Initialize the TrapezoidRule class.
 
-        Args:
-            degree (int): Degree of the integration scheme.
+        Parameters:
+            degree: Degree of the integration scheme.
         """
         super().__init__(degree)
         self._reference_volume_setter()
@@ -251,11 +309,14 @@ class TrapezoidRule(BaseScheme):
         """
         Return the endpoints of the goal elements.
 
-        Args:
-            elements (np.ndarray): Elements to transform.
+        Parameters:
+            elements: ```(num_vertices, num_elements, 1)``
+                Elements to transform.
 
         Returns:
-            np.ndarray: Transformed integration points.
+            np.ndarray: ``shape=(num_ref_points, num_elements, 1)``
+                Transformed integration points.
+
         """
         return elements
 
@@ -263,20 +324,24 @@ class TrapezoidRule(BaseScheme):
         """
         Return lengths of the goal elements.
 
-        Args:
-            elements (np.ndarray): Elements to calculate volumes for.
+        Parameters:
+            elements: Elements to calculate volumes for.
 
         Returns:
             np.ndarray: Volumes of the elements.
+
         """
-        return elements[1, ...] - elements[0, ...]
+        volumes: np.ndarray = elements[1, ..., 0] - elements[0, ..., 0]
+        assert volumes.shape == (elements.shape[1],), "Volumes have wrong shape."
+        return volumes
 
     def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         """
         Set the volume of the reference element.
 
-        Args:
-            reference_volumes (float | None): Volume of the reference element.
+        Parameters:
+            reference_volumes: Volume of the reference element.
+
         """
         self._reference_volume = 1.0
 
@@ -286,17 +351,19 @@ class TrapezoidRule(BaseScheme):
         """
         Set the points on the reference element.
 
-        Args:
-            reference_points (np.ndarray | None): Points on the reference element.
+        Parameters:
+            reference_points: Points on the reference element.
+
         """
-        self._reference_points = np.array([0, 1])
+        self._reference_points = np.array([[0], [1]])
 
     def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         """
         Set the weights for the integration points.
 
-        Args:
-            weights (np.ndarray | None): Weights for the integration points.
+        Parameters:
+            weights: Weights for the integration points.
+
         """
         self._weights = np.array([0.5, 0.5])
 
@@ -316,14 +383,16 @@ class GaussLegendreQuadrature1D(BaseScheme):
     Gauss-Legendre quadrature rule for 1D-intervals.
 
     The reference domain is :math:`[-1,1]`.
+
     """
 
     def __init__(self, degree: int = 2) -> None:
         """
         Initialize the GaussLegendreQuadrature1D class.
 
-        Args:
-            degree (int): Degree of the integration scheme.
+        Parameters:
+            degree: Degree of the integration scheme.
+
         """
         super().__init__(degree)
         self._reference_volume_setter()
@@ -334,11 +403,12 @@ class GaussLegendreQuadrature1D(BaseScheme):
         """
         Transform integration points from the reference element to the goal element.
 
-        Args:
-            elements (np.ndarray): Elements to transform.
+        Parameters:
+            elements: Elements to transform.
 
         Returns:
             np.ndarray: Transformed integration points.
+
         """
         self.sanity_check(elements)
         return (
@@ -350,7 +420,9 @@ class GaussLegendreQuadrature1D(BaseScheme):
     def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
         """Return lengths of the goal elements."""
         self.sanity_check(elements)
-        return elements[1, ...] - elements[0, ...]
+        volumes: np.ndarray = elements[1, ..., 0] - elements[0, ..., 0]
+        assert volumes.shape == (elements.shape[1],), "Volumes have wrong shape."
+        return volumes
 
     def sanity_check(self, elements: np.ndarray) -> None:
         """Assert that all elements satisfy the following assumptions:
@@ -361,9 +433,9 @@ class GaussLegendreQuadrature1D(BaseScheme):
 
         """
         assert elements.shape == (2, elements.shape[1], 1)
-        assert np.all(
-            elements[0, :, 0] <= elements[1, :, 0]
-        ), "Element vertices ordered wrongly."
+        assert np.all(elements[0, :, 0] <= elements[1, :, 0]), (
+            "Element vertices ordered wrongly."
+        )
 
     def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         self._reference_volume = 2.0
@@ -372,11 +444,14 @@ class GaussLegendreQuadrature1D(BaseScheme):
         self, reference_points: np.ndarray | None = None
     ) -> None:
         """Integration points on the reference interval :math:`[-1,1]`."""
-        self._reference_points = np.polynomial.legendre.leggauss(self.degree)[0]
+        self._reference_points = np.polynomial.legendre.leggauss(self.degree)[0][
+            ..., None
+        ]
 
     def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         r"""Integration weights on the reference interval :math:`[-1,1]`."""
         self._weights = np.polynomial.legendre.leggauss(self.degree)[1]
+        assert self._weights.shape == (self.degree,), "Weights have wrong shape."
 
 
 class GaussLegendreQuadrature2D(BaseScheme):
@@ -384,6 +459,10 @@ class GaussLegendreQuadrature2D(BaseScheme):
 
     The reference domain is :math:`[-1,1] \times [-1,1]`. See
     https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature.
+
+    To obtain correct results, ``elements`` passed to ``integrate`` must be in the
+    correct format and shape. Check :meth:~`GaussLegendreQuadrature2D.transform` for
+    details.
 
     """
 
@@ -395,9 +474,10 @@ class GaussLegendreQuadrature2D(BaseScheme):
 
     def transform(self, elements: np.ndarray) -> np.ndarray:
         """
+
         Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
-            vertices of each element to be in the order top-left, top-right,
-            bottom-left, bottom-right.
+            vertices of each element to be in the order bottom-left, bottom-right,
+          top-left, top-right.
 
         """
         self.sanity_check(elements)
@@ -405,58 +485,66 @@ class GaussLegendreQuadrature2D(BaseScheme):
         x2: np.ndarray = elements[1, :, 0]
         y1: np.ndarray = elements[0, :, 1]
         y2: np.ndarray = elements[2, :, 1]
-        return np.array(
-            [
-                [
-                    x * (x2 - x1) * 0.5 + (x1 + x2) * 0.5,
-                    y * (y2 - y1) * 0.5 + (y1 + y2) * 0.5,
-                ]
+        return np.stack(
+            [  # These have ``shape==(num_elements,2)``
+                np.column_stack(
+                    [
+                        # These have ``shape==(num_elements,)``
+                        x * (x2 - x1) * 0.5 + (x1 + x2) * 0.5,
+                        y * (y2 - y1) * 0.5 + (y1 + y2) * 0.5,
+                    ]
+                )
                 for x, y in self.reference_points
-            ]
+            ],
+            axis=0,
         )
 
     def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
         """
 
         Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
-            vertices of each element to be in the order top-left, top-right,
-            bottom-left, bottom-right.
+            vertices of each element to be in the order bottom-left, bottom-right,
+          top-left, top-right.
 
         """
         self.sanity_check(elements)
-        return (elements[1, :, 0] - elements[0, :, 0]) * (
-            elements[3, :, 1] - elements[2, :, 1]
-        )
+        volumes: np.ndarray = (
+            (elements[0, :, 0] - elements[1, :, 0])
+            * (elements[0, :, 1] - elements[2, :, 1])
+        ).squeeze()
+        assert volumes.shape == (elements.shape[1],), "Volumes have wrong shape."
+        return volumes
 
     def sanity_check(self, elements: np.ndarray) -> None:
         """Assert that all elements satisfy the following assumptions:
         - ``elements`` has shape ``(4, num_elements, 2)``
         - Each element aligns with the coordinate axes
-        - The vertices of each element are in the order top-left, top-right,
-            bottom-left, bottom-right.
+        - The vertices of each element are in the order bottom-left, bottom-right,
+          top-left, top-right.
+            .
 
-        Note that we allow elements to have volume 0.
+        Note: We allow elements to have volume 0.
 
         """
         assert elements.shape == (4, elements.shape[1], 2)
-        assert np.all(
-            elements[0, :, 0] == elements[2, :, 0]
-        ), "Left side (x-axis) vertices of an element have differing x-coordinates."
-        assert np.all(
-            elements[1, :, 0] == elements[3, :, 0]
-        ), "Right side (x-axis) vertices of an element have differing x-coordinates."
-        assert np.all(
-            elements[0, :, 1] == elements[1, :, 1]
-        ), "Top side (y-axis) vertices of an element have differing y-coordinates."
-        assert np.all(
-            elements[2, :, 1] == elements[3, :, 1]
-        ), "Bottom side (y-axis) vertices of an element have differing y-coordinates."
-        assert np.all(
-            elements[0, :, 0] <= elements[1, :, 0]
-        ), "Element vertices ordered wrongly."
-        assert np.all(
-            elements[0, :, 1] <= elements[2, :, 1]
-        ), "Element vertices ordered wrongly."
+        assert np.all(elements[0, :, 0] == elements[2, :, 0]), (
+            "Left side (x-axis) vertices of an element have differing x-coordinates."
+        )
+        assert np.all(elements[1, :, 0] == elements[3, :, 0]), (
+            "Right side (x-axis) vertices of an element have differing x-coordinates."
+        )
+        assert np.all(elements[0, :, 1] == elements[1, :, 1]), (
+            "Top side (y-axis) vertices of an element have differing y-coordinates."
+        )
+        assert np.all(elements[2, :, 1] == elements[3, :, 1]), (
+            "Bottom side (y-axis) vertices of an element have differing y-coordinates."
+        )
+        assert np.all(elements[0, :, 0] <= elements[1, :, 0]), (
+            "Element vertices ordered wrongly."
+        )
+        assert np.all(elements[0, :, 1] <= elements[2, :, 1]), (
+            "Element vertices ordered wrongly."
+        )
 
     def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         self._reference_volume = 4.0
@@ -471,6 +559,7 @@ class GaussLegendreQuadrature2D(BaseScheme):
     def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         weights_1d = np.polynomial.legendre.leggauss(self.degree)[1]
         self._weights = np.outer(weights_1d, weights_1d).flatten()
+        assert self._weights.shape == (self.degree**2,), "Weights have wrong shape."
 
 
 class GaussLegendreQuadrature3D(BaseScheme):
@@ -478,6 +567,10 @@ class GaussLegendreQuadrature3D(BaseScheme):
 
     The reference domain is :math:`[-1,1] \times [-1,1] \times [-1,1]`. See
     https://en.wikipedia.org/wiki/Gauss%E2%80%93Legendre_quadrature.
+
+    To obtain correct results, ``elements`` passed to ``integrate`` must be in the
+    correct format and shape. Check :meth:~`GaussLegendreQuadrature3D.transform` for
+    details.
 
     """
 
@@ -489,9 +582,10 @@ class GaussLegendreQuadrature3D(BaseScheme):
 
     def transform(self, elements: np.ndarray) -> np.ndarray:
         """
-        Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
-            vertices of each element to be in the order top-left, top-right,
-            bottom-left, bottom-right.
+        Note: We assume ``elements`` to have shape ``(4, num_elements, 3)`` and the
+            vertices of each element to be in the order bottom-left-front,
+            bottom--front, top-left-front, top-right-front, bottom-left-back,
+            bottom--back, top-left-back, top-right-back.
 
         """
         self.sanity_check(elements)
@@ -501,41 +595,49 @@ class GaussLegendreQuadrature3D(BaseScheme):
         y2: np.ndarray = elements[2, :, 1]
         z1: np.ndarray = elements[1, :, 2]
         z2: np.ndarray = elements[4, :, 2]
-        return np.array(
+        return np.stack(
             [
-                [
-                    x * (x2 - x1) * 0.5 + (x1 + x2) * 0.5,
-                    y * (y2 - y1) * 0.5 + (y1 + y2) * 0.5,
-                    z * (z2 - z1) * 0.5 + (z1 + z2) * 0.5,
-                ]
+                # These have ``shape==(num_elements,3)``
+                np.column_stack(
+                    [
+                        # These have ``shape==(num_elements,)``
+                        x * (x2 - x1) * 0.5 + (x1 + x2) * 0.5,
+                        y * (y2 - y1) * 0.5 + (y1 + y2) * 0.5,
+                        z * (z2 - z1) * 0.5 + (z1 + z2) * 0.5,
+                    ]
+                )
                 for x, y, z in self.reference_points
-            ]
+            ],
+            axis=0,
         )
 
     def calc_volumes(self, elements: np.ndarray) -> np.ndarray:
         """
 
         Note: We assume ``elements`` to have shape ``(4, num_elements, 2)`` and the
-            vertices of each element to be in the order top-left, top-right,
-            bottom-left, bottom-right.
+            vertices of each element to be in the order bottom-left-front,
+            bottom--front, top-left-front, top-right-front, bottom-left-back,
+            bottom--back, top-left-back, top-right-back.
 
         """
         self.sanity_check(elements)
-        return (
+        volumes: np.ndarray = (
             (elements[1, :, 0] - elements[0, :, 0])
             * (elements[3, :, 1] - elements[2, :, 1])
             * (elements[4, :, 2] - elements[0, :, 2])
-        )
+        ).squeeze()
+        assert volumes.shape == elements.shape[1], "Volumes have wrong shape."
+        return volumes
 
     def sanity_check(self, elements: np.ndarray) -> None:
         """Assert that all elements satisfy the following assumptions:
         - ``elements`` has shape ``(8, num_elements, 3)``
         - Each element aligns with the coordinate axes
-        - The vertices of each element are in the order top-left-front, top-right-front,
-            bottom-left-front, bottom-right-front, top-left-back, top-right-back,
-            bottom-left-back, bottom-right-back
+        - The vertices of each element are in the order bottom-left-front,
+            bottom--front, top-left-front, top-right-front, bottom-left-back,
+            bottom--back, top-left-back, top-right-back.
 
-        Note that we allow elements to have volume 0.
+        Note: We allow elements to have volume 0.
 
         """
         assert elements.shape == [8, elements.shape[1], 3]
@@ -575,15 +677,15 @@ class GaussLegendreQuadrature3D(BaseScheme):
             == elements[6, :, 2]
             == elements[7, :, 2]
         ), "Back side (z-axis) vertices of an element have differing z-coordinates."
-        assert np.all(
-            elements[0, :, 0] <= elements[1, :, 0]
-        ), "Element vertices ordered wrongly."
-        assert np.all(
-            elements[0, :, 1] <= elements[2, :, 1]
-        ), "Element vertices ordered wrongly."
-        assert np.all(
-            elements[0, :, 2] <= elements[5, :, 2]
-        ), "Element vertices ordered wrongly."
+        assert np.all(elements[0, :, 0] <= elements[1, :, 0]), (
+            "Element vertices ordered wrongly."
+        )
+        assert np.all(elements[0, :, 1] <= elements[2, :, 1]), (
+            "Element vertices ordered wrongly."
+        )
+        assert np.all(elements[0, :, 2] <= elements[5, :, 2]), (
+            "Element vertices ordered wrongly."
+        )
 
     def _reference_volume_setter(self, reference_volumes: float | None = None) -> None:
         self._reference_volume = 8.0
@@ -599,7 +701,8 @@ class GaussLegendreQuadrature3D(BaseScheme):
 
     def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         weights_1d = np.polynomial.legendre.leggauss(self.degree)[1]
-        self._weights = np.outer(weights_1d, weights_1d, weights_1d).flatten()
+        self._weights = np.outer(weights_1d, np.outer(weights_1d, weights_1d)).flatten()
+        assert self._weights.shape == (self.degree**3,), "Weights have wrong shape."
 
 
 class GaussJacobiQuadrature(BaseScheme):
@@ -762,8 +865,7 @@ class TriangleQuadrature(BaseScheme):
             transformed_points ``shape=(num_elements, num_ref_points, 2)
 
         """
-        if not hasattr(self, "_affine_coefficients"):
-            self.calc_affine_coefficients(elements)
+        self.calc_affine_coefficients(elements)
         transformed_points: np.ndarray = (
             np.matmul(self._A, self.reference_points[:, None, :, None]).squeeze()
             + self._b
@@ -851,52 +953,49 @@ class MonteCarloQuadrature(BaseScheme):
 
 
 def get_quadpy_elements(
-    sd: pp.Grid, grid_type: Literal["triangle", "cart"] = "triangle"
+    sd: pp.Grid, grid_type: Literal["simplex", "cartesian"] = "simplex"
 ) -> np.ndarray:
     """
-    Assembles the elements of a given grid in quadpy format: https://pypi.org/project/quadpy/.
+    Assembles the elements of a given grid in quadpy format:
+    https://pypi.org/project/quadpy/.
 
-    Parameters
-    ----------
-        sd (pp.Grid): PorePy grid.
+    Parameters:
+        sd: PorePy grid.
 
-    Returns
-    --------
-    quadpy_elements (np.ndarray): Elements in QuadPy format.
+    Returns:
+        quadpy_elements: ``shape=(num_nodes, num_cells, sd.dim)``
+            Elements in QuadPy format. For line segments, the shape is
+            ``(2, num_cells)``.
 
-    Example
-    --------
-    >>> # shape (3, 5, 2), i.e., (corners, num_triangles, xy_coords)
-    >>> triangles = np.stack([
-            [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
-            [[1.2, 0.6], [1.3, 0.7], [1.4, 0.8]],
-            [[26.0, 31.0], [24.0, 27.0], [33.0, 28]],
-            [[0.1, 0.3], [0.4, 0.4], [0.7, 0.1]],
-            [[8.6, 6.0], [9.4, 5.6], [7.5, 7.4]]
-            ], axis=-2)
     """
-    nodes_per_cell: int = sd.dim + 1 if grid_type == "triangle" else sd.dim * 2
+    nodes_per_cell: int = sd.dim + 1 if grid_type == "simplex" else sd.dim * 2
     # Renaming variables
-    nc = sd.num_cells
+    num_cells = sd.num_cells
 
     # Getting node coordinates for each cell
-    nodes_of_cell = sps.find(sd.cell_nodes().T)[1].reshape(nc, nodes_per_cell)
+    nodes_of_cell = sps.find(sd.cell_nodes().T)[1].reshape(num_cells, nodes_per_cell)
     nodes_coor_cell = sd.nodes[:, nodes_of_cell]
 
     # Stacking node coordinates
-    cnc_stckd = np.empty([nc, nodes_per_cell * sd.dim])
-    col = 0
+    # cnc_stckd = np.empty([num_cells, nodes_per_cell * sd.dim])
+    # col = 0
+    # for vertex in range(nodes_per_cell):
+    #     for dim in range(sd.dim):
+    #         cnc_stckd[:, col] = nodes_coor_cell[dim][:, vertex]
+    #         col += 1
+
+    # # Reshaping to please quadpy format i.e., (corners, num_cells, dim)
+    # elelemt_coords: np.ndarray = np.reshape(cnc_stckd, np.array([num_cells, nodes_per_cell, sd.dim]))
+    # elements: np.ndarray = np.swapaxes(elelemt_coords, 0, 1)
+    # Stacking node coordinates
+    elements: np.ndarray = np.empty([nodes_per_cell, num_cells, sd.dim])
     for vertex in range(nodes_per_cell):
         for dim in range(sd.dim):
-            cnc_stckd[:, col] = nodes_coor_cell[dim][:, vertex]
-            col += 1
-        element_coord = np.reshape(cnc_stckd, np.array([nc, nodes_per_cell, sd.dim]))
-
-    # Reshaping to please quadpy format i.e., (corners, num_elements, coords)
-    elements = np.stack(element_coord, axis=-2)  # type:ignore
+            elements[vertex, :, dim] = nodes_coor_cell[dim][:, vertex]
 
     # For some reason, quadpy needs a different formatting for line segments
     if sd.dim == 1:
-        elements = elements.reshape(sd.dim + 1, sd.num_cells)
+        # TODO Swapaxes here?
+        elements = elements.reshape(sd.dim + 1, num_cells)
 
     return elements
