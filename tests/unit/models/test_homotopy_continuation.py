@@ -3,7 +3,6 @@ from typing import Any
 import numpy as np
 import porepy as pp
 import pytest
-from deprecated.homotopy_continuation import adaptive_lambda
 
 
 def test_adaptive_lambda_(

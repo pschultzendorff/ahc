@@ -5,7 +5,7 @@ while True:
     1. Newton step
     2. Compute discretization error estimator and linearization error estimate
     3. If linearization error estimator <= tol * discretization error estimator:
-        break 
+        break
 
 [M. Vohralík and M. F. Wheeler, “A posteriori error estimates, stopping criteria, and
 adaptivity for two-phase flows,” Comput Geosci, vol. 17, no. 5, pp. 789–812, Oct. 2013,
@@ -13,81 +13,287 @@ doi: 10.1007/s10596-013-9356-0.]
 
 """
 
+import itertools
 import logging
-from typing import Any
+import typing
+from typing import Any, Literal
 
 import numpy as np
+import porepy as pp
 from tpf.models.error_estimate import (
     DataSavingEst,
     ErrorEstimateMixin,
     SolutionStrategyEst,
 )
-from tpf.models.flow_and_transport import TwoPhaseFlow
-from tpf.models.protocol import EstimatesProtocol, TPFProtocol
+from tpf.models.flow_and_transport import SolutionStrategyTPF, TwoPhaseFlow
+from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFProtocol
 from tpf.models.reconstruction import (
     EquationsRecMixin,
     EquilibratedFluxMixin,
     GlobalPressureMixin,
     PressureReconstructionMixin,
 )
+from tpf.numerics.quadrature import Integral
 
 logger = logging.getLogger(__name__)
 
 
-class ErrorEstimateANewtonMixin(EstimatesProtocol):
+class ErrorEstimateANewtonMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol):
 
-    def global_discretization_est(self) -> float:
-        r"""Compute the global discretization error estimate.
+    def local_temp_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
+        r"""Calculate the local-in-space temporal error estimators.
 
-        In the CCFVM, the local residual estimates :math:`\eta_{R,\alpha,K}` are
-        (almost) zero, hence the global discretization error estimate is equal to the
-        sum of both global nonconformity error estimates given by
-        :meth:`ErrorEstimateMixin.global_nonconformity_est`.
+        We assume the following sub-dictionaries to be present in the data dictionary:
+            ``iterate_dictionary``, storing all parameters.
+                Stored in ``data[pp.ITERATE_SOLUTIONS]``.
 
-        Note: To avoid computing the local and global estimates twice, this method has
-            to be called **after** :meth:`SolutionStrategyEst.check_convergence`, which
-            evaluates and stores the global nonconformity estimates.
+        The following entries in ``iterate_dictionary`` will be updated:
+            - ``{flux_name}_T_estimator``, storing the local time error estimator.
 
-        Returns:
-            estimator: The global discretization estimator.
+        Note: The local estimators read
+
+        .. math::
+            \|\mathbf{u}_{\alpha,h,\tau}(t) - \mathbf{u}_{\alpha,h}^{n,i,k}\|_K^2,
+
+        where :math:`\mathbf{u}_{\alpha,h,\tau}(t)` is the FV flux at time :math:`t`,
+        and :math:`\mathbf{u}_{\alpha,h}^{n,i,k}` is the (non equilibrated) FV flux at
+        the current time step, continuation iteration, and Newton iteration.
+
+        To obtain the global estimator, the local estimators are summed over the domain
+        and integrated in time. The time integral is approximated with the trapezoidal
+        rule.  As the difference is piecewise affine on the time integral and zero at
+        :math:`t^n`, where both fluxes are equal, it suffices to evaluate the difference
+        at :math:`t^{n-1}`. The time integral is then approximate as
+
+        .. math::
+            \frac{\Delta t}{2}
+            \|\mathbf{u}_{\alpha,h,\tau}(t^{n-1}) - \mathbf{u}_{\alpha,h}^{n,i,k}\|_K^2.
+
+        Parameters:
+            flux_name: Name of the flux to calculate the estimator for.
 
         """
-        return sum(self.nonlinear_solver_statistics.nonconformity_est[-1].values())
+        # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
+        fv_coeffs_new = pp.get_solution_values(
+            f"{flux_name}_flux_RT0_coeffs",
+            self.g_data,
+            iterate_index=0,
+        )
+        fv_coeffs_old = pp.get_solution_values(
+            f"{flux_name}_flux_RT0_coeffs",
+            self.g_data,
+            time_step_index=0,
+        )
+
+        def integrand(x: np.ndarray) -> np.ndarray:
+            integrand_x: np.ndarray = (
+                fv_coeffs_new[..., 0] - fv_coeffs_old[..., 0]
+            ) * x[..., 0] + (fv_coeffs_new[..., 1] - fv_coeffs_old[..., 1])
+            integrand_y: np.ndarray = (
+                fv_coeffs_new[..., 0] - fv_coeffs_old[..., 0]
+            ) * x[..., 1] + (fv_coeffs_new[..., 2] - fv_coeffs_old[..., 2])
+            return integrand_x**2 + integrand_y**2
+
+        # Integrate elementwise and store the result.
+        integral: Integral = self.quadrature_estimate.integrate(
+            integrand,
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+        pp.set_solution_values(
+            f"{flux_name}_T_estimator",
+            integral.elementwise.squeeze(),
+            self.g_data,
+            iterate_index=0,
+        )
+
+    def local_linearization_est(
+        self, flux_name: Literal["total", "wetting_from_ff"]
+    ) -> None:
+        """
+
+        We assume the following sub-dictionaries to be present in the data dictionary:
+            ``iterate_dictionary``, storing all parameters.
+                Stored in ``data[pp.ITERATE_SOLUTIONS]``.
+
+        The following entries in ``iterate_dictionary`` will be updated:
+            - ``{flux_name}_L_estimator``, storing the local in time and space
+              linearization error estimator.
+
+        """
+        # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
+        fv_coeffs = pp.get_solution_values(
+            f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
+        )
+        fv_equilibrated_coeffs = pp.get_solution_values(
+            f"{flux_name}_flux_equilibrated_RT0_coeffs", self.g_data, iterate_index=0
+        )
+
+        def integrand(x: np.ndarray) -> np.ndarray:
+            integrand_x: np.ndarray = (
+                fv_coeffs[..., 0] - fv_equilibrated_coeffs[..., 0]
+            ) * x[..., 0] + (fv_coeffs[..., 1] - fv_equilibrated_coeffs[..., 1])
+            integrand_y: np.ndarray = (
+                fv_coeffs[..., 0] - fv_equilibrated_coeffs[..., 0]
+            ) * x[..., 1] + (fv_coeffs[..., 2] - fv_equilibrated_coeffs[..., 2])
+            return integrand_x**2 + integrand_y**2
+
+        # Integrate elementwise and store the result.
+        integral: Integral = self.quadrature_estimate.integrate(
+            integrand,
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+        # To calculate the global estimator, only the estimators fromt the most recent
+        # nonlinear iteration are needed. No need to shift anything.
+        pp.set_solution_values(
+            f"{flux_name}_L_estimator",
+            integral.elementwise.squeeze(),
+            self.g_data,
+            iterate_index=0,
+        )
+
+    def global_res_est(self) -> float:
+        r"""Sum local residual estimators, integrate in time, and sum total and
+         wetting estimators.
+
+        Contrary to :meth:`ErrorEstimatesMixin.global_res_and_flux_est`, the local flux
+        estimator does not contribute to the spatial discretization error. Instead, it
+        is decomposed and separated into the temporal and linearization
+        estimator.
+
+        The remaining residual error estimate is zero in theory and negligible in
+        practice. For faster evaluation, it may not be evaluated.
+
+        Note: The residual estimator is not time dependent, hence we multiply the
+        value at :math:`t_n` by :math:`\Delta t` to get the time integral.
+
+        Returns:
+            estimator: Global discretization error estimator.
+
+        """
+        if self.params.get("anewton_fast_evaluation", True):
+            return 0.0
+        else:
+            estimators: dict[str, float] = {}
+            for flux_name in ["total", "wetting_from_ff"]:
+                # Satisfy mypy.
+                flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+
+                # Calculate local estimatorss.
+                self.local_residual_est(flux_name)
+                # Load spatial integrals from current nonlinear iteration.
+                local_integral_R: np.ndarray = pp.get_solution_values(
+                    f"{flux_name}_R_estimator", self.g_data, iterate_index=0
+                )
+                # Calculate global values at current iteration.
+                # NOTE The values stored were the squares of the elementwise norms, hence we
+                # take the square root first
+                global_integral: float = local_integral_R.sum()
+                # Integrate in time by multiplying .
+                estimators[flux_name] = self.time_manager.dt * global_integral
+            # Sum estimators for both equations.
+            estimator: float = sum(estimators.values()) ** 1 / 2
+            logger.info(f"Global residual error estimator: {estimator}")
+            return estimator
+
+    def global_spatial_est(self) -> float:
+        """Evaluate the global spatial discretization error estimator."""
+        residual_estimator: float = self.global_res_est()
+        nc_estimators: tuple[float, float] = self.global_nonconformity_est()
+        # The global residual estimator is the square root of the sum over both fluxes,
+        # integral over time and domain of the squared local estimators. Its part in the
+        # global error estimator multiplied by 3 before taking the square root. Instead
+        # of writing
+        # estimator: float = (3 * residual_estimator**2) ** (1 / 2) +
+        # sum(nc_estimators),
+        # we multiply by np.sqrt(3).
+        estimator: float = np.sqrt(3) * residual_estimator + sum(nc_estimators)
+        logger.info(f"Global spatial discretization error estimator: {estimator}")
+        return estimator
+
+    def global_temp_est(self) -> float:
+        """Evaluate the global temporal discretization error estimator."""
+        estimators: dict[str, float] = {}
+        for flux_name in ["total", "wetting_from_ff"]:
+            # Satisfy mypy.
+            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+
+            # Calculate local estimators.
+            self.local_temp_est(flux_name)
+            # Load spatial integral from current nonlinear iteration.
+            local_integral: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_T_estimator", self.g_data, iterate_index=0
+            )
+            # Calculate global values at current and previous time step.
+            # NOTE The values stored were the squares of the elementwise norms, hence we
+            # do not need to square here.
+            global_integral: float = local_integral.sum()
+            # Integrate in time by multiplying with time step size / 2.
+            estimators[flux_name] = self.time_manager.dt / 2.0 * global_integral
+        # Sum estimators for both equations.
+        estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
+        logger.info(f"Global temporal discretization error estimator: {estimator}")
+        return estimator
+
+    def global_discretization_est(self) -> float:
+        """Evaluate the global discretization error estimator."""
+        spatial_estimator: float = self.nonlinear_solver_statistics.spatial_est[-1]
+        temp_estimator: float = self.nonlinear_solver_statistics.temp_est[-1]
+        estimator: float = spatial_estimator + temp_estimator
+        logger.info(f"Global discretization error estimator: {estimator}")
+        return estimator
 
     def global_linearization_est(self) -> float:
         r"""Compute the global linearization error estimate.
 
-        When solving the nonlinear system with Newton, and assuming that the linear
-        system is solved exactly at each Newton iteration, the local linearization error
-        estimate is given by summing the local flux estimates over the domain,
-        integrating in time and summing the esimates for both fluxes.
-
-        In the CCFVM, the local residual estimates :math:`\eta_{R,\alpha,K}` are
-        (almost) zero, hence it holds
-
-        .. math::
-            \left{\sum_{\alpha \in \{w,t\}} \int_{I_n} \sum_{K \in \mathcal{T}_h}
-                (\eta_{R,\alpha,K} + \eta_{F,\alpha,K})^2 dt \right}^{1/2}
-            =
-            \left{\sum_{\alpha \in \{w,t\}} \int_{I_n} \sum_{K \in \mathcal{T}_h}
-                \eta_{F,\alpha,K}^2 dt \right}^{1/2},
-
-        i.e., the global linearization error estimate is equal to the global flux and
-        residual error given by :meth:`ErrorEstimateMixin.global_res_and_flux_est`.
-
-        Note: To avoid computing the local and global estimates twice, this method has
-            to be called **after** :meth:`SolutionStrategyEst.check_convergence`, which
-            evaluates and stores the global flux and residual estimate.
 
         Returns:
             estimator: The global linearization estimator.
 
         """
 
-        return self.nonlinear_solver_statistics.residual_and_flux_est[-1]
+        estimators: dict[str, float] = {}
+        for flux_name in ["total", "wetting_from_ff"]:
+            # Satisfy mypy.
+            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+
+            # Calculate local estimators.
+            self.local_linearization_est(flux_name)
+            # Load spatial integral from current nonlinear iteration.
+            local_integral: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_L_estimator", self.g_data, iterate_index=0
+            )
+            # Calculate global values at current and previous time step.
+            # NOTE The values stored were the squares of the elementwise norms, hence we
+            # do not need to square here.
+            global_integral: float = local_integral.sum()
+            # Integrate in time by multiplying with time step size.
+            estimators[flux_name] = self.time_manager.dt * global_integral
+        # Sum estimators for both equations.
+        estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
+        logger.info(f"Global linearization error estimator: {estimator}")
+        return estimator
 
 
 class SolutionStrategyANewtonMixin(EstimatesProtocol, TPFProtocol):
+
+    def set_initial_estimators(self) -> None:
+        """Initialize iterate and time step values for additional error estimators."""
+        super().set_initial_estimators()
+        for flux_name, specifier in itertools.product(
+            ["total", "wetting_from_ff"],
+            ["T_estimator", "L_estimator"],
+        ):
+            pp.set_solution_values(
+                f"{flux_name}_{specifier}",
+                np.zeros(self.g.num_cells),
+                self.g_data,
+                time_step_index=0,
+                iterate_index=0,
+            )
 
     def check_convergence(
         self,
@@ -96,8 +302,22 @@ class SolutionStrategyANewtonMixin(EstimatesProtocol, TPFProtocol):
         reference_residual: np.ndarray,
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
-        converged, diverged = super().check_convergence(  # type: ignore
-            nonlinear_increment, residual, reference_residual, nl_params
+        # NOTE Here, we explicitely do NOT want to call
+        # ``SolutionStrategyEstMixin.check_convergence``, but
+        # ``TwoPhaseFlow.check_convergence``. The former logs estimators we are not
+        # interested in.
+        converged, diverged = SolutionStrategyTPF.check_convergence(  # type: ignore
+            self, nonlinear_increment, residual, reference_residual, nl_params
+        )
+
+        linearization_est: float = self.global_linearization_est()
+        self.nonlinear_solver_statistics.log_error(
+            # NOTE The discretization error estimate does not need to be calculated
+            # at this point. After HC convergence is sufficient if we want the code
+            # to be more efficient.
+            spatial_est=self.global_spatial_est(),
+            temp_est=self.global_temp_est(),
+            linearization_est=linearization_est,
         )
 
         # Adaptive stopping criterion.
@@ -106,8 +326,6 @@ class SolutionStrategyANewtonMixin(EstimatesProtocol, TPFProtocol):
                 nonlinear_increment
             )
             discretization_est: float = self.global_discretization_est()
-            linearization_est: float = self.global_linearization_est()
-
             # If Newton diverges, the estimators lose their meaning and the adaptive
             # criterion might incorrectly stop the HC loop. Hence, we check that the
             # nonlinear increment norm is not too large.
@@ -123,6 +341,28 @@ class SolutionStrategyANewtonMixin(EstimatesProtocol, TPFProtocol):
                 converged = True
 
         return converged, diverged
+
+    def after_nonlinear_convergence(self) -> None:  # type: ignore
+        """Export and move to the next homotopy continuation step.
+
+        When ``self._limit_saturation_change == True``, check if the wetting saturation
+        has changed too much
+
+        """
+        super().after_nonlinear_convergence()
+        for flux_name, specifier in itertools.product(
+            ["total", "wetting_from_ff"],
+            [
+                "T_estimator",
+                "L_estimator",
+            ],
+        ):
+            flux_values: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_{specifier}", self.g_data, iterate_index=0
+            )
+            pp.set_solution_values(
+                f"{flux_name}_{specifier}", flux_values, self.g_data, hc_index=0
+            )
 
 
 class TwoPhaseFlowANewton(

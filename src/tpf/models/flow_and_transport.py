@@ -310,7 +310,6 @@ class DarcyFluxes(TPFProtocol):
         this term as it's the term used during Newton.
 
         """
-
         # Spatial discretization operators.
         flux_tpfa = pp.ad.TpfaAd(self.flux_key, [g])
         upwind_w = pp.ad.UpwindAd(self.wetting.mobility_key, [g])

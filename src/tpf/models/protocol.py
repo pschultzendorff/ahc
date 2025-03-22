@@ -31,12 +31,12 @@ else:
     import porepy as pp
     from porepy.models.protocol import DataSavingProtocol, PorePyModel
     from porepy.viz.exporter import DataInput
+
     from tpf.models.constitutive_laws_tpf import CapPressConstants, RelPermConstants
     from tpf.models.phase import FluidPhase
-    from tpf.utils.constants_and_typing import PHASENAME, PRESSURE_KEY
+    from tpf.utils.constants_and_typing import PRESSURE_KEY
 
     class TPFProtocol(PorePyModel):
-
         # Variables & equations
         primary_pressure_var: str
         """Name of primary pressure variable. Normally provided by a mixin of instance
@@ -300,7 +300,9 @@ else:
             """Phase dependent pressure bc values on Dirichlet boundaries."""
             ...
 
-        def bc_dirichlet_saturation_values(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:  # type: ignore
+        def bc_dirichlet_saturation_values(
+            self, g: pp.Grid, phase: FluidPhase
+        ) -> np.ndarray:  # type: ignore
             """Phase dependent saturation bc values on Dirichlet boundaries."""
             ...
 
@@ -314,23 +316,22 @@ else:
             ...
 
     class HCProtocol(Protocol):
-
         _rel_perm_constants_1: RelPermConstants
         """Relative permeability constants for the first phase."""
         _rel_perm_constants_2: RelPermConstants
         """Relative permeability constants for the second phase."""
 
-        hc_rel_perm_toggle_fl: float
-        """Toggle between homotopy continuation and goal relative permeabilities.
+        hc_toggle_fl: float
+        """Toggle homotopy continuation on and off.
 
-        The default value is one to use homotopy continuation relative permeabilities.
-        To toggle the target relative permeabilities, it is set value to zero. Any
+        The default value is one to use homotopy continuation numerical fluxes.
+        To toggle the target numerical fluxes, it is set value to zero. Any
         method that changes this value, is expected to change it back to one after 
         the call.
 
         """
-        hc_rel_perm_toggle_ad: pp.ad.Scalar
-        """Toggle between homotopy continuation and goal relative permeabilities.
+        hc_toggle_ad: pp.ad.Scalar
+        """Toggle homotopy continuation on and off.
 
         Needs to be updated whenever :attr:`hc_rel_perm_toggle_fl` is changed.
 
@@ -412,7 +413,6 @@ else:
             ...
 
     class ReconstructionProtocol(Protocol):
-
         total_flux_eq: str
         """Total flux equation. Normally provided by a mixin of instance
         :class:`SolutionStrategyReconstruction`.
@@ -583,7 +583,6 @@ else:
             ...
 
     class EstimatesProtocol(Protocol):
-
         #  EstimatesMixin attributes and methods:
         quadrature_estimate_degree: int
         quadrature_estimate: TriangleQuadrature
@@ -641,7 +640,6 @@ else:
             ...
 
     class DataSavingMixinExtendedProtocol(DataSavingProtocol):
-
         def data_to_export_iteration(
             self,
         ) -> list[DataInput]:

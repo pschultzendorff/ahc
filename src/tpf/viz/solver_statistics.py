@@ -204,6 +204,75 @@ class SolverStatisticsEst(SolverStatisticsRec):
                 json.dump(data, file, indent=4)
 
 
+@dataclass
+class SolverStatisticsANewton(SolverStatisticsRec):
+
+    spatial_est: list[float] = field(default_factory=list)
+    """List of spatial discretization estimates for each non-linear iteration."""
+    temp_est: list[dict[str, float]] = field(default_factory=list)
+    """List of temporal discretization error estimates for each non-linear iteration."""
+    linearization_est: list[dict[str, float]] = field(default_factory=list)
+    """List of linearization error estimates for each non-linear iteration."""
+
+    @typing.override
+    def log_error(
+        self,
+        nonlinear_increment_norm: float | None = None,
+        residual_norm: float | None = None,
+        **kwargs,
+    ) -> None:
+        if (
+            "spatial_est" in kwargs
+            and "temp_est" in kwargs
+            and "linearization_est" in kwargs
+        ):
+            self.spatial_est.append(kwargs["spatial_est"])
+            self.temp_est.append(
+                kwargs["temp_est"],
+            )
+            self.linearization_est.append(kwargs["linearization_est"])
+        else:
+            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
+
+    @typing.override
+    def reset(self) -> None:
+        """Reset the estimator lists."""
+        super().reset()
+        self.spatial_est.clear()
+        self.temp_est.clear()
+        self.linearization_est.clear()
+
+    @typing.override
+    def save(self) -> None:
+        """Save the estimator statistics to a JSON file."""
+        # This calls ``pp.SolverStatistics.save``, which adds a new entry to the
+        # ``data`` dictionary that is found at ``self.path``.
+        super().save()
+        # Instead of creating a new entry, we load the already created entry and append.
+        if self.path is not None:
+            # Check if object exists and append to it
+            if self.path.exists():
+                with self.path.open("r") as file:
+                    data = json.load(file)
+            else:
+                data = {}
+
+            # Append data.
+            ind = len(data)
+            # Since data was stored and loaded as json, the keys have turned to strings.
+            data[str(ind)].update(
+                {
+                    "spatial_est": self.spatial_est,
+                    "temp_est": self.temp_est,
+                    "linearization_est": self.linearization_est,
+                }
+            )
+
+            # Save to file
+            with self.path.open("w") as file:
+                json.dump(data, file, indent=4)
+
+
 # Important to subclass SolverStatisticsTPF and not SolverStatisticsEst.
 @dataclass
 class SolverStatisticsHC(SolverStatisticsTPF):
@@ -388,7 +457,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                     # Newton loop. This is because :meth:`after_hc_iteration` is called
                     # before :meth:`after_hc_convergence/failure`
                     "hc_lambdas": self.hc_lambdas[:-1],
-                    "hc_num_iterations": self.hc_num_iteration - 1,
+                    "hc_num_iterations": self.hc_num_iteration,
                 }
             )
             # Save to file

@@ -7,6 +7,7 @@ from typing import Any, Literal
 import numpy as np
 import porepy as pp
 from porepy.viz.exporter import DataInput
+
 from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFProtocol
 from tpf.models.reconstruction import (
     DataSavingRec,
@@ -93,20 +94,24 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             dt_s: np.ndarray = (dt_s_ad).value(self.equation_system)  # type: ignore
             porosity: np.ndarray = self.porosity(self.g)
             integral: Integral = Integral(
-                self.g.cell_volumes
-                * self.poincare_constants
-                * (porosity * dt_s + div_equilibrated_flux - source) ** 2
+                (
+                    self.g.cell_volumes
+                    * self.poincare_constants
+                    * (porosity * dt_s + div_equilibrated_flux - source) ** 2
+                )[..., None]
             )
         elif flux_name == "total":
             integral = Integral(
-                self.g.cell_volumes
-                * self.poincare_constants
-                * (div_equilibrated_flux - source) ** 2
+                (
+                    self.g.cell_volumes
+                    * self.poincare_constants
+                    * (div_equilibrated_flux - source) ** 2
+                )[..., None]
             )
 
         pp.set_solution_values(
             f"{flux_name}_R_estimator",
-            integral.elementwise,
+            integral.elementwise.squeeze(),
             self.g_data,
             iterate_index=0,
         )
@@ -170,7 +175,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             )
             pp.set_solution_values(
                 f"{flux_name}_F_estimator{specifier}",
-                integral.elementwise,
+                integral.elementwise.squeeze(),
                 self.g_data,
                 iterate_index=0,
             )
@@ -238,7 +243,12 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 \kappa \nabla (\tilde{\mathfrac{q}}^{n-1} - \mathfrac{q}^{n-1}).
 
             """
-            nonlocal reconstructed_coeffs, reconstructed_coeffs_old, postprocessed_coeffs_old, total_mobility, perm
+            nonlocal \
+                reconstructed_coeffs, \
+                reconstructed_coeffs_old, \
+                postprocessed_coeffs_old, \
+                total_mobility, \
+                perm
             # Calculate the pressure potential at the current time step and at the
             # previous time step (if needed).
             fluxes: list[np.ndarray] = []
@@ -323,7 +333,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             )
             pp.set_solution_values(
                 f"{pressure_key}_NC_estimator{specifier}",
-                integral.elementwise,
+                integral.elementwise.squeeze(),
                 self.g_data,
                 iterate_index=0,
             )
@@ -512,7 +522,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             )
             pp.set_solution_values(
                 f"energy_norm_{flux_name}_flux_part",
-                local_energy.elementwise,
+                local_energy.elementwise.squeeze(),
                 self.g_data,
                 iterate_index=0,
             )
@@ -558,7 +568,6 @@ class SolutionStrategyEst(  # type: ignore
     EstimatesProtocol,
     SolutionStrategyRec,
 ):
-
     def prepare_simulation(self) -> None:
         """Set up estimators after setting up the base simulation and
         reconstructions.
@@ -571,7 +580,7 @@ class SolutionStrategyEst(  # type: ignore
         self.set_initial_estimators()
 
     def set_initial_estimators(self) -> None:
-        """Initialize time step values for error estimators.
+        """Initialize iterate and time step values for error estimators.
 
         To calculate the integrals in time, we need to access previous time step values.
         At the initial time step, the continuous solution is equal to the initial
@@ -582,13 +591,12 @@ class SolutionStrategyEst(  # type: ignore
         ``after_hc_convergence``, but not everything.
 
         """
-        # Initialize time step and iterate values for local estimators.
-        for flux_name, key in itertools.product(
+        for flux_name, specifier in itertools.product(
             ["total", "wetting_from_ff"],
             ["R_estimator", "F_estimator", "F_estimator_old", "energy_norm_flux_part"],
         ):
-            if key.endswith("estimator"):
-                name: str = f"{flux_name}_{key}"
+            if specifier.endswith("estimator"):
+                name: str = f"{flux_name}_{specifier}"
                 initial_values: np.ndarray = np.zeros(self.g.num_cells)
             else:
                 name = f"energy_norm_{flux_name}_flux_part"
@@ -673,7 +681,6 @@ class SolutionStrategyEst(  # type: ignore
 
 
 class DataSavingEst(DataSavingRec):
-
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:

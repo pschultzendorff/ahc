@@ -8,8 +8,9 @@ from typing import Any, Literal
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-from numba import njit
+from numba import njit, prange
 from porepy.viz.exporter import DataInput
+
 from tpf.models.flow_and_transport import (
     DataSavingTPF,
     SolutionStrategyTPF,
@@ -32,7 +33,6 @@ logger = logging.getLogger(__name__)
 
 
 class GlobalPressureMixin(TPFProtocol):
-
     def setup_glob_compl_pressure(self) -> None:
         global_pressure_constants: dict[str, Any] = self.params.get(
             "global_pressure_constants", {}
@@ -196,7 +196,7 @@ class GlobalPressureMixin(TPFProtocol):
             return w_mobility / t_mobility * self.cap_press_deriv_np(s)
 
         integral: Integral = self.quadrature_1d.integrate(integrand, intervals)
-        return integral.elementwise[:, 0]
+        return integral.elementwise.squeeze()
 
     def complimentary_pressure_integral_part(
         self, s_0: np.ndarray, s_1: np.ndarray
@@ -242,7 +242,7 @@ class GlobalPressureMixin(TPFProtocol):
             return w_mobility * n_mobility / t_mobility * self.cap_press_deriv_np(s)
 
         integral: Integral = self.quadrature_1d.integrate(integrand, intervals)
-        return -1 * integral.elementwise[..., 0]
+        return -1 * integral.elementwise.squeeze()
 
     def set_boundary_pressures(self) -> None:
         """Set boundary pressures for the global and complimentary pressure fields."""
@@ -362,6 +362,9 @@ class PressureReconstructionMixin(TPFProtocol):
 
         # To obtain the constant c_5, we solve  c_5 = p_h - 1/|K| (gamma(x, y), 1)_K,
         # where s(x, y) = gamma(x, y) + c_5.
+        # Decorating this with @njit, it gets recompiled at each nonlinear iteration,
+        # which makes the whole process super slow. For now, we turn this off.
+        # @njit
         def integrand(x):
             int_0 = s[:, 0][None, ...] * x[..., 0] ** 2
             int_1 = s[:, 1][None, ...] * x[..., 0] * x[..., 1]
@@ -378,7 +381,7 @@ class PressureReconstructionMixin(TPFProtocol):
         )
 
         # Now, we can compute the constant C, one per cell.
-        s[:, 5] = p_cc - integral.elementwise / self.g.cell_volumes
+        s[:, 5] = p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
 
         # Store post-processed but not reconstructed pressure at the nodes.
         pp.set_solution_values(
@@ -816,7 +819,6 @@ class EquilibratedFluxMixin(TPFProtocol):
 
 
 class EquationsRecMixin(TPFProtocol):
-
     def set_equations(self) -> None:
         """Set additional equations needed for reconstructions.
 
@@ -878,7 +880,6 @@ class SolutionStrategyRec(  # type: ignore
     ReconstructionProtocol,
     SolutionStrategyTPF,
 ):
-
     @property
     @typing.override
     def iterate_indices(self) -> np.ndarray:
@@ -1252,6 +1253,9 @@ def get_sign_normals(g: pp.Grid) -> np.ndarray:
     return sign_normals
 
 
+# The loop could be parallelized with njit(parallel=True) and prange. However, on a
+# small grids (<16000 cells) the overhead made :meth:`postprocess_pressure_vohralik`
+# slower.
 @njit
 def compute_pressure_coeffs(
     num_cells: int, dim: int, perm: np.ndarray, coeffs_flux: np.ndarray
@@ -1261,7 +1265,7 @@ def compute_pressure_coeffs(
 
     """
     s = np.zeros((num_cells, 6))
-    # Loop through all cells and compute the vector r.
+    # Loop through all cells and compute the nonconstant coefficients.
     for ci in range(num_cells):
         # Local permeability tensor
         K = perm[:dim, :dim, ci]
@@ -1284,6 +1288,9 @@ def compute_pressure_coeffs(
     return s
 
 
+# The loop could be parallelized with njit(parallel=True) and prange. However, on a
+# small grids (<16000 cells) the overhead made :meth:`reconstruct_pressure_vohralik`
+# slower.
 @njit
 def linalg_solve_batch(A_elements: np.ndarray, point_val: np.ndarray) -> np.ndarray:
     ret: np.ndarray = np.empty_like(point_val)
@@ -1293,7 +1300,6 @@ def linalg_solve_batch(A_elements: np.ndarray, point_val: np.ndarray) -> np.ndar
 
 
 class DataSavingRec(DataSavingTPF):
-
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:

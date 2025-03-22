@@ -356,16 +356,12 @@ class ModelGeometrySPE11(TPFProtocol):
 
 
 class SolutionStrategySPE11(TPFProtocol):
-    """Mixin class to provide the SPE10 model data.
+    """Mixin class to provide the SPE11 model data.
 
     Takes care of:
-    - Loading the SPE10 fluids, i.e., oil and water.
-    - Loading the SPE10 geometry, i.e., permeability and porosity.
-    - Exporting the SPE10 geometry.
-
-    Requires the following model parameters to be set:
-        - "spe10_layer" (int): The layer of the SPE10 model to use.
-        - "spe10_isotropic_perm" (bool): Whether to use isotropic permeability.
+    - Loading the SPE11 fluids, i.e., CO2 and water.
+    - Loading the SPE11 geometry, i.e., permeability and porosity.
+    - Exporting the SPE11 geometry.
 
     """
 

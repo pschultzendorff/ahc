@@ -1,3 +1,6 @@
+"""This test file is deprecated until the ``tpf.viz.convergence_analysis`` functionality
+is updated."""
+
 from typing import Any
 
 import numpy as np

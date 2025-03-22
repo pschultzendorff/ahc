@@ -1,4 +1,5 @@
-r"""
+r"""Deprecated until the Buckley-Leverett model is implemented in the new framework.
+
 Test the Buckley-Leverett model.
 
 NOTE: As of now, everything is tested without gravity.

@@ -6,7 +6,13 @@ from typing import Any, Literal
 import numpy as np
 import porepy as pp
 from porepy.viz.exporter import DataInput
-from tpf.models.constitutive_laws_tpf import RelativePermeability, RelPermConstants
+
+from tpf.models.constitutive_laws_tpf import (
+    CapillaryPressure,
+    CapPressConstants,
+    RelativePermeability,
+    RelPermConstants,
+)
 from tpf.models.error_estimate import (
     DataSavingEst,
     ErrorEstimateMixin,
@@ -69,7 +75,9 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
 
     # Ignore mypy complaining about incompatible signature with supertype.
     @typing.override
-    def rel_perm(self, saturation_w: pp.ad.Operator, phase: FluidPhase) -> pp.ad.Operator:  # type: ignore[override]
+    def rel_perm(
+        self, saturation_w: pp.ad.Operator, phase: FluidPhase
+    ) -> pp.ad.Operator:  # type: ignore[override]
         # Return homotopy continuation relative permeability.
         # Mypy gives an error here, because it thinks the empty ``HCProtocol.rel_perm``
         # is called. During runtime, ``HCProtocol`` does not have this method, hence we
@@ -91,8 +99,8 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
             * rel_perm_2
         )
         return (
-            self.hc_rel_perm_toggle_ad * hc_rel_perm
-            + (pp.ad.Scalar(1) - self.hc_rel_perm_toggle_ad) * rel_perm_2
+            self.hc_toggle_ad * hc_rel_perm
+            + (pp.ad.Scalar(1) - self.hc_toggle_ad) * rel_perm_2
         )
 
     @typing.override
@@ -115,18 +123,78 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
             self.nonlinear_solver_statistics.hc_lambda_fl * rel_perm_1
             + (1 - self.nonlinear_solver_statistics.hc_lambda_fl) * rel_perm_2
         )
-        return (
-            self.hc_rel_perm_toggle_fl * hc_rel_perm
-            + (1 - self.hc_rel_perm_toggle_fl) * rel_perm_2
+        return self.hc_toggle_fl * hc_rel_perm + (1 - self.hc_toggle_fl) * rel_perm_2
+
+
+# ``HCProtocol`` and ``TPFProtocol`` define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
+    @typing.override
+    def set_rel_perm_constants(self) -> None:
+        cap_press_constants: dict[str, dict] = self.params.get(
+            "cap_press_constants", {}
         )
+        cap_press_1_constants: dict[str, Any] = cap_press_constants.get("model_1", {})
+        cap_press_2_constants: dict[str, Any] = cap_press_constants.get("model_2", {})
+
+        self._cap_press_constants_1 = CapPressConstants(**cap_press_1_constants)
+        self._cap_press_constants_2 = CapPressConstants(**cap_press_2_constants)
+
+    # Ignore mypy complaining about incompatible signature with supertype.
+    @typing.override
+    def cap_press(self, saturation_w: pp.ad.Operator) -> pp.ad.Operator:  # type: ignore[override]
+        # Return homotopy continuation relative permeability.
+        # Mypy gives an error here, because it thinks the empty ``HCProtocol.rel_perm``
+        # is called. During runtime, ``HCProtocol`` does not have this method, hence we
+        # can ignore the error. Additionally, we ignore complaints about the wrong
+        # number of arguments and wrong arguemnt types.
+        cap_press_1: pp.ad.Operator = super().cap_press(  # type: ignore
+            saturation_w,  # type: ignore
+            cap_press_constants=self._cap_press_constants_1,  # type: ignore
+        )
+        cap_press_2: pp.ad.Operator = super().cap_press(  # type: ignore
+            saturation_w,  # type: ignore
+            cap_press_constants=self._cap_press_constants_2,  # type: ignore
+        )
+        hc_cap_press: pp.ad.Operator = (
+            self.nonlinear_solver_statistics.hc_lambda_ad * cap_press_1
+            + (pp.ad.Scalar(1) - self.nonlinear_solver_statistics.hc_lambda_ad)
+            * cap_press_2
+        )
+        return (
+            self.hc_toggle_ad * hc_cap_press
+            + (pp.ad.Scalar(1) - self.hc_toggle_ad) * cap_press_2
+        )
+
+    @typing.override
+    def cap_press_np(
+        self,
+        saturation_w: np.ndarray,
+    ) -> np.ndarray:
+        cap_press_1: np.ndarray = super().cap_press_np(  # type: ignore
+            saturation_w,  # type: ignore
+            cap_press_constants=self._cap_press_constants_1,  # type: ignore
+        )
+        cap_press_2: np.ndarray = super().cap_press_np(  # type: ignore
+            saturation_w,  # type: ignore
+            cap_press_constants=self._cap_press_constants_2,  # type: ignore
+        )
+        hc_cap_press: np.ndarray = (
+            self.nonlinear_solver_statistics.hc_lambda_fl * cap_press_1
+            + (1 - self.nonlinear_solver_statistics.hc_lambda_fl) * cap_press_2
+        )
+        return self.hc_toggle_fl * hc_cap_press + (1 - self.hc_toggle_fl) * cap_press_2
 
 
 # The various protocols define different types for
 # ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
 # practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
 # the error.
-class EstimatesHCMixin(HCProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol):  # type: ignore
-
+class EstimatesHCMixin(
+    HCProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
+):  # type: ignore
     def local_temp_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
         r"""Calculate the local-in-space temporal error estimators.
 
@@ -191,7 +259,7 @@ class EstimatesHCMixin(HCProtocol, EstimatesProtocol, ReconstructionProtocol, TP
         )
         pp.set_solution_values(
             f"{flux_name}_T_estimator",
-            integral.elementwise,
+            integral.elementwise.squeeze(),
             self.g_data,
             iterate_index=0,
         )
@@ -236,7 +304,7 @@ class EstimatesHCMixin(HCProtocol, EstimatesProtocol, ReconstructionProtocol, TP
         )
         pp.set_solution_values(
             f"{flux_name}_C_estimator",
-            integral.elementwise,
+            integral.elementwise.squeeze(),
             self.g_data,
             iterate_index=0,
         )
@@ -283,14 +351,58 @@ class EstimatesHCMixin(HCProtocol, EstimatesProtocol, ReconstructionProtocol, TP
         # nonlinear iteration are needed. No need to shift anything.
         pp.set_solution_values(
             f"{flux_name}_L_estimator",
-            integral.elementwise,
+            integral.elementwise.squeeze(),
             self.g_data,
             iterate_index=0,
         )
 
+    def global_res_est(self) -> float:
+        r"""Sum local residual estimators, integrate in time, and sum total and
+         wetting estimators.
+
+        Contrary to :meth:`ErrorEstimatesMixin.global_res_and_flux_est`, the local flux
+        estimator does not contribute to the spatial discretization error. Instead, it
+        is decomposed and separated into the temporal, continuation and linearization
+        estimator.
+
+        The remaining residual error estimate is zero in theory and negligible in
+        practice. For faster evaluation, it may not be evaluated.
+
+        Note: The residual estimator is not time dependent, hence we multiply the
+        value at :math:`t_n` by :math:`\Delta t` to get the time integral.
+
+        Returns:
+            estimator: Global discretization error estimator.
+
+        """
+        if self.params.get("hc_fast_evaluation", True):
+            return 0.0
+        else:
+            estimators: dict[str, float] = {}
+            for flux_name in ["total", "wetting_from_ff"]:
+                # Satisfy mypy.
+                flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+
+                # Calculate local estimatorss.
+                self.local_residual_est(flux_name)
+                # Load spatial integrals from current nonlinear iteration.
+                local_integral_R: np.ndarray = pp.get_solution_values(
+                    f"{flux_name}_R_estimator", self.g_data, iterate_index=0
+                )
+                # Calculate global values at current iteration.
+                # NOTE The values stored were the squares of the elementwise norms, hence we
+                # take the square root first
+                global_integral: float = local_integral_R.sum()
+                # Integrate in time by multiplying .
+                estimators[flux_name] = self.time_manager.dt * global_integral
+            # Sum estimators for both equations.
+            estimator: float = sum(estimators.values()) ** 1 / 2
+            logger.info(f"Global residual error estimator: {estimator}")
+            return estimator
+
     def global_spatial_est(self) -> float:
         """Evaluate the global spatial discretization error estimator."""
-        residual_estimator: float = self.global_res_and_flux_est()
+        residual_estimator: float = self.global_res_est()
         nc_estimators: tuple[float, float] = self.global_nonconformity_est()
         # The global residual estimator is the square root of the sum over both fluxes,
         # integral over time and domain of the squared local estimators. Its part in the
@@ -320,8 +432,10 @@ class EstimatesHCMixin(HCProtocol, EstimatesProtocol, ReconstructionProtocol, TP
             # NOTE The values stored were the squares of the elementwise norms, hence we
             # do not need to square here.
             global_integral: float = local_integral.sum()
-            # Integrate in time by multiplying with time step size / 2.
-            estimators[flux_name] = self.time_manager.dt / 2.0 * global_integral
+            # Integrate in time by multiplying with time step size / 3. This comes from
+            # writing the local estimator as an affine function of :math:`t` that is
+            # zero at :math:`t^n` and calcualting the integral exactly.
+            estimators[flux_name] = self.time_manager.dt / 3.0 * global_integral
         # Sum estimators for both equations.
         estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
         logger.info(f"Global temporal discretization error estimator: {estimator}")
@@ -391,49 +505,6 @@ class EstimatesHCMixin(HCProtocol, EstimatesProtocol, ReconstructionProtocol, TP
         logger.info(f"Global linearization error estimator: {estimator}")
         return estimator
 
-    def global_res_and_flux_est(self) -> float:
-        r"""Sum local residual estimators, integrate in time, and sum total and
-         wetting estimators.
-
-        Contrary to :meth:`ErrorEstimatesMixin.global_res_and_flux_est`, the local flux
-        estimator does not contribute to the discretization error. Instead, it is
-        decomposed and separated into the continuation and linearization estimator.
-
-        The remaining residual error estimate is zero in theory and negligible in
-        practice. For faster evaluation, it may not be evaluated.
-
-        Note: The residual estimator is not time dependent, hence we multiply the
-        value at :math:`t_n` by :math:`\Delta t` to get the time integral.
-
-        Returns:
-            estimator: Global discretization error estimator.
-
-        """
-        if self.params.get("hc_fast_evaluation", True):
-            return 0.0
-        else:
-            estimators: dict[str, float] = {}
-            for flux_name in ["total", "wetting_from_ff"]:
-                # Satisfy mypy.
-                flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
-
-                # Calculate local estimatorss.
-                self.local_residual_est(flux_name)
-                # Load spatial integrals from current nonlinear iteration.
-                local_integral_R: np.ndarray = pp.get_solution_values(
-                    f"{flux_name}_R_estimator", self.g_data, iterate_index=0
-                )
-                # Calculate global values at current iteration.
-                # NOTE The values stored were the squares of the elementwise norms, hence we
-                # take the square root first
-                global_integral: float = local_integral_R.sum()
-                # Integrate in time by multiplying .
-                estimators[flux_name] = self.time_manager.dt * global_integral
-            # Sum estimators for both equations.
-            estimator: float = sum(estimators.values()) ** 1 / 2
-            logger.info(f"Global residual error estimator: {estimator}")
-            return estimator
-
     def relative_global_discretization_est(self) -> float:
         """Return relative global discretization error estimator."""
         return self.global_discretization_est() / self.global_energy_norm()
@@ -462,12 +533,13 @@ class EstimatesHCMixin(HCProtocol, EstimatesProtocol, ReconstructionProtocol, TP
 # ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
 # practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
 # the error.
-class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol, SolutionStrategyTPF):  # type: ignore
-
+class SolutionStrategyAHC(
+    HCProtocol, EstimatesProtocol, ReconstructionProtocol, SolutionStrategyTPF
+):  # type: ignore
     def __init__(self, params=None) -> None:
         super().__init__(params=params)
-        self.hc_rel_perm_toggle_fl: float = 1.0
-        self.hc_rel_perm_toggle_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
+        self.hc_toggle_fl: float = 1.0
+        self.hc_toggle_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
 
     @property
     def hc_indices(self) -> list[int]:
@@ -585,7 +657,7 @@ class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol,
             self.nonlinear_solver_statistics.hc_lambda_fl
         )
         logger.info(
-            f"Decayed hc_lambda to"
+            "Decayed hc_lambda to"
             + f" {self.nonlinear_solver_statistics.hc_lambda_fl:.2f}"
         )
         self.nonlinear_solver_statistics.hc_num_iteration += 1
@@ -715,7 +787,7 @@ class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol,
             ):
                 logger.info(
                     f"HC converged as HC parameter decreased below minimal value"
-                    f" {hc_params["hc_lambda_min"]}."
+                    f" {hc_params['hc_lambda_min']}."
                 )
                 self.hc_is_converged = True
 
@@ -727,7 +799,7 @@ class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol,
         ):
             logger.info(
                 f"Reached maximum number of HC iterations "
-                f"{hc_params["hc_max_iterations"]} without convergence."
+                f"{hc_params['hc_max_iterations']} without convergence."
             )
             self.hc_is_diverged = True
 
@@ -854,9 +926,9 @@ class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol,
             COMPLIMENTARY_PRESSURE, prepare_simulation=prepare_simulation
         )
 
-        # Switch rel. perm. to goal rel. perm, calculate fluxes, and switch back.
-        self.hc_rel_perm_toggle_fl = 0.0
-        self.hc_rel_perm_toggle_ad.set_value(self.hc_rel_perm_toggle_fl)
+        # Switch rel. perm. to goal rel. perm, calculate fluxes.
+        self.hc_toggle_fl = 0.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
         for flux_name, flux_eq in zip(
             [
@@ -872,8 +944,8 @@ class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol,
                 self.total_flux_times_fractional_flow_eq,
             ],
         ):
-            # Take the negative of the values since ``equation_system.assemble`` returns the
-            # negative of the RHS.
+            # Take the negative of the values since ``equation_system.assemble`` returns
+            # the negative of the RHS.
             flux: np.ndarray = -self.equation_system.assemble(
                 evaluate_jacobian=False, equations=[flux_eq]
             )
@@ -885,8 +957,9 @@ class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol,
                 iterate_index=0,
             )
 
-        self.hc_rel_perm_toggle_fl = 1.0
-        self.hc_rel_perm_toggle_ad.set_value(self.hc_rel_perm_toggle_fl)
+        # Switch back to hc rel perm.
+        self.hc_toggle_fl = 1.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
     @typing.override
     def postprocess_solution(
@@ -1083,7 +1156,6 @@ class SolutionStrategyAHC(HCProtocol, EstimatesProtocol, ReconstructionProtocol,
 
 
 class DataSavingHC(DataSavingEst):
-
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
@@ -1118,6 +1190,7 @@ class DataSavingHC(DataSavingEst):
 
 class TwoPhaseFlowAHC(
     RelativePermeabilityHC,
+    # CapillaryPressureHC,
     EstimatesHCMixin,
     SolutionStrategyAHC,
     DataSavingHC,

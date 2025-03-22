@@ -2,5 +2,4 @@
 # deepdiff
 tqdm
 viztracer
-pytest-lazy-fixture
 scikit-learn

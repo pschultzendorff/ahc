@@ -205,6 +205,7 @@ class BaseScheme(abc.ABC):
         elements: np.ndarray | None = None,
         recalc_points: bool = True,
         recalc_volumes: bool = True,
+        njit: bool = False,
     ) -> Integral:
         """Evaluate the integral of a function on all elements.
 
@@ -218,6 +219,9 @@ class BaseScheme(abc.ABC):
                 Elements to integrate over.
             recalc_points: Whether to recalculate the integration points.
             recalc_volumes: Whether to recalculate the volumes.
+            njit: Whether to use numba for the integration. WARNING: Ideally, ``func``
+                should be decorated with ``@njit`` as well. However, if ``func`` changes
+                between calls, this gets super slow.
 
         Returns:
             Integral: Integral object containing the integrated values.
@@ -242,10 +246,14 @@ class BaseScheme(abc.ABC):
         # If y has shape (num_ref_points, num_elements), add a dimension.
         if y.ndim == 2:
             y = y[..., None]
-        values: np.ndarray = self._integrate_njit(
-            y, self.weights, self.volumes, self.reference_volume
-        )
-
+        if njit:
+            values: np.ndarray = self._integrate_njit(
+                y, self.weights, self.volumes, self.reference_volume
+            )
+        else:
+            values = (self.volumes / self.reference_volume)[..., None] * np.tensordot(
+                self.weights, y, axes=([0], [0])
+            )
         return Integral(values)
 
     # When recalc_points and recalc_volumes are set to False, only this method should
@@ -254,6 +262,7 @@ class BaseScheme(abc.ABC):
     # with ``@njit`` as well.
     # TODO How to implement conditional numba decoration?
     # TODO Must ``func`` be decorated with ``@njit`` for this to be efficient?
+    # TODO Make this efficient!
     @staticmethod
     @njit
     def _integrate_njit(

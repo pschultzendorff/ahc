@@ -109,8 +109,8 @@ params = {
         constant_dt=True,
     ),
     "grid_type": "simplex",
-    "spe10_quarter_domain": True,
-    "spe10_layer": 80 - 1,
+    "spe10_quarter_domain": False,
+    "spe10_layer": 80,
     "spe10_isotropic_perm": True,
     # Nonlinear params:
     "nonlinear_solver_statistics": SolverStatisticsEst,
@@ -128,7 +128,7 @@ except Exception:
 foldername.mkdir(parents=True)
 
 tracer = VizTracer(
-    min_duration=1e3,  # μs
+    min_duration=1e2,  # μs
     ignore_c_function=True,
     ignore_frozen=True,
 )
