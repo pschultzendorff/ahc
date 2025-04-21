@@ -22,6 +22,7 @@ import numpy as np
 import porepy as pp
 import requests
 from porepy.viz.exporter import DataInput
+
 from tpf.derived_models.fluid_values import oil as _oil
 from tpf.derived_models.fluid_values import water as _water
 from tpf.derived_models.utils import center_cell_id, corner_faces_id
@@ -201,16 +202,13 @@ class EquationsSPE10(TPFProtocol):
             array: np.ndarray = super().phase_fluid_source(g, phase)
             array[center_cell_id(g)] = phase.convert_units(
                 INJECTION_RATE, "m^3"
-            ) / phase.convert_units(
-                pp.DAY, "s"
-            )  # 87.5 m^3/day in [m^3/s]
+            ) / phase.convert_units(pp.DAY, "s")  # 87.5 m^3/day in [m^3/s]
             return array
         elif phase.name == self.nonwetting.name:
             return super().phase_fluid_source(g, phase)
 
 
 class ModifiedBoundarySPE10(TPFProtocol):
-
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann).
 
@@ -350,6 +348,14 @@ class SolutionStrategySPE10(TPFProtocol):
         if hasattr(self, "iteration_exporter"):
             self.iteration_exporter.add_constant_data(data)
 
+        # # Additionally, add them to the list of variables to make plotting easier.
+        # pp.set_solution_values(
+        #     "permeability_kxx",
+        #     data[-2],
+        #     data=self.mdg.subdomains(return_data=True)[0][1],
+        # )
+        # pp.set_solution_values("porosity", self.g, self._permeability[1])
+
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
@@ -384,7 +390,6 @@ class SolutionStrategySPE10(TPFProtocol):
 
 
 class ModelGeometrySPE10(TPFProtocol):
-
     def set_domain(self) -> None:
         r"""Single layer of the SPE10 problem 2 model. Extend of the full domain is
         :math:`\qty{1200 x 2200 x 170}{\feet}`. A single layer is
@@ -469,4 +474,6 @@ class ModelGeometrySPE10(TPFProtocol):
 # ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
 # practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
 # the error.
-class SPE10Mixin(EquationsSPE10, ModifiedBoundarySPE10, SolutionStrategySPE10, ModelGeometrySPE10): ...  # type: ignore
+class SPE10Mixin(
+    EquationsSPE10, ModifiedBoundarySPE10, SolutionStrategySPE10, ModelGeometrySPE10
+): ...  # type: ignore

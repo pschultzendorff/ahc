@@ -6,6 +6,7 @@ from typing import Literal, TypeGuard
 
 import numpy as np
 import porepy as pp
+
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.ad.functions import minimum
@@ -37,7 +38,7 @@ class RelPermConstants:
     n_b: float = 1
     """Model parameter for the Brooks-Corey-Burdine and Brooks-Corey-Mualem models."""
     eta: float = 1
-    """Model parameter for the Brooks-Corey-Mualem models."""
+    """Model parameter for the Brooks-Corey-Mualem model."""
     power: int = 2
     """Model parameter for the Corey and linear models."""
     linear_param_w: float = 1.0
@@ -73,7 +74,7 @@ class RelPermConstants:
             self.n2 = 1.0 + 1.0 / self.n_b
             self.n3 = 2.0
             logger.info(
-                f"Brooks-Corey-Mualem model is used. Adjusting parameters to n1"
+                "Brooks-Corey-Mualem model is used. Adjusting parameters to n1"
                 + f" = {self.n1}, n2 = {self.n2}, n3 = {self.n3}."
             )
 
@@ -94,7 +95,6 @@ class RelPermConstants:
 
 
 class RelativePermeability(TPFProtocol):
-
     _rel_perm_constants: RelPermConstants
 
     def set_rel_perm_constants(self) -> None:
@@ -206,7 +206,8 @@ class RelativePermeability(TPFProtocol):
                 phase, rel_perm_constants=rel_perm_constants
             )
 
-        elif rel_perm_constants.model == "Brooks-Corey":
+        # Both Brooks-Corey models are handled by the same equation.
+        elif rel_perm_constants.model.startswith("Brooks-Corey"):
             if phase.name == self.wetting.name:
                 rel_perm = s_phase ** pp.ad.Scalar(
                     rel_perm_constants.n1
@@ -321,7 +322,8 @@ class RelativePermeability(TPFProtocol):
         elif rel_perm_constants.model == "linear":
             rel_perm = s_phase * linear_param
 
-        elif rel_perm_constants.model == "Brooks-Corey":
+        # Both Brooks-Corey models are handled by the same equation.
+        elif rel_perm_constants.model.startswith("Brooks-Corey"):
             if phase.name == self.wetting.name:
                 rel_perm = s_phase ** (
                     rel_perm_constants.n1
@@ -409,7 +411,6 @@ class CapPressConstants:
 
 
 class CapillaryPressure(TPFProtocol):
-
     _cap_press_constants: CapPressConstants
 
     def set_cap_press_constants(self) -> None:
@@ -439,7 +440,7 @@ class CapillaryPressure(TPFProtocol):
 
         Linear model
         .. math::
-            p_c(\hat{s}_w) = c\hat{}_w
+            p_c(\hat{s}_w) = c p_e (1 - \hat{s}_w)
 
         van Genuchten model
         .. math::
@@ -477,18 +478,19 @@ class CapillaryPressure(TPFProtocol):
                 -1 / cap_press_constants.n_b
             )
         elif cap_press_constants.model == "linear":
+            entry_pressure = pp.ad.Scalar(
+                cap_press_constants.entry_pressure, name="entry pressure"
+            )
             linear_param = pp.ad.Scalar(
                 cap_press_constants.linear_param, name="linear param"
             )
-            p_c = linear_param * (pp.ad.Scalar(1) - s_normalized)
+            p_c = linear_param * entry_pressure * (pp.ad.Scalar(1) - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             p_c = (
                 (
-                    (
-                        (s_normalized ** pp.ad.Scalar(-1 / cap_press_constants.m_g))
-                        - pp.ad.Scalar(1)
-                    )
+                    (s_normalized ** pp.ad.Scalar(-1 / cap_press_constants.m_g))
+                    - pp.ad.Scalar(1)
                 )
                 ** pp.ad.Scalar(1 / cap_press_constants.n_g)
             ) / beta_g
@@ -532,19 +534,21 @@ class CapillaryPressure(TPFProtocol):
                 where=s_normalized != 0,
             )
         elif cap_press_constants.model == "linear":
-            p_c = cap_press_constants.linear_param * (1 - s_normalized)
+            p_c = (
+                cap_press_constants.linear_param
+                * cap_press_constants.entry_pressure
+                * (1 - s_normalized)
+            )
         elif cap_press_constants.model == "van Genuchten":
             p_c = (
                 (
-                    (
-                        np.power(
-                            s_normalized,
-                            -1 / cap_press_constants.m_g,
-                            out=np.zeros_like(s_normalized),
-                            where=s_normalized != 0,
-                        )
-                        - 1
+                    np.power(
+                        s_normalized,
+                        -1 / cap_press_constants.m_g,
+                        out=np.zeros_like(s_normalized),
+                        where=s_normalized != 0,
                     )
+                    - 1
                 )
                 ** (1 / cap_press_constants.n_g)
             ) / cap_press_constants.beta_g

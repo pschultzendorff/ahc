@@ -104,6 +104,8 @@ else:
 
         _nl_appleyard_chopping: bool
         """Whether to use the Appleyard chopping strategy for the nonlinear solver."""
+        _nl_enforce_physical_saturation: bool
+        """Whether to enforce physical saturations in the nonlinear solver."""
 
         g: pp.Grid
         """Single subdomain."""

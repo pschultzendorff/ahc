@@ -2,4 +2,3 @@
 # deepdiff
 tqdm
 viztracer
-scikit-learn

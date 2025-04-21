@@ -45,6 +45,7 @@ from typing import Any, Literal
 import numpy as np
 import porepy as pp
 from porepy.viz.exporter import DataInput
+
 from tpf.models.constitutive_laws_tpf import CapillaryPressure, RelativePermeability
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
@@ -59,7 +60,6 @@ logger = logging.getLogger(__name__)
 
 
 class DarcyFluxes(TPFProtocol):
-
     def phase_mobility(
         self,
         g: pp.Grid,
@@ -133,11 +133,13 @@ class DarcyFluxes(TPFProtocol):
         return mobility
 
     def total_mobility(self, g: pp.Grid) -> pp.ad.Operator:
-        """We add a small epsilon to avoid division by zero when calculating the
+        """
+
+        We add a small epsilon to avoid division by zero when calculating the
         fractional flow at Neumann boundaries.
 
         Parameters:
-            g:
+            g: Grid object.
 
         Returns:
             Total mobility.
@@ -519,7 +521,6 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
 
 
 class VariablesTPF(TPFProtocol, pp.VariableMixin):
-
     def create_variables(self) -> None:
         """Create primary variables (wetting pressure, nonwetting pressure,
         saturation)."""
@@ -825,7 +826,9 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
 
     # Ignore Pylance complaining. Function will always return a value.
     @typing.final
-    def bc_dirichlet_saturation_values(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:  # type: ignore
+    def bc_dirichlet_saturation_values(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> np.ndarray:  # type: ignore
         """Phase dependent saturation bc values on Dirichlet boundaries; nulled on
         Neumann boundaries.
 
@@ -897,7 +900,6 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
 # and cause a MyPy error. This is not a problem in practice, but
 # ``nonlinear_solver_statistics`` needs to be called with care. We ignore the error.
 class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
-
     @typing.override
     def __init__(self, params: dict | None) -> None:
         super().__init__(params)
@@ -956,6 +958,19 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         If ``True``, chop local saturation changes per nonlinear iteration that are
         larger than :math:`0.2`.
+
+        """
+
+        self._nl_enforce_physical_saturation: bool = self.params.get(
+            "nl_enforce_physical_saturation", False
+        )
+        """Whether to enforce physical saturation bounds at each nonlinear iteration.
+
+        If ``True``, the saturation is limited to the range of residual saturations
+        :math:`[s_{w,res}, 1 - s_{n,res}]` at each nonlinear iteration.
+
+        Note: Narrows the interval by a small epsilon to avoid nonphysical saturations
+            due to floating point errors in the process of chopping.
 
         """
 
@@ -1235,15 +1250,38 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             nonlinear_increment: The new solution, as computed by the non-linear solver.
 
         """
-        if self._nl_appleyard_chopping and self.formulation == "fractional_flow":
-            # Store the non-chopped saturation.
+        # Store the non-chopped saturation.
+        if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
             self.non_chopped_nonlinear_increment: np.ndarray = (
                 nonlinear_increment.copy()
             )
+
+        if self._nl_appleyard_chopping and self.formulation == "fractional_flow":
             # Saturation comes first in the nonlinear increment.
             nonlinear_increment[: self.g.num_cells] = np.clip(
                 nonlinear_increment[: self.g.num_cells], -0.2, 0.2
             )
+
+        if (
+            self._nl_enforce_physical_saturation
+            and self.formulation == "fractional_flow"
+        ):
+            # Check where the saturation exceeds :math:`[s_{w,res},1-s_{n,res}]` and
+            # clip the update.
+            prev_saturation: np.ndarray = self.equation_system.get_variable_values(
+                [self.primary_saturation_var], iterate_index=0
+            )
+            new_saturation: np.ndarray = (
+                prev_saturation + nonlinear_increment[: self.g.num_cells]
+            )
+            # Add some epsilon to avoid nonphysical values due to floating point
+            # precision.
+            new_saturation = np.clip(
+                new_saturation,
+                self.wetting.residual_saturation + 1e-10,
+                1.0 - self.nonwetting.residual_saturation - 1e-10,
+            )
+            nonlinear_increment[: self.g.num_cells] = new_saturation - prev_saturation
 
         # Update primary variables.
         self.equation_system.shift_iterate_values(max_index=len(self.iterate_indices))
@@ -1355,7 +1393,6 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
 
 class DataSavingTPF(TPFProtocol, pp.DataSavingMixin):
-
     @typing.override
     def _evaluate_and_scale(
         self,

@@ -18,7 +18,7 @@ from tpf.models.error_estimate import (
     ErrorEstimateMixin,
     SolutionStrategyEst,
 )
-from tpf.models.flow_and_transport import SolutionStrategyTPF, TwoPhaseFlow
+from tpf.models.flow_and_transport import DarcyFluxes, SolutionStrategyTPF, TwoPhaseFlow
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import (
     EstimatesProtocol,
@@ -45,6 +45,71 @@ logger = logging.getLogger(__name__)
 # computation will result in an underflow error. These errors should NOT be raised.
 # Treating the local estimators as zero is fine.
 np.seterr(under="ignore")
+
+
+# ``HCProtocol`` and ``TPFProtocol`` define different types for
+# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
+# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
+# the error.
+class DarcyFluxesHC(HCProtocol, DarcyFluxes):
+    r"""Mobility is averaged when :math:`\beta=1` and upwinded when :math:`\beta=0`."""
+
+    def phase_mobility(
+        self,
+        g: pp.Grid,
+        phase: FluidPhase,
+    ) -> pp.ad.Operator:
+        r"""See :meth:`tpf.models.flow_and_transport.DarcyFluxes.phase_mobility` for
+        documentation of the upwinded case. Here, we add cell-averaging.
+
+        """
+        upwinded_mobility = super().phase_mobility(g, phase)
+
+        saturation_w = self.wetting.s
+        saturation_w_bc = pp.ad.DenseArray(
+            self.bc_dirichlet_saturation_values(g, self.wetting),
+            name=f"{self.wetting.name}_s_bc",
+        )
+        viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
+
+        # Take mobility in cells, map to faces and divide by 2 to obtain averaged
+        # mobility.
+        cells_to_faces: pp.ad.Operator = pp.ad.SparseArray(g.cell_faces)
+
+        # Create a mask hiding all internal faces.
+        boundary_faces_mask_np: np.ndarray = np.zeros(g.num_faces)
+        boundary_faces_mask_np[g.get_boundary_faces()] = 1.0
+        boundary_faces_mask: pp.ad.Operator = pp.ad.DenseArray(boundary_faces_mask_np)
+
+        # The bc rel. perms. are defined on all faces, we just mask the internal faces.
+        # The internal rel. perms. are defined on cells and mapped to faces.
+        averaged_mobility: pp.ad.Operator = (
+            cells_to_faces @ self.rel_perm(saturation_w, phase)
+            + boundary_faces_mask * self.rel_perm(saturation_w_bc, phase)
+        ) / (pp.ad.Scalar(2) * viscosity)
+
+        # Flux on Neumann faces is treated in :meth:`wetting_flux_from_fractional_flow`
+        # and :meth:`total_flux`. The mobility at these faces is set to zero to not
+        # introduce any inconsistencies.
+        dir_faces_mask_np: np.ndarray = np.zeros(g.num_faces)
+        dir_faces_mask_np[self.bc_type(g).is_dir] = 1.0
+        dir_faces_mask: pp.ad.Operator = pp.ad.DenseArray(dir_faces_mask_np)
+        averaged_mobility *= dir_faces_mask
+
+        # Add some epsilon to avoid zero mobility.
+        averaged_mobility += pp.ad.Scalar(1e-7)
+
+        hc_mobility: pp.ad.Operator = (
+            self.nonlinear_solver_statistics.hc_lambda_ad * averaged_mobility
+            + (pp.ad.Scalar(1) - self.nonlinear_solver_statistics.hc_lambda_ad)
+            * upwinded_mobility
+        )
+        hc_mobility.set_name(f"{phase.name} hc mobility")
+
+        return (
+            self.hc_toggle_ad * hc_mobility
+            + (pp.ad.Scalar(1) - self.hc_toggle_ad) * upwinded_mobility
+        )
 
 
 # ``HCProtocol`` and ``TPFProtocol`` define different types for
@@ -132,7 +197,7 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
 # the error.
 class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
     @typing.override
-    def set_rel_perm_constants(self) -> None:
+    def set_cap_press_constants(self) -> None:
         cap_press_constants: dict[str, dict] = self.params.get(
             "cap_press_constants", {}
         )
@@ -186,6 +251,16 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
             + (1 - self.nonlinear_solver_statistics.hc_lambda_fl) * cap_press_2
         )
         return self.hc_toggle_fl * hc_cap_press + (1 - self.hc_toggle_fl) * cap_press_2
+
+    @typing.override
+    def cap_press_deriv_np(
+        self,
+        saturation_w: np.ndarray,
+        cap_press_constants: CapPressConstants | None = None,
+    ) -> np.ndarray:
+        return super().cap_press_deriv_np(
+            saturation_w, cap_press_constants=self._cap_press_constants_2
+        )
 
 
 # The various protocols define different types for
@@ -682,13 +757,13 @@ class SolutionStrategyAHC(
         # Set time step values for reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["postprocessed_coeffs", "reconstructed_coeffs", "NC_estimator"],
+            ["", "_postprocessed_coeffs", "_reconstructed_coeffs", "_NC_estimator"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{specifier}", self.g_data, hc_index=0
+                f"{pressure_key}{specifier}", self.g_data, hc_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{specifier}",
+                f"{pressure_key}{specifier}",
                 pressure_values,
                 self.g_data,
                 time_step_index=0,
@@ -1099,13 +1174,13 @@ class SolutionStrategyAHC(
         # Reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
-            ["postprocessed_coeffs", "reconstructed_coeffs", "NC_estimator"],
+            ["", "_postprocessed_coeffs", "_reconstructed_coeffs", "_NC_estimator"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_{specifier}", self.g_data, iterate_index=0
+                f"{pressure_key}{specifier}", self.g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}_{specifier}", pressure_values, self.g_data, hc_index=0
+                f"{pressure_key}{specifier}", pressure_values, self.g_data, hc_index=0
             )
         for flux_name, specifier in itertools.product(
             ["total", "wetting_from_ff"],
@@ -1189,8 +1264,11 @@ class DataSavingHC(DataSavingEst):
 
 
 class TwoPhaseFlowAHC(
+    # HC constitutive laws mixins:
     RelativePermeabilityHC,
-    # CapillaryPressureHC,
+    CapillaryPressureHC,
+    DarcyFluxesHC,
+    # Adaptive HC mixins:
     EstimatesHCMixin,
     SolutionStrategyAHC,
     DataSavingHC,
