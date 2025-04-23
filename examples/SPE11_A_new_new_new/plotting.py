@@ -3,13 +3,13 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any
 
-import matplotlib.colors as colors
 import matplotlib.pyplot as plt
 import numpy as np
+import seaborn as sns
 from ahc import SimulationConfig, generate_configs
-from matplotlib.ticker import ScalarFormatter
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent
+sns.set_theme()
 
 
 # region UTILS
@@ -92,92 +92,83 @@ def plot_nl_iterations(
     varying_param_name: str,
     title: str | None = None,
 ):
-    """Create a heatmap showing nonlinear iterations for different solvers and parameter
-    values.
+    """Create a heatmap showing nonlinear iterations for different solvers and parameter values.
 
     Args:
         data: Dictionary mapping simulation configurations to simulation statistics.
-        varying_param: Name of the parameter that varies between the configurations.
-
+        varying_param_name: Name of the parameter that varies between the configurations.
+        title: Optional title for the plot.
     """
-    # Get unique solvers and parameter values.
-    cases: list[str] = list(data.keys())
-    solvers = list(set("_".join(case.split("_")[:2]) for case in cases))
-    x_ticks = list(set("_".join(case.split("_")[2:]) for case in cases))
-    solvers.sort()
-    x_ticks.sort()
+    # Extract solvers and parameter values from case names
+    cases = list(data.keys())
+    solvers = sorted(set("\n".join(case.split("_")[:2]) for case in cases))
+    x_ticks = sorted(
+        set(" ".join(case.split("_")[2:]) for case in cases),
+        key=lambda x: (x.isdigit(), x),
+    )
 
-    # Create a matrix for the heatmap.
-    matrix = np.empty((len(solvers), len(x_ticks)))
+    # Transform data to two arrays for iterations and annotations.
+    iterations = np.empty((len(solvers), len(x_ticks)))
+    annotations = np.empty((len(solvers), len(x_ticks)), dtype="<U25")
 
-    # Fill the matrix with iteration counts.
-    for case, statistic in data.items():
-        solver_name, adaptive_error_ratio_str, *varying_param = case.split("_")
-        varying_param = "_".join(varying_param)
+    for case, stat in data.items():
+        solver_name, adaptive_error_ratio_str, varying_param = case.split("_")
+
         adaptive_error_ratio = float(adaptive_error_ratio_str)
 
-        i = solvers.index(f"{solver_name}_{adaptive_error_ratio}")
+        i = solvers.index(f"{solver_name}\n{adaptive_error_ratio}")
         j = x_ticks.index(varying_param)
-        if solver_name.startswith("AHC"):
-            tot_nl_iters = sum(flatten(statistic.timestep_nl_iters))
-        elif solver_name.startswith("Newton"):
-            tot_nl_iters = sum(statistic.timestep_nl_iters)
-        matrix[i, j] = tot_nl_iters
 
-    # Create the figure and axis
-    fig, ax = plt.subplots(figsize=(10, 5))
+        tot_nl_iters = (
+            sum(flatten(stat.timestep_nl_iters))
+            if solver_name.startswith("AHC")
+            else sum(stat.timestep_nl_iters)
+        )
 
-    # Define a colormap
-    cmap = plt.cm.YlOrRd  # type: ignore
-    norm = colors.Normalize(vmin=np.nanmin(matrix), vmax=np.nanmax(matrix))  # type: ignore
+        iterations[i, j] = tot_nl_iters
+        annotations[i, j] = f"{tot_nl_iters}\n({len(stat.time_steps)})"
 
-    # Create custom colormap with white for zeros.
-    masked_matrix = np.ma.masked_where(matrix == 0, matrix)
-    im = ax.imshow(masked_matrix, cmap=cmap, norm=norm, aspect="auto")
+    mask = iterations == 0
 
-    # Add colorbar
-    cbar = plt.colorbar(im, ax=ax)
-    cbar.set_label("Number of nonlinear iterations")
+    # Create heatmap figure
+    fig, ax = plt.subplots(figsize=(8, 4))
 
-    # Configure axes
-    ax.set_xticks(np.arange(len(x_ticks)))
-    ax.set_yticks(np.arange(len(solvers)))
-    ax.set_xticklabels(x_ticks)
-    ax.set_yticklabels(solvers)
+    sns.heatmap(
+        iterations,
+        mask=mask,
+        annot=annotations,
+        fmt="s",
+        cmap="Blues",
+        cbar=True,
+        cbar_kws={"label": "Number of nonlinear iterations"},
+        xticklabels=x_ticks,
+        yticklabels=solvers,
+        linewidths=0.8,
+        ax=ax,
+    )
 
-    # Add grid
-    ax.set_xticks(np.arange(-0.5, len(x_ticks), 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, len(solvers), 1), minor=True)
-    ax.grid(which="minor", color="black", linestyle="-", linewidth=1)
-
-    # Add parameter value inside each cell
-    for i in range(len(solvers)):
-        for j in range(len(x_ticks)):
-            if matrix[i, j] != 0:
-                text = str(int(matrix[i, j]))
-            else:
-                text = "Diverged"
-            if not np.isnan(matrix[i, j]):
+    # Annotate failed simulations
+    for i in range(mask.shape[0]):
+        for j in range(mask.shape[1]):
+            if mask[i, j]:
                 ax.text(
-                    j,
-                    i,
-                    text,
+                    j + 0.5,
+                    i + 0.5,
+                    r"Reached min. $\Delta t$",
                     ha="center",
                     va="center",
+                    fontsize=10,
                     color="black",
                 )
 
-    # Format x-axis if the parameter values are float numbers
-    if isinstance(x_ticks[0], float):
-        ax.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
-        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
-
-    # Add labels and title
-    ax.set_xlabel(varying_param_name)
-    ax.set_ylabel("Solver")
-    if title is None:
-        title = f"Nonlinear iterations by solver and {varying_param_name}"
-    ax.set_title(title)
+    # Set labels and title
+    ax.set_xlabel(varying_param_name, fontsize=12, fontweight="bold")
+    ax.set_ylabel("Solver & adaptive error ratio", fontsize=12, fontweight="bold")
+    ax.set_title(
+        title or f"#NL iterations (#time steps) by solver and {varying_param_name}",
+        fontsize=14,
+        fontweight="bold",
+    )
 
     fig.tight_layout()
     return fig
@@ -186,6 +177,7 @@ def plot_nl_iterations(
 def plot_estimators(
     statistics: SimulationStatistics,
     title: str | None = None,
+    combine_disc_est: bool = False,
 ) -> plt.Figure:
     """Create a plot showing the evolution of different error estimators over time.
 
@@ -196,10 +188,10 @@ def plot_estimators(
     # Check if HC estimator is present.
     uses_hc: bool = len(statistics.hc_estimator) > 0
 
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(8, 6))
 
     tot_nl_iterations: int = 0
-    ts_nl_iterations: int = 0
+    tot_nl_iterations_fine: int = 0
     # Plot spatial estimator
     for i, (time, spat_est, temp_est, lin_est) in enumerate(
         zip(
@@ -210,62 +202,81 @@ def plot_estimators(
         )
     ):
         if uses_hc:
-            # Plot for each HC iteration.
-            hc_est = statistics.hc_estimator[i]
-            for hc_est_i, lin_est_i in zip(hc_est, lin_est):
+            # Plot NL est for each HC iteration.
+            for lin_est_i in lin_est:
                 ax.plot(
-                    range(ts_nl_iterations, ts_nl_iterations + len(hc_est_i)),
-                    hc_est_i,
-                    "g^-",
-                    markersize=4,
-                    fillstyle="none",
-                    label=r"$\eta_{hc}$" if i == 0 else "",
-                )
-                ax.plot(
-                    range(ts_nl_iterations, ts_nl_iterations + len(lin_est_i)),
+                    range(
+                        tot_nl_iterations_fine, tot_nl_iterations_fine + len(lin_est_i)
+                    ),
                     lin_est_i,
                     "mo-",
                     markersize=4,
                     fillstyle="none",
+                    markerfacecolor="none",
                     label=r"$\eta_{lin}$" if i == 0 else "",
                 )
-                ts_nl_iterations += len(lin_est)
+                tot_nl_iterations_fine += len(lin_est_i)
 
+            hc_est_flat = flatten(statistics.hc_estimator[i])
             spat_est_flat = flatten(spat_est)
             temp_est_flat = flatten(temp_est)
 
         else:
             ax.plot(
-                range(ts_nl_iterations, ts_nl_iterations + len(lin_est)),
+                range(tot_nl_iterations, tot_nl_iterations + len(lin_est)),
                 lin_est,
                 "mo-",
                 markersize=4,
                 fillstyle="none",
+                markerfacecolor="none",
                 label=r"$\eta_{lin}$" if i == 0 else "",
             )
-
-            ts_nl_iterations += len(lin_est)
 
             spat_est_flat = spat_est
             temp_est_flat = temp_est
 
+        if uses_hc:
+            ax.plot(
+                range(tot_nl_iterations, tot_nl_iterations + len(hc_est_flat)),
+                hc_est_flat,
+                "g^-",
+                markersize=4,
+                fillstyle="none",
+                markerfacecolor="green",
+                label=r"$\eta_{hc}$" if i == 0 else "",
+            )
+
         # Plot spatial and temporal estimators for the full time step.
-        ax.plot(
-            range(tot_nl_iterations, tot_nl_iterations + len(spat_est_flat)),
-            spat_est_flat,
-            "bo-",
-            markersize=4,
-            fillstyle="none",
-            label=r"$\eta_{sp}$" if i == 0 else "",
-        )
-        ax.plot(
-            range(tot_nl_iterations, tot_nl_iterations + len(spat_est_flat)),
-            temp_est_flat,
-            "rv-",
-            markersize=4,
-            fillstyle="none",
-            label=r"$\eta_{temp}$" if i == 0 else "",
-        )
+        if combine_disc_est:
+            # Combine spatial and temporal estimators.
+            disc_est_flat = np.array(spat_est_flat) + np.array(temp_est_flat)
+            ax.plot(
+                range(tot_nl_iterations, tot_nl_iterations + len(disc_est_flat)),
+                disc_est_flat,
+                "bo-",
+                markersize=4,
+                fillstyle="none",
+                markerfacecolor="blue",
+                label=r"$\eta_{disc}$" if i == 0 else "",
+            )
+        else:
+            ax.plot(
+                range(tot_nl_iterations, tot_nl_iterations + len(spat_est_flat)),
+                spat_est_flat,
+                "bo-",
+                markersize=4,
+                fillstyle="none",
+                markerfacecolor="blue",
+                label=r"$\eta_{sp}$" if i == 0 else "",
+            )
+            ax.plot(
+                range(tot_nl_iterations, tot_nl_iterations + len(temp_est_flat)),
+                temp_est_flat,
+                "rv-",
+                markersize=4,
+                fillstyle="none",
+                label=r"$\eta_{temp}$" if i == 0 else "",
+            )
 
         # Update number of nl iterations.
         tot_nl_iterations += len(spat_est_flat)
@@ -274,16 +285,37 @@ def plot_estimators(
     ax.set_yscale("log")
 
     # Add labels and title
-    ax.set_xlabel("Nonlinear iteration")
-    ax.set_ylabel("Error estimate (log scale)")
+    ax.tick_params(axis="both", labelsize=12)
+    ax.set_xlabel(
+        "Nonlinear iteration",
+        fontsize=14,
+        fontweight="bold",
+    )
+    ax.set_ylabel(
+        "Error estimate (log scale)",
+        fontsize=14,
+        fontweight="bold",
+    )
     if title is None:
         title = "Error Estimators Evolution"
-    ax.set_title(title)
+    ax.set_title(
+        title,
+        fontsize=16,
+        fontweight="bold",
+    )
+
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
     # Add legend
     handles, labels = ax.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), loc="best")
+    ax.legend(
+        by_label.values(),
+        by_label.keys(),
+        loc="best",
+        ncol=2,
+        prop={"size": 14, "weight": "bold"},
+    )
 
     fig.tight_layout()
     return fig
@@ -293,16 +325,16 @@ def plot_estimators(
 
 if __name__ == "__main__":
     configs = generate_configs()
-    configs_varying_rp_init_s_08 = configs[::10] + configs[1::10] + configs[2::10]
-    configs_varying_rp_init_s_09 = configs[3::10] + configs[4::10] + configs[5::10]
-    configs_varying_ref_init_s08 = configs[::10] + configs[6::10] + configs[7::10]
-    configs_varying_ref_init_s09 = configs[3::10] + configs[8::10] + configs[9::10]
+    configs_varying_rp_init_s_08 = configs[:12]
+    configs_varying_rp_init_s_09 = configs[12:24]
+    configs_varying_ref_init_s_08 = configs[24:36]
+    configs_varying_ref_init_s_09 = configs[:4] + configs[36:]
     data = {}
     for config in configs_varying_rp_init_s_08:
-        if config.rp_model_2["model"] == "Brooks-Corey":
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        if config.rp_model_2["model"] == "Corey":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
         else:
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}_{config.rp_model_2['power']}"
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
         try:
             statistics = read_data(config)
         except ValueError:
@@ -310,15 +342,14 @@ if __name__ == "__main__":
         data[key] = statistics
     fig1 = plot_nl_iterations(
         data,
-        "Rel. perm. model",
-        title=r"NL iterations by solver and rel. perm. model. $s_{init} = 0.8$",
+        "rel. perm. model",
     )
     data = {}
     for config in configs_varying_rp_init_s_09:
-        if config.rp_model_2["model"] == "Brooks-Corey":
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        if config.rp_model_2["model"] == "Corey":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
         else:
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}_{config.rp_model_2['power']}"
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
         try:
             statistics = read_data(config)
         except ValueError:
@@ -326,11 +357,10 @@ if __name__ == "__main__":
         data[key] = statistics
     fig2 = plot_nl_iterations(
         data,
-        "Rel. perm. model",
-        title=r"NL iterations by solver and rel. perm. model. $s_{init} = 0.9$",
+        "rel. perm. model",
     )
     data = {}
-    for config in configs_varying_ref_init_s08:
+    for config in configs_varying_ref_init_s_08:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
         try:
             statistics = read_data(config)
@@ -339,11 +369,10 @@ if __name__ == "__main__":
         data[key] = statistics
     fig3 = plot_nl_iterations(
         data,
-        "grid refinement",
-        title=r"NL iterations by solver and grid refinement. Brooks-Corey rel. perm., $s_{init} = 0.8$",
+        "refinement factor",
     )
     data = {}
-    for config in configs_varying_ref_init_s09:
+    for config in configs_varying_ref_init_s_09:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
         try:
             statistics = read_data(config)
@@ -352,15 +381,16 @@ if __name__ == "__main__":
         data[key] = statistics
     fig4 = plot_nl_iterations(
         data,
-        "grid refinement",
-        title=r"NL iterations by solver and grid refinement. Brooks-Corey rel. perm., $s_{init} = 0.9$",
+        "refinement factor",
     )
 
     fig1.savefig(dirname / "nl_iters_rp_model_s_init_08.png")
     fig2.savefig(dirname / "nl_iters_rp_model_s_init_09.png")
-    fig3.savefig(dirname / "nl_iters_ref_s_init_08.png")
-    fig4.savefig(dirname / "nl_iters_ref_s_init_09.png")
+    fig3.savefig(dirname / "nl_iters_ref_fac_s_init_08.png")
+    fig4.savefig(dirname / "nl_iters_ref_fac_s_init_09.png")
     # fig4 = plot_estimators(data["NewtonAppleyard_0.1_0.2"])
     # fig4.savefig(dirname / "estimators_newton_appleyard.png")
-    # fig5 = plot_estimators(data["AHC_0.1_0.2"])
-    # fig5.savefig(dirname / "estimators_ahc.png")
+    # fig5 = plot_estimators(data["AHC_0.1_0.2"], combine_disc_est=True)
+    # fig5.savefig(dirname / "estimators_ahc_0.1.png")
+    # fig5 = plot_estimators(data["AHC_0.005_0.2"], combine_disc_est=True)
+    # fig5.savefig(dirname / "estimators_ahc_0.005.png")

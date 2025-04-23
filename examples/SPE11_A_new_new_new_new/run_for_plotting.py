@@ -1,39 +1,32 @@
-r"""Run the simulation with small uniform time steps for fancy plotting.
+r"""Study convergence of solvers on different grid sizes and with different rel.
+ perm./cap. pressure models.
+
+The following solvers are employed:
+- Adaptive homotopy continuation (AHC) with Newton
+- Newton
+- Newton with Appleyard chopping
 
 
-We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
-continuation. The considered model is similar to the heterogeneous 3D models in the
-article (section 4.6.4), but on a 2D domain for now.
-
-X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport in
-   heterogeneous porous media,” Journal of Computational Physics, vol. 253, pp.
-   114–137, Nov. 2013, doi: 10.1016/j.jcp.2013.06.041.
 
 Model description:
-- 600x1100 ft domain (we just take a quarter of the original SPE10 domain)
-- Constant water injection in the center: 87.5 m^3/day
-- Oil production at the four corners: 4000 psi bhp
-    - This is simulated by prescribing the bottom hole pressure and saturation (residual
-      oil saturation) in the corner cells. We do NOT use a well model.
+- Constant CO2 injection in the center.
+- No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
 - Simulation time: 10 days
 - Solid properties:
-    - Porosity: Uppermost layer of the SPE10, case 2A.
-    - Permeability: Uppermost layer of the SPE10, case 2A.
+    - Porosity: SPE11, case A.
+    - Permeability: SPE11, case A.
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.2.
-    - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
-      Residual saturation is 0.2.
+    - Water: pp.fluid_values.water. Residual saturation is 0.1.
+    - CO2: From the NIST database, taken at 20°C and atmospheric pressure. Residual
+      saturation is 0.1.
 - Initial values:
-    - Pressure: 6000 psi
-    - Saturation: Varying between 0.2 and 0.3.
+    - Pressure: Atmospheric pressure.
+    - Saturation: Varying between 0.8 and 0.9.
 - Rel. perm. models:
     - linear
-    - Corey with power .
-    - Corey with power 3
     - Brooks-Corey
 - Capillary pressure model:
     - None
-    - Brooks-Corey
 
 """
 
@@ -47,8 +40,9 @@ from typing import Any
 
 import numpy as np
 import porepy as pp
-from tpf.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
+from tpf.derived_models.spe11 import INITIAL_PRESSURE, SPE11Mixin
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
+from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.utils.constants_and_typing import FEET
 from tpf.viz.solver_statistics import SolverStatisticsANewton
@@ -87,7 +81,7 @@ class InitialConditionsMixin(TPFProtocol):
         """Set initial values for pressure and saturation."""
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
         initial_saturation = np.full(
-            self.g.num_cells, self.params["spe10_initial_saturation"]
+            self.g.num_cells, self.params["spe11_initial_saturation"]
         )
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),
@@ -104,10 +98,23 @@ class InitialConditionsMixin(TPFProtocol):
             iterate_index=0,
         )
 
+    def _bc_dirichlet_saturation_values(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> np.ndarray:
+        if phase.name == self.wetting.name:
+            s_bc: np.ndarray = np.full(
+                g.num_faces, self.params["spe11_initial_saturation"]
+            )
+        elif phase.name == self.nonwetting.name:
+            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
+                g, self.wetting
+            )
+        return s_bc
 
-class SPE10Newton(
+
+class SPE11Newton(
     InitialConditionsMixin,
-    SPE10Mixin,
+    SPE11Mixin,
     TwoPhaseFlowANewton,
 ):  # type: ignore
     ...
@@ -116,8 +123,6 @@ class SPE10Newton(
 # endregion
 
 # region UTILS
-spe10_layer: int = 80
-
 default_params: dict[str, Any] = {
     "progressbars": True,
     # Model:
@@ -126,9 +131,8 @@ default_params: dict[str, Any] = {
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
-    "spe10_quarter_domain": True,
-    "spe10_layer": spe10_layer,
-    "spe10_isotropic_perm": True,
+    # Nonlinear solver:
+    "nl_enforce_physical_saturation": True,
 }
 
 time_manager_params: dict[str, Any] = {
@@ -146,7 +150,7 @@ class SimulationConfig:
     file_name: str
     solver_name: str
     adaptive_error_ratio: float
-    cell_size: float
+    refinement_factor: float
     init_s: float
     rp_model_1: dict[str, Any]
     rp_model_2: dict[str, Any]
@@ -154,7 +158,7 @@ class SimulationConfig:
     cp_model_2: dict[str, Any]
 
 
-def setup_solver() -> tuple[type[SPE10Newton], dict[str, Any]]:
+def setup_solver() -> tuple[type[SPE11Newton], dict[str, Any]]:
     """Return a tuple of solver-specific parameters and model class based on the solver
     name.
 
@@ -175,13 +179,13 @@ def setup_solver() -> tuple[type[SPE10Newton], dict[str, Any]]:
         "nonlinear_solver": pp.NewtonSolver,
         "nl_adaptive": True,
         "nl_error_ratio": 0.1,
-        "nl_adaptive_convergence_tol": 1e3,
+        "nl_adaptive_convergence_tol": 1e-2,
         "nl_convergence_tol": 1e-5,
         "nl_divergence_tol": 1e30,
         "nl_appleyard_chopping": True,
         "max_iterations": 50,
     }
-    model_class = SPE10Newton
+    model_class = SPE11Newton
     return model_class, solver_params
 
 
@@ -190,7 +194,7 @@ def run_simulation(config: SimulationConfig) -> None:
     logger.info(
         f"solver: {config.solver_name}, "
         f"adaptive error ratio: {config.adaptive_error_ratio:.2f}, "
-        f"cell size: {config.cell_size:.2f}, "
+        f"refinement factor: {config.refinement_factor:.2f}, "
         f"initial saturation: {config.init_s}, "
         f"RP model 1: {config.rp_model_1}, "
         f"RP model 2: {config.rp_model_2}, "
@@ -208,10 +212,10 @@ def run_simulation(config: SimulationConfig) -> None:
 
     params.update(
         {
-            "meshing_arguments": {"cell_size": config.cell_size},
+            "meshing_arguments": {"spe11_refinement_factor": config.refinement_factor},
             "rel_perm_constants": rel_perm_constants,
             "cap_press_constants": cap_press_constants,
-            "spe10_initial_saturation": config.init_s,
+            "spe11_initial_saturation": config.init_s,
         }
     )
 
@@ -263,8 +267,8 @@ if __name__ == "__main__":
         folder_name=dirname / "plotting",
         solver_name="NewtonAppleyard",
         adaptive_error_ratio=0.1,
-        cell_size=600 * FEET / 30,
-        init_s=0.3,
+        refinement_factor=5,
+        init_s=0.8,
         rp_model_1=rp_model,
         rp_model_2=rp_model,
         cp_model_1=cp_model,

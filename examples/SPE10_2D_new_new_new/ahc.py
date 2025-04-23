@@ -204,7 +204,7 @@ def setup_solver(
             "hc_max_iterations": 30,
             "hc_constant_decay": False,
             "hc_lambda_decay": 0.9,
-            "hc_decay_min_max": (0.1, 0.99),
+            "hc_decay_min_max": (0.1, 0.95),
             "nl_iter_optimal_range": (4, 7),
             "nl_iter_relax_factors": (0.7, 1.3),
             "hc_decay_recomp_max": 5,
@@ -212,7 +212,7 @@ def setup_solver(
             "hc_adaptive": True,
             "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
             "nl_error_ratio": 0.1,
-            "hc_nl_convergence_tol": 1e3,
+            "hc_nl_convergence_tol": 1e2,
             # Nonlinear solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -228,7 +228,7 @@ def setup_solver(
             # Adaptivity:
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e3,
+            "nl_adaptive_convergence_tol": 1e2,
             # Further parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -243,7 +243,7 @@ def setup_solver(
             "nonlinear_solver": pp.NewtonSolver,
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e3,
+            "nl_adaptive_convergence_tol": 1e2,
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,

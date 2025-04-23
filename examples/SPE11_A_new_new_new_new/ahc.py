@@ -1,5 +1,5 @@
-r"""Study convergence of solvers with different rel. perm./cap. pressure models and
- different initial saturations.
+r"""Study convergence of solvers on different grid sizes and with different rel.
+ perm./cap. pressure models.
 
 The following solvers are employed:
 - Adaptive homotopy continuation (AHC) with Newton
@@ -7,39 +7,26 @@ The following solvers are employed:
 - Newton with Appleyard chopping
 
 
-We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
-continuation. The considered model is similar to the heterogeneous 3D models in the
-article (section 4.6.4), but on a 2D domain for now.
-
-X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport in
-   heterogeneous porous media,” Journal of Computational Physics, vol. 253, pp.
-   114–137, Nov. 2013, doi: 10.1016/j.jcp.2013.06.041.
 
 Model description:
-- 600x1100 ft domain (we just take a quarter of the original SPE10 domain)
-- Constant water injection in the center: 87.5 m^3/day
-- Oil production at the four corners: 4000 psi bhp
-    - This is simulated by prescribing the bottom hole pressure and saturation (residual
-      oil saturation) in the corner cells. We do NOT use a well model.
+- Constant CO2 injection in the center.
+- No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
 - Simulation time: 10 days
 - Solid properties:
-    - Porosity: Uppermost layer of the SPE10, case 2A.
-    - Permeability: Uppermost layer of the SPE10, case 2A.
+    - Porosity: SPE11, case A.
+    - Permeability: SPE11, case A.
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.2.
-    - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
-      Residual saturation is 0.2.
+    - Water: pp.fluid_values.water. Residual saturation is 0.1.
+    - CO2: From the NIST database, taken at 20°C and atmospheric pressure. Residual
+      saturation is 0.1.
 - Initial values:
-    - Pressure: 6000 psi
-    - Saturation: Varying between 0.2 and 0.3.
+    - Pressure: Atmospheric pressure.
+    - Saturation: Varying between 0.8 and 0.9.
 - Rel. perm. models:
     - linear
-    - Corey with power .
-    - Corey with power 3
     - Brooks-Corey
 - Capillary pressure model:
     - None
-    - Brooks-Corey
 
 """
 
@@ -54,12 +41,12 @@ from typing import Any, Type
 
 import numpy as np
 import porepy as pp
-from tpf.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
+from tpf.derived_models.spe11 import INITIAL_PRESSURE, SPE11Mixin
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
 from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
+from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
-from tpf.utils.constants_and_typing import FEET
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 # region SETUP
@@ -96,7 +83,7 @@ class InitialConditionsMixin(TPFProtocol):
         """Set initial values for pressure and saturation."""
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
         initial_saturation = np.full(
-            self.g.num_cells, self.params["spe10_initial_saturation"]
+            self.g.num_cells, self.params["spe11_initial_saturation"]
         )
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),
@@ -113,18 +100,31 @@ class InitialConditionsMixin(TPFProtocol):
             iterate_index=0,
         )
 
+    def _bc_dirichlet_saturation_values(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> np.ndarray:
+        if phase.name == self.wetting.name:
+            s_bc: np.ndarray = np.full(
+                g.num_faces, self.params["spe11_initial_saturation"]
+            )
+        elif phase.name == self.nonwetting.name:
+            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
+                g, self.wetting
+            )
+        return s_bc
 
-class SPE10HC(
+
+class SPE11HC(
     InitialConditionsMixin,
-    SPE10Mixin,
+    SPE11Mixin,
     TwoPhaseFlowAHC,
 ):  # type: ignore
     ...
 
 
-class SPE10Newton(
+class SPE11Newton(
     InitialConditionsMixin,
-    SPE10Mixin,
+    SPE11Mixin,
     TwoPhaseFlowANewton,
 ):  # type: ignore
     ...
@@ -133,7 +133,6 @@ class SPE10Newton(
 # endregion
 
 # region UTILS
-spe10_layer: int = 80
 
 default_params: dict[str, Any] = {
     "progressbars": True,
@@ -143,24 +142,8 @@ default_params: dict[str, Any] = {
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
-    "spe10_quarter_domain": True,
-    "spe10_layer": spe10_layer,
-    "spe10_isotropic_perm": True,
-    # HC params:
-    "nonlinear_solver_statistics": SolverStatisticsHC,
-    "nonlinear_solver": HCSolver,
-    "hc_max_iterations": 20,
-    # HC decay parameters.
-    "hc_constant_decay": False,
-    "hc_lambda_decay": 0.9,
-    "hc_decay_min_max": (0.1, 0.95),
-    "nl_iter_optimal_range": (4, 7),
-    "nl_iter_relax_factors": (0.7, 1.3),
-    "hc_decay_recomp_max": 5,
-    # Nonlinear params:
-    "nl_convergence_tol": 1e-5,
-    "nl_divergence_tol": 1e30,
-    "max_iterations": 20,
+    # Nonlinear solver:
+    "nl_enforce_physical_saturation": True,
 }
 
 time_manager_params: dict[str, Any] = {
@@ -183,16 +166,17 @@ class SimulationConfig:
     file_name: str
     solver_name: str
     adaptive_error_ratio: float
-    cell_size: float
+    refinement_factor: float
     init_s: float
     rp_model_1: dict[str, Any]
     rp_model_2: dict[str, Any]
-    cp_model: dict[str, Any]
+    cp_model_1: dict[str, Any]
+    cp_model_2: dict[str, Any]
 
 
 def setup_solver(
     solver: str, adaptive_error_ratio: float
-) -> tuple[Type[SPE10HC] | Type[SPE10Newton], dict[str, Any]]:
+) -> tuple[Type[SPE11HC] | Type[SPE11Newton], dict[str, Any]]:
     """Return a tuple of solver-specific parameters and model class based on the solver
     name.
 
@@ -213,10 +197,10 @@ def setup_solver(
             # Homotopy Continuation (HC) parameters:
             "nonlinear_solver_statistics": SolverStatisticsHC,
             "nonlinear_solver": HCSolver,
-            "hc_max_iterations": 20,
+            "hc_max_iterations": 30,
             "hc_constant_decay": False,
             "hc_lambda_decay": 0.9,
-            "hc_decay_min_max": (0.1, 0.95),
+            "hc_decay_min_max": (0.1, 0.99),
             "nl_iter_optimal_range": (4, 7),
             "nl_iter_relax_factors": (0.7, 1.3),
             "hc_decay_recomp_max": 5,
@@ -224,14 +208,14 @@ def setup_solver(
             "hc_adaptive": True,
             "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
             "nl_error_ratio": 0.1,
-            "hc_nl_convergence_tol": 1e3,
+            "hc_nl_convergence_tol": 1e-2,
             # Nonlinear solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
-            "max_iterations": 20,
+            "max_iterations": 50,
             "nl_appleyard_chopping": False,
         }
-        model_class = SPE10HC
+        model_class = SPE11HC
     elif solver == "Newton":
         solver_params = {
             # Newton solver parameters:
@@ -240,14 +224,14 @@ def setup_solver(
             # Adaptivity:
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e3,
+            "nl_adaptive_convergence_tol": 1e-2,
             # Further parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": False,
-            "max_iterations": 20,
+            "max_iterations": 50,
         }
-        model_class = SPE10Newton
+        model_class = SPE11Newton
     elif solver == "NewtonAppleyard":
         solver_params = {
             # Newton solver params with Appleyard chopping:
@@ -255,13 +239,13 @@ def setup_solver(
             "nonlinear_solver": pp.NewtonSolver,
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e3,
+            "nl_adaptive_convergence_tol": 1e-2,
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,
             "max_iterations": 50,
         }
-        model_class = SPE10Newton
+        model_class = SPE11Newton
     else:
         raise ValueError(f"Unknown solver: {solver}")
     return model_class, solver_params
@@ -272,11 +256,12 @@ def run_simulation(config: SimulationConfig) -> None:
     logger.info(
         f"solver: {config.solver_name}, "
         f"adaptive error ratio: {config.adaptive_error_ratio:.2f}, "
-        f"cell size: {config.cell_size:.2f}, "
+        f"refinement factor: {config.refinement_factor:.2f}, "
         f"initial saturation: {config.init_s}, "
         f"RP model 1: {config.rp_model_1}, "
         f"RP model 2: {config.rp_model_2}, "
-        f"CP model: {config.cp_model}."
+        f"CP model 1: {config.cp_model_1}, "
+        f"CP model 2: {config.cp_model_2}."
     )
 
     model_class, solver_params = setup_solver(
@@ -287,20 +272,26 @@ def run_simulation(config: SimulationConfig) -> None:
     params = default_params.copy()
     params.update(solver_params)
 
-    # Newton and Appleyard Newton require a single rel. perm. model.
+    # Newton and Appleyard Newton require only one of each constitutive law.
     if config.solver_name.startswith("Newton"):
         rel_perm_constants = config.rp_model_2
+        cap_press_constants = config.cp_model_2
     else:
         rel_perm_constants = {
             "model_1": config.rp_model_1,
             "model_2": config.rp_model_2,
         }
+        cap_press_constants = {
+            "model_1": config.cp_model_1,
+            "model_2": config.cp_model_2,
+        }
+
     params.update(
         {
-            "meshing_arguments": {"cell_size": config.cell_size},
+            "meshing_arguments": {"spe11_refinement_factor": config.refinement_factor},
             "rel_perm_constants": rel_perm_constants,
-            "cap_press_constants": config.cp_model,
-            "spe10_initial_saturation": config.init_s,
+            "cap_press_constants": cap_press_constants,
+            "spe11_initial_saturation": config.init_s,
         }
     )
 
@@ -316,9 +307,9 @@ def run_simulation(config: SimulationConfig) -> None:
 
     try:
         shutil.rmtree(config.folder_name)
+        config.folder_name.mkdir(parents=True)
     except Exception:
         pass
-        config.folder_name.mkdir(parents=True)
 
     try:
         model = model_class(params)
@@ -333,87 +324,106 @@ def run_simulation(config: SimulationConfig) -> None:
 
 # region RUN
 solvers: list[str] = ["AHC", "Newton", "NewtonAppleyard"]
-adaptive_error_ratios: list[float] = [0.1, 0.01]
+adaptive_error_ratios: list[float] = [0.1, 0.005]
+refinement_factors: list[float] = [5, 1, 0.2]
 
 rp_models: dict[str, Any] = {
     "Brooks-Corey": {
-        "model": "Brooks-Corey",
-        "limit": True,
-        "n1": 2,
-        "n2": 2,
-        "n3": 1,
-    },
-    "Corey_power_2": {"model": "Corey", "limit": True, "power": 2},
-    "Corey_power_3": {"model": "Corey", "limit": True, "power": 3},
+        "model": "Brooks-Corey-Mualem",
+        "limit": False,
+        "n_b": 1.0,
+        "eta": 2.0,
+    },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
+    "Corey_power_2": {"model": "Corey", "limit": False, "power": 2},
+    "Corey_power_3": {"model": "Corey", "limit": False, "power": 3},
 }
+
 cp_models: dict[str, Any] = {
-    "None": {"model": None},
-    "Brooks-Corey": {"model": "Brooks-Corey", "n1": 2, "n2": 2, "n3": 1},
+    "None": {
+        "model": None,
+    },
+    "linear": {
+        "model": "linear",
+        "linear_param": 3.0,
+    },
+    "Brooks-Corey": {
+        "model": "Brooks-Corey",
+        "n_b": 2.0,
+    },
 }
 
 
 def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
     configs = []
-    for solver_name, adaptive_error_ratio in itertools.product(
-        solvers, adaptive_error_ratios
-    ):
-        # Newton at an adaptive error ratio of 0.01 causes problems and is skipped.
-        if solver_name == "Newton" and adaptive_error_ratio == 0.01:
-            continue
+    # Varying rel. perm. models at init_s = 0.8 and init_s = 0.9.
+    # for init_s in [0.8, 0.9]:
+    #     for rp_model_name, rp_model in rp_models.items():
+    #         for solver_name, adaptive_error_ratio in itertools.product(
+    #             solvers, adaptive_error_ratios
+    #         ):
+    #             if solver_name.startswith("Newton") and adaptive_error_ratio <= 0.005:
+    #                 continue
+    #             folder_name = (
+    #                 dirname
+    #                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
+    #                 / "varying_rp"
+    #                 / f"init_s_{init_s}"
+    #                 / rp_model_name
+    #             )
+    #             configs.append(
+    #                 SimulationConfig(
+    #                     file_name=rp_model_name,
+    #                     folder_name=folder_name,
+    #                     solver_name=solver_name,
+    #                     adaptive_error_ratio=adaptive_error_ratio,
+    #                     refinement_factor=20,
+    #                     init_s=init_s,
+    #                     rp_model_1={"model": "linear", "limit": False},
+    #                     rp_model_2=rp_model,
+    #                     cp_model_1=cp_models["linear"],
+    #                     cp_model_2=cp_models["Brooks-Corey"],
+    #                 )
+    #             )
 
-        # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3
-        for init_s in [0.2, 0.3]:
-            for rp_model_name, rp_model in rp_models.items():
+    # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
+    for init_s in [0.8, 0.9]:
+        for refinement_factor in refinement_factors[1:]:
+            # Highest resolution at init_s = 0.9 takes too long, mostly due to the fact
+            # that adaptive Newton only makes sense for small-sized updates to produce
+            # physical solutions. But setting ``hc_nl_convergence_tol`` low makes AHC
+            # require a lot of time steps.
+            if init_s == 0.9 and refinement_factor == 0.2:
+                continue
+
+            for solver_name, adaptive_error_ratio in itertools.product(
+                solvers, adaptive_error_ratios
+            ):
+                if solver_name.startswith("Newton") and adaptive_error_ratio <= 0.005:
+                    continue
+                file_name = f"ref_fac_{refinement_factor:.2f}"
                 folder_name = (
                     dirname
-                    / f"{solver_name}_{adaptive_error_ratio:.2f}"
-                    / "varying_rp"
+                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                    / "varying_refinement"
                     / f"init_s_{init_s}"
-                    / rp_model_name
+                    / file_name
                 )
                 configs.append(
                     SimulationConfig(
-                        file_name=rp_model_name,
+                        file_name=file_name,
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        cell_size=600 * FEET / 30,
+                        refinement_factor=refinement_factor,
                         init_s=init_s,
-                        rp_model_1={"model": "linear", "limit": True},
-                        rp_model_2=rp_model,
-                        cp_model={"model": None},
+                        rp_model_1={"model": "linear", "limit": False},
+                        rp_model_2=rp_models["Brooks-Corey"],
+                        cp_model_1=cp_models["linear"],
+                        cp_model_2=cp_models["Brooks-Corey"],
                     )
                 )
 
-        # Varying init_s for the Brooks-Corey model.
-        for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
-            file_name = f"init_s_{init_s:.2f}"
-            folder_name = (
-                dirname
-                / f"{solver_name}_{adaptive_error_ratio:.2f}"
-                / "varying_init_s"
-                / file_name
-            )
-            configs.append(
-                SimulationConfig(
-                    file_name=file_name,
-                    folder_name=folder_name,
-                    solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
-                    cell_size=600 * FEET / 30,
-                    init_s=init_s,
-                    rp_model_1={"model": "linear", "limit": False},
-                    rp_model_2={
-                        "model": "Brooks-Corey",
-                        "limit": False,
-                        "n1": 2,
-                        "n2": 2,
-                        "n3": 1,
-                    },
-                    cp_model={"model": None},
-                )
-            )
     return configs
 
 
