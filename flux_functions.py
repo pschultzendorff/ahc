@@ -414,7 +414,7 @@ def plot_F() -> None:
             fig, axes = plt.subplots(
                 len(rp_models),
                 len(cp_models),
-                figsize=(12, 8),
+                figsize=(15, 10),  # Increased figure size
                 subplot_kw={"projection": "3d"},
             )
 
@@ -440,10 +440,11 @@ def plot_F() -> None:
                     axes[j, k].set_xlabel("S_U")
                     axes[j, k].set_ylabel("S_D")
                     axes[j, k].set_zlabel("F(S_U, S_D)")
-                    axes[j, k].set_title(
-                        f"Pe = {pe}, RP Model = {rp_model}, CP Model = {cp_model},"
-                        + f" Upwinding = {upwinding}"
-                    )
+
+                    # Split title into two lines for better readability
+                    title_line1 = f"Pe = {pe}, RP Model = {rp_model}"
+                    title_line2 = f"CP Model = {cp_model}, Upwinding = {upwinding}"
+                    axes[j, k].set_title(f"{title_line1}\n{title_line2}")
 
                     # Turn to have the origin in the front.
                     axes[j, k].view_init(azim=-135)
@@ -452,12 +453,11 @@ def plot_F() -> None:
                     axes[j, k].set_zlim(0.0, 1.0)
                     axes[j, k].set_zlim(-0.2, 3.5)
 
-                # Add a color bar
-                # fig.colorbar(surf, ax=axes[j, 1], shrink=0.5, aspect=10)
-
+            # Add more padding between subplots
+            plt.tight_layout(pad=3.0)
             plt.show()
 
 
 if __name__ == "__main__":
-    # plot_f_w()
+    plot_f_w()
     plot_F()

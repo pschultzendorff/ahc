@@ -8,7 +8,8 @@ from typing import Any, Literal
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-from numba import njit, prange
+from numba import njit
+from numpy.typing import ArrayLike
 from porepy.viz.exporter import DataInput
 
 from tpf.models.flow_and_transport import (
@@ -81,6 +82,7 @@ class GlobalPressureMixin(TPFProtocol):
         self,
         s_w: np.ndarray,
         pressure_key: PRESSURE_KEY,
+        entry_pressure: ArrayLike = 1.0,
         p_n: np.ndarray | None = None,
         epsilon: float = 1e-6,
     ) -> np.ndarray:
@@ -90,7 +92,12 @@ class GlobalPressureMixin(TPFProtocol):
         Note: This is done via interpolation of the global pressure values depending on
         the saturation values.
 
+        Note: The interpolants are divided by the entry pressure. Thus, the entry
+        pressure has to be passed explicitly as an array.
+
         """
+        entry_pressure = np.asarray(entry_pressure)
+
         # Limit saturation from below to 0 and from above to 1 in case of negative or >1
         # saturation values during Newton.
         # FIXME Using epsilon here instead of at the normalized saturation is not the
@@ -108,12 +115,17 @@ class GlobalPressureMixin(TPFProtocol):
                 raise ValueError(
                     "Wetting pressure must be provided for global" + " pressure."
                 )
-            p_vals: np.ndarray = p_n - np.interp(
-                s_w, self.s_interpol_vals, self.global_pressure_interpol_vals
+            p_vals: np.ndarray = (
+                p_n
+                - np.interp(
+                    s_w, self.s_interpol_vals, self.global_pressure_interpol_vals
+                )
+                * entry_pressure
             )
         elif pressure_key == COMPLIMENTARY_PRESSURE:
-            p_vals = np.interp(
-                s_w, self.s_interpol_vals, self.compl_pressure_interpol_vals
+            p_vals = (
+                np.interp(s_w, self.s_interpol_vals, self.compl_pressure_interpol_vals)
+                * entry_pressure
             )
         return p_vals
 
@@ -143,7 +155,14 @@ class GlobalPressureMixin(TPFProtocol):
         s_w: np.ndarray = self.equation_system.get_variable_values(
             [self.wetting.s], iterate_index=0
         )
-        p_vals: np.ndarray = self.eval_glob_compl_pressure(s_w, pressure_key, p_n=p_n)
+        entry_pressure: float | np.ndarray = self.entry_pressure_np(self.g)
+
+        p_vals: np.ndarray = self.eval_glob_compl_pressure(
+            s_w,
+            pressure_key,
+            entry_pressure=entry_pressure,
+            p_n=p_n,
+        )
         pp.set_solution_values(
             name=pressure_key,
             values=p_vals,
@@ -166,9 +185,14 @@ class GlobalPressureMixin(TPFProtocol):
             this is only done once at the start of each simulation. During the
             simulation the global pressure is interpolated.
 
+            The integrant is divided by the entry pressure. This allows to easily
+            account for spatially heterogeneous entry pressures by multiplying the
+            interpolated values instead of having to store different interpolants for
+            each entry pressure value.
+
         Cellwise it holds:
         .. math::
-            result = \int_{s_0}^{s_1} \frac{\lambda_n}{\lambda_t} p'_c ds.
+            result = \int_{s_0}^{s_1} \frac{\lambda_n}{\lambda_t} \frac{p'_c}{p_e} ds.
 
         Parameters:
             s_0: ``shape=(num_elements,)`` Lower integral boundaries.
@@ -193,7 +217,11 @@ class GlobalPressureMixin(TPFProtocol):
                 self.rel_perm_np(s, self.nonwetting) / self.nonwetting.viscosity
             )
             t_mobility: np.ndarray = w_mobility + n_mobility
-            return w_mobility / t_mobility * self.cap_press_deriv_np(s)
+            return (
+                w_mobility
+                / t_mobility
+                * self.cap_press_deriv_np(s, divide_by_entry_pressure=True)
+            )
 
         integral: Integral = self.quadrature_1d.integrate(integrand, intervals)
         return integral.elementwise.squeeze()
@@ -205,12 +233,17 @@ class GlobalPressureMixin(TPFProtocol):
         functions.
 
         Note: The evaluation works by transforming ``p`` and ``s`` to
-        :class:`~porepy.ad.DenseArray`, calling
-        :meth:`CapillaryPressure.cap_press_deriv` and
-        :meth:`RelativePermeability.rel_perm` and then evaluating the resulting
-        :class:`~porepy.ad.Operator`. This is probably quite inefficient, however this
-        is only done once at the start of each simulation. During the simulation the
-        complimentary pressure is interpolated.
+            :class:`~porepy.ad.DenseArray`, calling
+            :meth:`CapillaryPressure.cap_press_deriv` and
+            :meth:`RelativePermeability.rel_perm` and then evaluating the resulting
+            :class:`~porepy.ad.Operator`. This is probably quite inefficient, however
+            this is only done once at the start of each simulation. During the
+            simulation the complimentary pressure is interpolated.
+
+            The integrant is divided by the entry pressure. This allows to easily
+            account for spatially heterogeneous entry pressures by multiplying the
+            interpolated values instead of having to store different interpolants for
+            each entry pressure value.
 
         Cellwise it holds:
         .. math::
@@ -239,7 +272,12 @@ class GlobalPressureMixin(TPFProtocol):
                 self.rel_perm_np(s, self.nonwetting) / self.nonwetting.viscosity
             )
             t_mobility: np.ndarray = w_mobility + n_mobility
-            return w_mobility * n_mobility / t_mobility * self.cap_press_deriv_np(s)
+            return (
+                w_mobility
+                * n_mobility
+                / t_mobility
+                * self.cap_press_deriv_np(s, divide_by_entry_pressure=True)
+            )
 
         integral: Integral = self.quadrature_1d.integrate(integrand, intervals)
         return -1 * integral.elementwise.squeeze()
@@ -934,13 +972,14 @@ class SolutionStrategyRec(  # type: ignore
 
         # When Newton is run with Appleyard chopping, the non-chopped nonlinear
         # increment has to be used to equilibrate the fluxes.
-        if self._nl_appleyard_chopping:
+        if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
             if hasattr(self, "non_chopped_nonlinear_increment"):
                 nonlinear_increment = self.non_chopped_nonlinear_increment
             else:
                 raise AttributeError(
                     "The non-chopped nonlinear increment vector has to be stored when"
-                    + " Newton is run with Appleyard chopping."
+                    + " Newton is run with Appleyard chopping or enforced physical"
+                    + " saturations."
                 )
 
         self.postprocess_solution(nonlinear_increment)
