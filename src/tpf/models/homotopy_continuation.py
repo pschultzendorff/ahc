@@ -209,7 +209,12 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
 
     # Ignore mypy complaining about incompatible signature with supertype.
     @typing.override
-    def cap_press(self, saturation_w: pp.ad.Operator) -> pp.ad.Operator:  # type: ignore[override]
+    def cap_press(
+        self,
+        saturation_w: pp.ad.Operator,
+        cap_press_constants: CapPressConstants | None = None,
+        **kwargs,
+    ) -> pp.ad.Operator:  # type: ignore[override]
         # Return homotopy continuation relative permeability.
         # Mypy gives an error here, because it thinks the empty ``HCProtocol.rel_perm``
         # is called. During runtime, ``HCProtocol`` does not have this method, hence we
@@ -218,10 +223,12 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
         cap_press_1: pp.ad.Operator = super().cap_press(  # type: ignore
             saturation_w,  # type: ignore
             cap_press_constants=self._cap_press_constants_1,  # type: ignore
+            **kwargs,
         )
         cap_press_2: pp.ad.Operator = super().cap_press(  # type: ignore
             saturation_w,  # type: ignore
             cap_press_constants=self._cap_press_constants_2,  # type: ignore
+            **kwargs,
         )
         hc_cap_press: pp.ad.Operator = (
             self.nonlinear_solver_statistics.hc_lambda_ad * cap_press_1
@@ -237,14 +244,18 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
     def cap_press_np(
         self,
         saturation_w: np.ndarray,
+        cap_press_constants: CapPressConstants | None = None,
+        **kwargs,
     ) -> np.ndarray:
         cap_press_1: np.ndarray = super().cap_press_np(  # type: ignore
             saturation_w,  # type: ignore
             cap_press_constants=self._cap_press_constants_1,  # type: ignore
+            **kwargs,
         )
         cap_press_2: np.ndarray = super().cap_press_np(  # type: ignore
             saturation_w,  # type: ignore
             cap_press_constants=self._cap_press_constants_2,  # type: ignore
+            **kwargs,
         )
         hc_cap_press: np.ndarray = (
             self.nonlinear_solver_statistics.hc_lambda_fl * cap_press_1
@@ -257,9 +268,10 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
         self,
         saturation_w: np.ndarray,
         cap_press_constants: CapPressConstants | None = None,
+        **kwargs: Any,
     ) -> np.ndarray:
         return super().cap_press_deriv_np(
-            saturation_w, cap_press_constants=self._cap_press_constants_2
+            saturation_w, cap_press_constants=self._cap_press_constants_2, **kwargs
         )
 
 
@@ -1267,7 +1279,7 @@ class TwoPhaseFlowAHC(
     # HC constitutive laws mixins:
     RelativePermeabilityHC,
     CapillaryPressureHC,
-    DarcyFluxesHC,
+    # DarcyFluxesHC,
     # Adaptive HC mixins:
     EstimatesHCMixin,
     SolutionStrategyAHC,

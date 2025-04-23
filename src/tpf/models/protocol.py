@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from numpy.typing import ArrayLike
+
 from tpf.numerics.quadrature import TriangleQuadrature
 from tpf.viz.solver_statistics import (
     SolverStatisticsEst,
@@ -59,39 +61,52 @@ else:
 
         """
         flow_equation: str
-        """Flow equation. Normally provided by a mixin of instance
+        """Name of the flow equation. Normally provided by a mixin of instance
         :class:`EquationsTPF`.
 
         """
         transport_equation: str
-        """Transport equation. Normally provided by a mixin of instance
+        """Name of the transport equation. Normally provided by a mixin of instance
         :class:`EquationsTPF`.
 
         """
         secondary_pressure_eq: str
-        """Secondary pressure equation. Normally provided by a mixin of instance
-        :class:`EquationsTPF`.
+        """Name of the secondary pressure equation. Normally provided by a mixin of
+        instance :class:`EquationsTPF`.
 
         """
         secondary_saturation_eq: str
-        """Secondary saturation equation. Normally provided by a mixin of instance
-        :class:`EquationsTPF`.
+        """Name of the secondary saturation equation. Normally provided by a mixin of
+        instance :class:`EquationsTPF`.
 
         """
 
+        # Phases
         wetting: FluidPhase
         """Wetting phase class, providing phase name, constants, variables, and bc.
-        Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
+        Normally set by a mixin of instance :class:`SolutionStrategyTPF`.
+
+        """
         nonwetting: FluidPhase
         """Nonwetting phase class, providing phase name, constants, variables, and bc.
-        Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
+        Normally set by a mixin of instance :class:`SolutionStrategyTPF`.#
+
+        """
         phases: dict[str, FluidPhase]
         """List of fluid phases, providing phase names, constants, variables, and bc.
         Normally set by a mixin of instance :class:`SolutionStrategyTPF`.
 
         """
+        _cap_press_constants: CapPressConstants
+        """Capillary pressure constants. Normally set by a mixin of instance
+        :class:`CapillaryPressure`.
+
+        """
+
         formulation: Literal["fractional_flow"]
         """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
+
+        # Discretization keywords
         flux_key: str
         """Keyword to define parameters and discretizations for the total flux. Normally
         provided by a mixin of instance :class:`SolutionStrategyTPF`.
@@ -100,6 +115,7 @@ else:
         params_key: str
         """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
 
+        # Nonlinear solver
         nonlinear_solver_statistics: SolverStatisticsTPF
 
         _nl_appleyard_chopping: bool
@@ -107,6 +123,7 @@ else:
         _nl_enforce_physical_saturation: bool
         """Whether to enforce physical saturations in the nonlinear solver."""
 
+        # Grid
         g: pp.Grid
         """Single subdomain."""
         g_data: dict
@@ -188,10 +205,23 @@ else:
             """
             ...
 
+        def entry_pressure_np(
+            self,
+            g: pp.Grid,
+            cap_press_constants: CapPressConstants | None = None,
+            **kwargs,
+        ) -> float | np.ndarray:
+            """Entry pressure for capillary pressure. Normally provided by a mixin of
+            instance :class:`CapillaryPressure`.
+
+            """
+            ...
+
         def cap_press(
             self,
             saturation_w: pp.ad.Operator,
             cap_press_constants: CapPressConstants | None = None,
+            **kwargs: Any,
         ) -> pp.ad.Operator:
             """Capillary pressure. Normally provided by a mixin of instance
             :class:`CapillaryPressure`.
@@ -203,6 +233,7 @@ else:
             self,
             saturation_w: np.ndarray,
             cap_press_constants: CapPressConstants | None = None,
+            **kwargs: Any,
         ) -> np.ndarray:
             """Capillary pressure for saturations of type
             :class:`~numpy.ndarray`. Normally provided by a mixin of instance
@@ -215,6 +246,7 @@ else:
             self,
             saturation_w: pp.ad.Operator,
             cap_press_constants: CapPressConstants | None = None,
+            **kwargs: Any,
         ) -> pp.ad.Operator:
             """Capillary pressure derivative. Normally provided by a mixin of instance
             :class:`CapillaryPressure`.
@@ -226,6 +258,7 @@ else:
             self,
             saturation_w: np.ndarray,
             cap_press_constants: CapPressConstants | None = None,
+            **kwargs: Any,
         ) -> np.ndarray:
             """Capillary pressure derivative for saturations of type
             :class:`~numpy.ndarray`. Normally provided by a mixin of instance
@@ -452,6 +485,7 @@ else:
             self,
             s_w: np.ndarray,
             pressure_key: PRESSURE_KEY,
+            entry_pressure: ArrayLike = 1.0,
             p_n: np.ndarray | None = None,
             epsilon: float = 1e-6,
         ) -> np.ndarray:
@@ -640,6 +674,13 @@ else:
         def set_initial_estimators(self) -> None:
             """Initialize time step values for error estimators."""
             ...
+
+    class SPE11Protocol(Protocol):
+        """Protocol for the SPE11 derived model."""
+
+        # SPE11 attributes and methods:
+        spe11_params: dict[str, Any]
+        """Parameters for the specificSPE11 case."""
 
     class DataSavingMixinExtendedProtocol(DataSavingProtocol):
         def data_to_export_iteration(

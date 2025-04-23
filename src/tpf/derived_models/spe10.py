@@ -16,7 +16,7 @@ import logging
 import pathlib
 import warnings
 import zipfile
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import porepy as pp

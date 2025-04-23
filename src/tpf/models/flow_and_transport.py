@@ -221,8 +221,10 @@ class DarcyFluxes(TPFProtocol):
         # necesarry for ``p_n_bc`` as it is already done by
         # ``self.bc_dirichlet_pressure_values``.
         is_neu: np.ndarray = self.bc_type(g).is_neu
+
+        # Make sure to evaluate the capillary pressure on faces, not on cells.
         p_cap_bc_values: np.ndarray = self.cap_press_np(
-            (self.bc_dirichlet_saturation_values(g, self.wetting))
+            (self.bc_dirichlet_saturation_values(g, self.wetting)), faces=True
         )
         p_cap_bc_values[is_neu] = 0.0
         p_cap_bc = pp.ad.DenseArray(p_cap_bc_values)
@@ -853,7 +855,6 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
             s_bc: ``shape=(g.num_faces,)`` Phase saturation boundary values.
 
         """
-
         if phase.name == self.wetting.name:
             s_bc: np.ndarray = np.full(g.num_faces, 0.5)
         elif phase.name == self.nonwetting.name:

@@ -411,8 +411,6 @@ class CapPressConstants:
 
 
 class CapillaryPressure(TPFProtocol):
-    _cap_press_constants: CapPressConstants
-
     def set_cap_press_constants(self) -> None:
         self._cap_press_constants = CapPressConstants(
             **self.params.get("cap_press_constants", {})
@@ -425,10 +423,52 @@ class CapillaryPressure(TPFProtocol):
         """
         ...
 
+    def entry_pressure(
+        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None, **kwargs
+    ) -> pp.ad.Operator:
+        r"""Entry pressure function.
+
+        By default, the entry pressure is a scalar value equal to
+        :attr:`self._cap_press_constants.entry_pressure`. This method can be overridden
+        to implement a spatially heterogeneous entry pressure.
+
+        Parameters:
+            g: Grid object.
+            cap_press_constants: Capillary pressure constants. If set, overrides
+                :attr:`self._cap_press_constants`. Default is ``None``.
+
+        Returns:
+            Entry pressure.
+
+        """
+        if cap_press_constants is None:
+            cap_press_constants = self._cap_press_constants
+        return pp.ad.Scalar(cap_press_constants.entry_pressure, name="entry pressure")
+
+    def entry_pressure_np(
+        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None, **kwargs
+    ) -> float | np.ndarray:
+        r"""Entry pressure function for numpy.
+
+        Parameters:
+            g: Grid object.
+            cap_press_constants: Capillary pressure constants. If set, overrides
+                :attr:`self._cap_press_constants`. Default is ``None``.
+            **kwargs:
+
+        Returns:
+            Entry pressure.
+
+        """
+        if cap_press_constants is None:
+            cap_press_constants = self._cap_press_constants
+        return cap_press_constants.entry_pressure
+
     def cap_press(
         self,
         saturation_w: pp.ad.Operator,
         cap_press_constants: CapPressConstants | None = None,
+        **kwargs,
     ) -> pp.ad.Operator:
         r"""Capillary pressure function.
 
@@ -458,6 +498,12 @@ class CapillaryPressure(TPFProtocol):
                 :class:`~porepy.ad.SparseArray` (for saturation boundary values).
             cap_press_model: Capillary pressure constants. If set, overrides
                 ``self._cap_press_constants``. Default is ``None``.
+            **kwargs: Possible keys:
+                - ``divide_by_entry_pressure``: If set to ``True``, the capillary
+                  pressure is divided by the entry pressure. This is useful for
+                  precomputing tabular values, e.g., for global and complimentary
+                  pressure in case the entry pressure is spatially heterogeneous.
+                  Default is ``False``.
 
         Returns:
             Capillary pressure.
@@ -465,22 +511,23 @@ class CapillaryPressure(TPFProtocol):
         """
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
+        if kwargs.get("divide_by_entry_pressure", False):
+            entry_pressure = pp.ad.Scalar(1, name="entry pressure")
+        else:
+            entry_pressure: pp.ad.Operator = self.entry_pressure(
+                self.g, cap_press_constants=cap_press_constants, **kwargs
+            )
 
         s_normalized = self.normalize_saturation(
             saturation_w, self.wetting, limit=False
         )
         s_normalized.set_name(f"{self.wetting.name}_s_normalized")
+
         if cap_press_constants.model == "Brooks-Corey":
-            entry_pressure = pp.ad.Scalar(
-                cap_press_constants.entry_pressure, name="entry pressure"
-            )
             p_c: pp.ad.Operator = entry_pressure * s_normalized ** pp.ad.Scalar(
                 -1 / cap_press_constants.n_b
             )
         elif cap_press_constants.model == "linear":
-            entry_pressure = pp.ad.Scalar(
-                cap_press_constants.entry_pressure, name="entry pressure"
-            )
             linear_param = pp.ad.Scalar(
                 cap_press_constants.linear_param, name="linear param"
             )
@@ -504,6 +551,7 @@ class CapillaryPressure(TPFProtocol):
         self,
         saturation_w: np.ndarray,
         cap_press_constants: CapPressConstants | None = None,
+        **kwargs,
     ) -> np.ndarray:
         r"""Capillary pressure function for saturations of type :class:`~numpy.ndarray`.
 
@@ -515,6 +563,12 @@ class CapillaryPressure(TPFProtocol):
                 :class:`~porepy.ad.SparseArray` (for saturation boundary values).
             cap_press_model: Capillary pressure constants. If set, overrides
                 ``self._cap_press_constants``. Default is ``None``.
+            **kwargs: Possible keys:
+                - ``divide_by_entry_pressure``: If set to ``True``, the capillary
+                  pressure is divided by the entry pressure. This is useful for
+                  precomputing tabular values, e.g., for global and complimentary
+                  pressure in case the entry pressure is spatially heterogeneous.
+                  Default is ``False``.
 
         Returns:
             Capillary pressure.
@@ -522,23 +576,26 @@ class CapillaryPressure(TPFProtocol):
         """
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
+        if kwargs.get("divide_by_entry_pressure", False):
+            entry_pressure = 1.0
+        else:
+            entry_pressure: float | np.ndarray = self.entry_pressure_np(
+                self.g, cap_press_constants=cap_press_constants, **kwargs
+            )
 
         s_normalized = self.normalize_saturation_np(
             saturation_w, self.wetting, limit=False
         )
+
         if cap_press_constants.model == "Brooks-Corey":
-            p_c: np.ndarray = cap_press_constants.entry_pressure * np.power(
+            p_c: np.ndarray = entry_pressure * np.power(
                 s_normalized,
                 -1 / cap_press_constants.n_b,
                 out=np.zeros_like(s_normalized),
                 where=s_normalized != 0,
             )
         elif cap_press_constants.model == "linear":
-            p_c = (
-                cap_press_constants.linear_param
-                * cap_press_constants.entry_pressure
-                * (1 - s_normalized)
-            )
+            p_c = cap_press_constants.linear_param * entry_pressure * (1 - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             p_c = (
                 (
@@ -561,16 +618,23 @@ class CapillaryPressure(TPFProtocol):
         self,
         saturation_w: pp.ad.Operator,
         cap_press_constants: CapPressConstants | None = None,
+        **kwargs,
     ) -> pp.ad.Operator:
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
+        if kwargs.get("divide_by_entry_pressure", False):
+            entry_pressure = pp.ad.Scalar(1, name="entry pressure")
+        else:
+            entry_pressure: pp.ad.Operator = self.entry_pressure(
+                self.g, cap_press_constants=cap_press_constants, **kwargs
+            )
 
         s_normalized = self.normalize_saturation(
             saturation_w, phase=self.wetting, limit=False
         )
         s_normalized_deriv = self.normalize_saturation_deriv(self.wetting)
+
         if cap_press_constants.model == "Brooks-Corey":
-            entry_pressure = pp.ad.Scalar(cap_press_constants.entry_pressure)
             return (
                 entry_pressure
                 * pp.ad.Scalar(-1 / cap_press_constants.n_b)
@@ -578,7 +642,7 @@ class CapillaryPressure(TPFProtocol):
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
             linear_param = pp.ad.Scalar(cap_press_constants.linear_param)
-            return pp.ad.Scalar(-1) * linear_param * s_normalized_deriv
+            return pp.ad.Scalar(-1) * linear_param * entry_pressure * s_normalized_deriv
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             return (
@@ -603,6 +667,7 @@ class CapillaryPressure(TPFProtocol):
         self,
         saturation_w: np.ndarray,
         cap_press_constants: CapPressConstants | None = None,
+        **kwargs,
     ) -> np.ndarray:
         r"""Capillary pressure derivative for saturation of type
          :class:`~numpy.ndarray`.
@@ -614,22 +679,34 @@ class CapillaryPressure(TPFProtocol):
             saturation_w: Array with wetting phase saturations.
             cap_press_constants: Relative permeability constants. If set, overrides
                 ``self.cap_press_constants``. Default is ``None``.
+            **kwargs: Possible keys:
+                - ``divide_by_entry_pressure``: If set to ``True``, the capillary
+                  pressure is divided by the entry pressure. This is useful for
+                  precomputing tabular values, e.g., for global and complimentary
+                  pressure in case the entry pressure is spatially heterogeneous.
+                  Default is ``False``.
 
         Returns:
             Capillary pressure derivative.
 
         """
-
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
+        if kwargs.get("divide_by_entry_pressure", False):
+            entry_pressure = 1.0
+        else:
+            entry_pressure: float | np.ndarray = self.entry_pressure_np(
+                self.g, cap_press_constants=cap_press_constants, **kwargs
+            )
 
         s_normalized: np.ndarray = self.normalize_saturation_np(
             saturation_w, phase=self.wetting, limit=False
         )
         s_normalized_deriv: float = self.normalize_saturation_deriv_np(self.wetting)
+
         if cap_press_constants.model == "Brooks-Corey":
             return (
-                cap_press_constants.entry_pressure
+                entry_pressure
                 * (-1 / cap_press_constants.n_b)
                 * np.power(
                     s_normalized,
@@ -639,8 +716,13 @@ class CapillaryPressure(TPFProtocol):
                 )
             ) * s_normalized_deriv
         elif cap_press_constants.model == "linear":
-            entry_pressure = cap_press_constants.linear_param
-            return np.full_like(s_normalized, -1 * entry_pressure * s_normalized_deriv)
+            return np.full_like(
+                s_normalized,
+                -1
+                * cap_press_constants.linear_param
+                * entry_pressure
+                * s_normalized_deriv,
+            )
         elif cap_press_constants.model == "van Genuchten":
             return (
                 (1 / cap_press_constants.n_g - 1)
