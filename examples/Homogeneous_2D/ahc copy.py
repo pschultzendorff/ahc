@@ -59,8 +59,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = N_THREADS
 os.environ["OMP_NUM_THREADS"] = N_THREADS
 os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
 
-# Catch all numpy errors except underflow. The latter can appear during estimator
-# calculation.
+# Catch all numpy errors except underflow. The latter can appear during estimator calculation.
 np.seterr(all="raise")
 np.seterr(under="ignore")
 
@@ -74,13 +73,9 @@ logger.setLevel(logging.INFO)
 
 
 # region MODEL
-class HomogeneousSPE10HC(
-    SPE10Mixin,
-    TwoPhaseFlowAHC,
-):  # type: ignore
+class HomogeneousSPE10HC(SPE10Mixin, TwoPhaseFlowAHC):  # type: ignore
     """Override the heterogeneous geometry of the SPE10 model by using methods of
     ``EquationsTPF`` instead.
-
     """
 
     def permeability(self, g: pp.Grid) -> dict[str, np.ndarray]:
@@ -121,6 +116,7 @@ class HomogeneousSPE10HC(
 
 
 # endregion
+
 
 # region RUN
 params: dict[str, Any] = {
@@ -165,50 +161,34 @@ params: dict[str, Any] = {
 }
 
 adaptive_error_ratios: list[float] = [0.1, 0.01]
-cell_sizes: list[float] = [
-    # 600 * FEET / 7.5,
-    # 600 * FEET / 15,
-    # 600 * FEET / 30,
-    600 * FEET / 60,
-]
+cell_sizes: list[float] = [600 * FEET / 60]
 initial_saturation_list: np.ndarray = np.linspace(0.2, 0.3, 5)
 
-# region VARYING_CELL_SIZES
-for i, (
-    adaptive_error_ratio,
-    initial_saturation,
-    cell_size,
-) in enumerate(
-    itertools.product(
-        adaptive_error_ratios,
-        initial_saturation_list[[0, -1]],
-        cell_sizes,
-    )
-):
-    logger.info(f"Varying cell sizes. Run {i + 1} of {len(cell_sizes)}")
-    logger.info(f"Cell size: {cell_size}, initial saturation: {initial_saturation}")
 
-    filename: str = f"cellsz_{int(cell_size)}"
-    foldername: pathlib.Path = (
+def run_simulation(
+    adaptive_error_ratio: float, initial_saturation: float, cell_size: float
+) -> None:
+    logger.info(f"Cell size: {cell_size}, initial saturation: {initial_saturation}")
+    filename = f"cellsz_{int(cell_size)}"
+    folder = (
         pathlib.Path(__file__).parent
         / f"ahc_{adaptive_error_ratio}"
         / "varying_cell_sizes"
         / f"init_s_{initial_saturation}"
         / filename
     )
-
     try:
-        shutil.rmtree(foldername)
+        shutil.rmtree(folder)
     except Exception:
         pass
-    foldername.mkdir(parents=True)
+    folder.mkdir(parents=True)
 
-    params.update(
+    local_params = params.copy()
+    local_params.update(
         {
-            "folder_name": foldername,
+            "folder_name": folder,
             "file_name": filename,
-            "solver_statistics_file_name": foldername / "solver_statistics.json",
-            # Reinitialize the time manager for each run.
+            "solver_statistics_file_name": folder / "solver_statistics.json",
             "time_manager": pp.TimeManager(
                 schedule=np.array([0.0, 10.0 * pp.DAY]),
                 dt_init=10.0 * pp.DAY,
@@ -224,12 +204,20 @@ for i, (
             "hc_error_ratio": adaptive_error_ratio,
         }
     )
-    model = HomogeneousSPE10HC(params)
+
+    model = HomogeneousSPE10HC(local_params)
     try:
-        pp.run_time_dependent_model(model=model, params=params)
+        pp.run_time_dependent_model(model=model, params=local_params)
     except Exception as error:
         logger.error(f"Model {model} failed with error: {error}")
         raise error
 
-# endregion
+
+# VARYING_CELL_SIZES
+combos = itertools.product(
+    adaptive_error_ratios, initial_saturation_list[[0, -1]], cell_sizes
+)
+for i, (adapt_err, init_sat, cell_sz) in enumerate(combos):
+    logger.info(f"Varying cell sizes. Run {i + 1} of {len(cell_sizes)}")
+    run_simulation(adapt_err, init_sat, cell_sz)
 # endregion

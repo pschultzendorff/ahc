@@ -56,7 +56,7 @@ from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
 from tpf.utils.constants_and_typing import FEET
 from tpf.viz.pca import biplot, screeplot
-from tpf.viz.solver_statistics import SolverStatisticsEst, SolverStatisticsHC
+from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 # region SETUP
 
@@ -78,7 +78,7 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-initial_saturation: float = 0.3
+initial_saturation: float = 0.2
 dirname: pathlib.Path = (
     pathlib.Path(__file__).parent / "solver_accuracy" / f"init_{initial_saturation}"
 )
@@ -88,7 +88,7 @@ dirname: pathlib.Path = (
 
 # region MODEL
 @dataclass
-class SolverStatisticsAcc(SolverStatisticsEst):
+class SolverStatisticsANewtonAcc(SolverStatisticsANewton):
     """Include accuracy compared to baseline in solver statistics."""
 
     accuracies: list[dict[str, float]] = field(default_factory=list)
@@ -407,7 +407,7 @@ params: dict[str, Any] = {
     "spe10_quarter_domain": True,
     "spe10_initial_saturation": initial_saturation,
     # Nonlinear params:
-    "nonlinear_solver_statistics": SolverStatisticsAcc,
+    "nonlinear_solver_statistics": SolverStatisticsANewtonAcc,
     "nonlinear_solver": pp.NewtonSolver,
     "max_iterations": 20,
     "nl_convergence_tol": 1e-7,
@@ -494,7 +494,9 @@ for i, (
             "file_name": filename,
             "solver_statistics_file_name": foldername / "solver_statistics.json",
             "nonlinear_solver_statistics": (
-                SolverStatisticsAcc if solver == "Newton" else SolverStatisticsHCAcc
+                SolverStatisticsANewtonAcc
+                if solver == "Newton"
+                else SolverStatisticsHCAcc
             ),
             "compute_accuracy": True,
             # Reinitialize the time manager for each run.
@@ -516,7 +518,7 @@ for i, (
                     "n2": 2,  # 1 + 2/n_b
                     "n3": 1,
                 },
-                "nonlinear_solver_statistics": SolverStatisticsAcc,
+                "nonlinear_solver_statistics": SolverStatisticsANewtonAcc,
                 "nonlinear_solver": pp.NewtonSolver,
                 "nl_adaptive": True,
                 "nl_adaptive_convergence_tol": 1e3,
