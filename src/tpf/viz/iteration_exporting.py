@@ -1,4 +1,4 @@
-"""Mixin to export model states at each iteration. 
+"""Mixin to export model states at each iteration.
 
 Mostly copied from
 https://github.com/pmgbergen/porepy/blob/develop/tutorials/exporting_models.ipynb
@@ -8,11 +8,11 @@ and adjusted for homotopy continuation.
 
 import numpy as np
 import porepy as pp
+
 from tpf.models.protocol import DataSavingMixinExtendedProtocol, HCProtocol, TPFProtocol
 
 
 class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFProtocol):
-
     def initialize_data_saving(self):
         """Initialize iteration exporter."""
         super().initialize_data_saving()
@@ -66,15 +66,25 @@ class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFPr
         )
 
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
-        """Integrate iteration export into simulation workflow.
+        """Exports the solution from the **PREVIOUS** iteration.
 
-        Order of operations is important, super call distributes the solution to
-        iterate subdictionary.
+        This is assumed to be called before any other mixin that changes the method.
 
         """
-        super().after_nonlinear_iteration(nonlinear_increment)
         self.save_data_iteration()
         self.iteration_exporter.write_pvd()
+        super().after_nonlinear_iteration(nonlinear_increment)
+
+    def after_nonlinear_convergence(self) -> None:
+        """Save model state after nonlinear convergence.
+
+        The estimators are evaluated only in :meth:``check_convergence`` and not yet
+        exported by the call in :meth:`after_nonlinear_iteration`.
+
+        """
+        self.save_data_iteration()
+        self.iteration_exporter.write_pvd()
+        super().after_nonlinear_convergence()
 
     def after_nonlinear_failure(self) -> None:
         """Save model state after nonlinear failure."""

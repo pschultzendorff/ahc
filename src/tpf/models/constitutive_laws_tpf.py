@@ -476,11 +476,11 @@ class CapillaryPressure(TPFProtocol):
 
         Brooks-Corey model
         .. math::
-            p_c(\hat{s}_w) = p_e\hat{s}_w^{n_b}
+            p_c(\hat{s}_w) = p_e\hat{s}_w^{-1/n_b}
 
         Linear model
         .. math::
-            p_c(\hat{s}_w) = c p_e (1 - \hat{s}_w)
+            p_c(\hat{s}_w) = p_e + c (1 - \hat{s}_w)
 
         van Genuchten model
         .. math::
@@ -531,7 +531,7 @@ class CapillaryPressure(TPFProtocol):
             linear_param = pp.ad.Scalar(
                 cap_press_constants.linear_param, name="linear param"
             )
-            p_c = linear_param * entry_pressure * (pp.ad.Scalar(1) - s_normalized)
+            p_c = entry_pressure + linear_param * (pp.ad.Scalar(1) - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
             p_c = (

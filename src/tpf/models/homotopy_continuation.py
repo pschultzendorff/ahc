@@ -654,9 +654,19 @@ class SolutionStrategyAHC(
         self._hc_is_diverged = value
 
     def prepare_simulation(self) -> None:
+        # Switch to goal cap. press. and rel. perms. to calculate interpolants for
+        # global and complimentary pressure.
+        self.hc_toggle_fl = 0.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
+
         # This is mixed with more Solutionstrategies that implement
         # ``prepare_simulation``. We ignore the mypy error.
         super().prepare_simulation()  # type: ignore
+
+        # Switch back.
+        self.hc_toggle_fl = 1.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
+
         self.setup_hc(self.params)
 
     def setup_hc(self, hc_params: dict[str, Any]) -> None:
@@ -1129,6 +1139,10 @@ class SolutionStrategyAHC(
             self, nonlinear_increment, residual, reference_residual, nl_params
         )
 
+        # Switch rel. perm. to goal rel. perm. to evaluate the nonconformity estimators.
+        self.hc_toggle_fl = 0.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
+
         # NOTE The following does not need to be evaluated when hc_params["hc_adaptive"]
         # is False. However, to compare HC and apdative HC, we still evaluate it.
         hc_est: float = self.global_hc_est()
@@ -1144,6 +1158,10 @@ class SolutionStrategyAHC(
             hc_est=hc_est,
             linearization_est=linearization_est,
         )
+
+        # Switch rel. perm. back.
+        self.hc_toggle_fl = 1.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
         # Adaptive stopping criterion.
         if not diverged and nl_params["hc_adaptive"]:

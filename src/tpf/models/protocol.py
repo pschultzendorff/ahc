@@ -24,6 +24,9 @@ if not TYPE_CHECKING:
     class EstimatesProtocol:
         """This is an empty placeholder of the protocol, used mainly for type hints."""
 
+    class SPE11Protocol:
+        """This is an empty placeholder of the protocol, used mainly for type hints."""
+
     class DataSavingMixinExtendedProtocol:
         """This is an empty placeholder of the protocol, used mainly for type hints."""
 
@@ -679,6 +682,11 @@ else:
         """Protocol for the SPE11 derived model."""
 
         # SPE11 attributes and methods:
+        spe11_case: str
+        """SPE11 case name. Normally provided by a mixin of instance
+        :class:`SolutionStrategySPE11`.
+
+        """
         spe11_params: dict[str, Any]
         """Parameters for the specificSPE11 case."""
 

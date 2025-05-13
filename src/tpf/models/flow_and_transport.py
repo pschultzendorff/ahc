@@ -315,11 +315,24 @@ class DarcyFluxes(TPFProtocol):
 
         """
         # Spatial discretization operators.
-        flux_tpfa = pp.ad.TpfaAd(self.flux_key, [g])
+        tpfa = pp.ad.TpfaAd(self.flux_key, [g])
         upwind_w = pp.ad.UpwindAd(self.wetting.mobility_key, [g])
 
         # Compute cap pressure and relative permeabilities.
         p_cap = self.cap_press(self.wetting.s)
+
+        # See :meth:``total_flux`` for an explanation of the capillary pressure
+        # boundary conditions.
+        is_neu: np.ndarray = self.bc_type(g).is_neu
+        p_cap_bc_values: np.ndarray = self.cap_press_np(
+            (self.bc_dirichlet_saturation_values(g, self.wetting)), faces=True
+        )
+        p_cap_bc_values[is_neu] = 0.0
+        p_cap_bc = pp.ad.DenseArray(p_cap_bc_values)
+
+        p_cap_potential: pp.ad.Operator = (
+            tpfa.flux() @ p_cap + tpfa.bound_flux() @ p_cap_bc
+        )
 
         mobility_w: pp.ad.Operator = self.phase_mobility(g, self.wetting)
         mobility_n: pp.ad.Operator = self.phase_mobility(g, self.nonwetting)
@@ -339,9 +352,9 @@ class DarcyFluxes(TPFProtocol):
             + fractional_flow_w
             * mobility_n
             * (
-                flux_tpfa.flux() @ p_cap
-                + flux_tpfa.vector_source() @ vector_source_w
-                - flux_tpfa.vector_source() @ vector_source_n
+                p_cap_potential
+                + tpfa.vector_source() @ vector_source_w
+                - tpfa.vector_source() @ vector_source_n
             )
             # NOTE ``phase_mobility(self.wetting)`` and hence
             # ``fractional_flow_w`` are zero on Neumann boundaries. We add the

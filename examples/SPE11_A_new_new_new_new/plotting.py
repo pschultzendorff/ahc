@@ -321,69 +321,186 @@ def plot_estimators(
     return fig
 
 
+def plot_spatial_convergence(
+    statistics: list[SimulationStatistics],
+    ref_facs: list[float],
+    title: str | None = None,
+    combine_disc_est: bool = True,
+) -> plt.Figure:
+    """Create a plot showing the evolution of different error estimators over time.
+
+    Returns:
+        A matplotlib figure with the plotted estimators.
+
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    cmap = plt.get_cmap("viridis")
+    colors = [cmap(i) for i in np.linspace(0, 1, len(statistics))]
+
+    for ref_fac, color, statistic in zip(ref_facs, colors, statistics):
+        uses_hc: bool = len(statistic.hc_estimator) > 0
+
+        tot_nl_iterations: int = 0
+        tot_nl_iterations_fine: int = 0
+        # Plot spatial estimator
+        for i, (time, spat_est, temp_est, lin_est) in enumerate(
+            zip(
+                statistic.time_steps,
+                statistic.spat_estimator,
+                statistic.temp_estimator,
+                statistic.lin_estimator,
+            )
+        ):
+            if uses_hc:
+                hc_est_flat = flatten(statistic.hc_estimator[i])
+                spat_est_flat = flatten(spat_est)
+                temp_est_flat = flatten(temp_est)
+            else:
+                spat_est_flat = spat_est
+                temp_est_flat = temp_est
+
+            # Plot spatial and temporal estimators for the full time step.
+
+            # Combine spatial and temporal estimators.
+            disc_est_flat = np.array(spat_est_flat) + np.array(temp_est_flat)
+            ax.plot(
+                range(tot_nl_iterations, tot_nl_iterations + len(disc_est_flat)),
+                disc_est_flat,
+                "o-",
+                color=color,
+                markersize=4,
+                fillstyle="none",
+                markerfacecolor=color,
+                label=rf"{ref_fac} $\eta_{{disc}}$" if i == 0 else "",
+            )
+            # Update number of nl iterations.
+            tot_nl_iterations += len(spat_est_flat)
+
+    # Set y scale to log
+    ax.set_yscale("log")
+
+    # Add labels and title
+    ax.tick_params(axis="both", labelsize=12)
+    ax.set_xlabel(
+        "Nonlinear iteration",
+        fontsize=14,
+        fontweight="bold",
+    )
+    ax.set_ylabel(
+        "Error estimate (log scale)",
+        fontsize=14,
+        fontweight="bold",
+    )
+    if title is None:
+        title = "Error Estimators Evolution"
+    ax.set_title(
+        title,
+        fontsize=16,
+        fontweight="bold",
+    )
+
+    ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+    # Add legend
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(
+        by_label.values(),
+        by_label.keys(),
+        loc="best",
+        ncol=2,
+        prop={"size": 14, "weight": "bold"},
+    )
+
+    fig.tight_layout()
+    return fig
+
+
 # endregion
 
 if __name__ == "__main__":
     configs = generate_configs()
-    configs_varying_rp_init_s_02 = configs[:12]
-    configs_varying_rp_init_s_03 = configs[12:24]
-    configs_varying_init_s = configs[:4] + configs[24:36] + configs[12:16]
-    configs_cap_press = configs[36:]
+    configs_varying_rp_init_s_08 = configs[:12]
+    configs_varying_rp_init_s_09 = configs[12:24]
+    configs_varying_ref_init_s_08 = configs[:4] + configs[24:28]
+    configs_varying_ref_init_s_09 = configs[12:16] + configs[28:]
     data = {}
-    # for config in configs_varying_rp_init_s_02:
-    #     if config.rp_model_2["model"] == "Corey":
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-    #     else:
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
-    #     data[key] = read_data(config)
-    # fig1 = plot_nl_iterations(
-    #     data,
-    #     "rel. perm. model",
-    # )
-    # data = {}
-    # for config in configs_varying_rp_init_s_03:
-    #     if config.rp_model_2["model"] == "Corey":
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-    #     else:
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
-    #     data[key] = read_data(config)
-    # fig2 = plot_nl_iterations(
-    #     data,
-    #     "rel. perm. model",
-    # )
-    data = {}
-    for config in configs_varying_init_s:
-        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
+    for config in configs_varying_rp_init_s_08:
+        if config.rp_model_2["model"] == "Corey":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
+        else:
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
         try:
             statistics = read_data(config)
         except ValueError:
             statistics = SimulationStatistics()
         data[key] = statistics
-    # fig3 = plot_nl_iterations(
-    #     data,
-    #     r"$s_{w,init}$",
-    # )
-    # data = {}
-    # for config in configs_cap_press:
-    #     assert config.cp_model_2["model"] != "linear", "Wrong config chosen"
-    #     key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
-    #     try:
-    #         statistics = read_data(config)
-    #     except ValueError:
-    #         statistics = SimulationStatistics()
-    #     data[key] = statistics
-    # fig4 = plot_nl_iterations(
-    #     data,
-    #     "entry pressure [Pa]",
-    # )
+    fig1 = plot_nl_iterations(
+        data,
+        "rel. perm. model",
+    )
+    fig1a = plot_estimators(
+        data["AHC_5e-05_Brooks-Corey-Mualem"],
+        title="AHC 0.00005 Brooks-Corey-Mualem",
+        combine_disc_est=True,
+    )
 
-    # fig1.savefig(dirname / "nl_iters_rp_model_s_init_02.png")
-    # fig2.savefig(dirname / "nl_iters_rp_model_s_init_03.png")
-    # fig3.savefig(dirname / "nl_iters_s_init.png")
-    # fig4.savefig(dirname / "nl_iters_cap_press.png")
-    fig4 = plot_estimators(data["NewtonAppleyard_0.1_0.2"])
-    fig4.savefig(dirname / "estimators_newton_appleyard.png")
-    fig5 = plot_estimators(data["AHC_0.1_0.2"], combine_disc_est=True)
-    fig5.savefig(dirname / "estimators_ahc_0.1.png")
-    fig5 = plot_estimators(data["AHC_0.005_0.2"], combine_disc_est=True)
-    fig5.savefig(dirname / "estimators_ahc_0.005.png")
+    data = {}
+    for config in configs_varying_rp_init_s_09:
+        if config.rp_model_2["model"] == "Corey":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
+        else:
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        try:
+            statistics = read_data(config)
+        except ValueError:
+            statistics = SimulationStatistics()
+        data[key] = statistics
+    fig2 = plot_nl_iterations(
+        data,
+        "rel. perm. model",
+    )
+    data = {}
+    for config in configs_varying_ref_init_s_08:
+        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
+        try:
+            statistics = read_data(config)
+        except ValueError:
+            statistics = SimulationStatistics()
+        data[key] = statistics
+    fig3 = plot_nl_iterations(
+        data,
+        "refinement factor",
+    )
+    fig3a = plot_spatial_convergence(
+        list(data.values())[::4], [5.0, 1.0, 0.5], combine_disc_est=True
+    )
+    fig3b = plot_spatial_convergence(
+        list(data.values())[3::4], [5.0, 1.0, 0.5], combine_disc_est=True
+    )
+
+    data = {}
+    for config in configs_varying_ref_init_s_09:
+        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
+        try:
+            statistics = read_data(config)
+        except ValueError:
+            statistics = SimulationStatistics()
+        data[key] = statistics
+    fig4 = plot_nl_iterations(
+        data,
+        "refinement factor",
+    )
+
+    fig1.savefig(dirname / "nl_iters_rp_model_s_init_08.png")
+    fig1a.savefig(dirname / "estimators_rp_model_s_init_08.png")
+    fig2.savefig(dirname / "nl_iters_rp_model_s_init_09.png")
+    fig3.savefig(dirname / "nl_iters_ref_fac_s_init_08.png")
+    fig3a.savefig(dirname / "ahc_spatial_convergence_s_init_08.png")
+    fig3b.savefig(dirname / "newtonappleyard_spatial_convergence_s_init_08.png")
+    fig4.savefig(dirname / "nl_iters_ref_fac_s_init_09.png")
+    # fig5 = plot_estimators(data["AHC_0.1_0.2"], combine_disc_est=True)
+    # fig5.savefig(dirname / "estimators_ahc_0.1.png")
+    # fig5 = plot_estimators(data["AHC_0.005_0.2"], combine_disc_est=True)
+    # fig5.savefig(dirname / "estimators_ahc_0.005.png")

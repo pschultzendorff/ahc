@@ -85,7 +85,7 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-dirname: pathlib.Path = pathlib.Path(__file__).parent
+dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # endregion
 

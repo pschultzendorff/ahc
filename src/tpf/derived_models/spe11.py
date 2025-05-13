@@ -27,7 +27,7 @@ from porepy.viz.exporter import DataInput
 
 from tpf.derived_models.fluid_values import co2 as _co2
 from tpf.derived_models.fluid_values import water as _water
-from tpf.derived_models.utils import cell_id_position
+from tpf.derived_models.utils import well_cell_id
 from tpf.models.constitutive_laws_tpf import CapPressConstants
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import SPE11Protocol, TPFProtocol
@@ -35,7 +35,7 @@ from tpf.utils.constants_and_typing import NONWETTING, WETTING
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent / "spe11_data"
+DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent.resolve() / "spe11_data"
 ZIP_FILENAME: str = "por_perm_case2a.zip"
 URL: str = "https://raw.githubusercontent.com/Simulation-Benchmarks/11thSPE-CSP/refs/heads/main/geometries/spe11a.geo"
 
@@ -49,8 +49,9 @@ case_A: dict[str, Any] = {
     "INITIAL_PRESSURE": ATM,  # [Pa]
     "INITIAL_SATURATION": 0.9,  # [-], initial saturation. Domain filled with water.
     "INJECTION_RATE": 1.75e-7 / _co2["density"],  # 1.7x10^-5 kg/s
+    "WELL_SIZE": 0.02,  # [m]
     "WELL_1_POS": (0.9, 0.3),  # [m]
-    "WELL_2_POS": (1.7, 0.7),  # [m]
+    "WELL_2_POS": (1.7, 0.68),  # [m], slightly lower so it's fully inside facies 4.
     "MAX_CAP_PRESS": 9.5e4,  # [Pa], upper limit on capillary pressure.
     "PERMEABILITY": {  # Permeability in [m^2]
         "facies 1": 4e-11,
@@ -96,7 +97,7 @@ case_B: dict[str, Any] = {
     "PERMEABILITY": {  # Permeability in [m^2]
         "facies 1": 1e-16,
         "facies 2": 1e-13,
-        "facies 3": 2e-3,
+        "facies 3": 2e-13,
         "facies 4": 5e-13,
         "facies 5": 1e-12,
         "facies 6": 2e-12,
@@ -163,6 +164,70 @@ def write_refinement_factor(
     with geo_file.open("r+") as f:
         lines: list[str] = f.readlines()
         lines[3] = f"DefineConstant[ refinement_factor = {refinement_factor} ];\n"
+        # Replace the current content of the file.
+        f.seek(0)
+        f.write("".join(lines))
+        f.truncate()
+
+
+def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
+    """Add the well positions in the SPE11 geometric information."""
+    with geo_file.open("r+") as f:
+        lines: list[str] = f.readlines()
+        # Add well positions.
+        well_1_pts: list[str] = [
+            f"Point(288) = {{{case['WELL_1_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(289) = {{{case['WELL_1_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(290) = {{{case['WELL_1_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(291) = {{{case['WELL_1_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+        ]
+        well_2_pts: list[str] = [
+            f"Point(292) = {{{case['WELL_2_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(293) = {{{case['WELL_2_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(294) = {{{case['WELL_2_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(295) = {{{case['WELL_2_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+        ]
+        well_1_lns: list[str] = [
+            "Line(319) = {288, 290};\n",
+            "Line(320) = {290, 291};\n",
+            "Line(321) = {291, 289};\n",
+            "Line(322) = {289, 288};\n",
+        ]
+        well_2_lns: list[str] = [
+            "Line(323) = {292, 294};\n",
+            "Line(324) = {294, 295};\n",
+            "Line(325) = {295, 293};\n",
+            "Line(326) = {293, 292};\n",
+        ]
+        surfaces: list[str] = [
+            "Line Loop(33) = {319, 320, 321, 322};\n",
+            "Line Loop(34) = {323, 324, 325, 326};\n",
+            "Line Loop(35) = {-319, -320, -321, -322};\n",
+            "Line Loop(36) = {-323, -324, -325, -326};\n",
+            "Plane Surface(35) = {35};\n",
+            "Plane Surface(36) = {36};\n",
+        ]
+        for i, line in enumerate(well_1_pts):
+            lines.insert(325 + i, line)
+        for i, line in enumerate(well_2_pts):
+            lines.insert(329 + i, line)
+        for i, line in enumerate(well_1_lns):
+            lines.insert(651 + i, line)
+        for i, line in enumerate(well_2_lns):
+            lines.insert(655 + i, line)
+        for i, line in enumerate(surfaces):
+            lines.insert(659 + i, line)
+
+        # Add holes in surfaces.
+        lines[682] = "Plane Surface(2) = {2, 33};\n"
+        lines[708] = "Plane Surface(11) = {11, 34};\n"
+
+        # Fill holes again.
+        lines[691] = 'Physical Surface("Facies 5", 5) = {2, 3, 4, 5, 6, 35};\n'
+        lines[719] = (
+            'Physical Surface("Facies 4", 4) = {10, 11, 12, 13, 14, 15, 22, 36};\n'
+        )
+
         # Replace the current content of the file.
         f.seek(0)
         f.write("".join(lines))
@@ -238,7 +303,9 @@ def fix_face_normals(
 
 
 def load_spe11_data(
-    data_dir: pathlib.Path, refinement_factor: float = 1.0
+    data_dir: pathlib.Path,
+    case: dict[str, Any] = case_A,
+    refinement_factor: float = 1.0,
 ) -> pp.MixedDimensionalGrid:
     """Load the SPE11 data into a :class:`~numpy.ndarray`.
 
@@ -278,6 +345,15 @@ def load_spe11_data(
         )
         write_refinement_factor(geo_file, refinement_factor)
 
+    with geo_file.open("r") as f:
+        lines: list[str] = f.readlines()
+        if len(lines) != 757:
+            logger.info(
+                "Well positions not included in the .geo file. Adjusting and"
+                + " recomputing mesh ..."
+            )
+            write_well_positions(geo_file, case)
+
     gmsh_file: pathlib.Path = fix_face_normals(geo_file)
 
     logger.info("Loading mesh.")
@@ -294,7 +370,7 @@ def LeverettJfunction(permeability: ArrayLike, porosity: ArrayLike) -> np.ndarra
     """
     permeability = np.asarray(permeability)
     porosity = np.asarray(porosity)
-    return np.sqrt(porosity / permeability) * 6.12e-3
+    return np.sqrt(porosity / permeability) * 6.12e-3  # type: ignore
 
 
 class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
@@ -320,10 +396,14 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
             Entry pressure.
 
         """
-        # We know that the entry pressure is a np.ndarray.
-        return pp.ad.DenseArray(
-            self.entry_pressure_np(g, cap_press_constants, **kwargs)  # type: ignore
-        )
+        if self.params.get("spe11_heterogeneous_cap_pressure", True):
+            # We know that the entry pressure is a np.ndarray.
+            return pp.ad.DenseArray(
+                self.entry_pressure_np(g, cap_press_constants, **kwargs)  # type: ignore
+            )
+        else:
+            # We know that the entry pressure is a scalar.
+            return pp.ad.Scalar(self.params["spe11_entry_pressure"])
 
     def entry_pressure_np(
         self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None, **kwargs
@@ -342,23 +422,26 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
             Entry pressure.
 
         """
-        if self.params["spe11_case"] == "A":
-            entry_pressure: np.ndarray = np.zeros(g.num_cells)
-            for facies, ep in self.spe11_params["ENTRY_PRESSURE"].items():
-                entry_pressure[g.tags[facies + "_simplices"]] = ep
-        elif self.params["spe11_case"] == "B":
-            entry_pressure: np.ndarray = LeverettJfunction(
-                self.permeability(g)["kxx"], self.porosity(g)
-            )
+        if self.params.get("spe11_heterogeneous_cap_pressure", True):
+            if self.spe11_case == "A":
+                entry_pressure: np.ndarray = np.zeros(g.num_cells)
+                for facies, ep in self.spe11_params["ENTRY_PRESSURE"].items():
+                    entry_pressure[g.tags[facies + "_simplices"]] = ep
+            elif self.spe11_case == "B":
+                entry_pressure: np.ndarray = LeverettJfunction(
+                    self.permeability(g)["kxx"], self.porosity(g)
+                )
 
-        # Map to faces.
-        if kwargs.get("faces", False):
-            cells_to_faces = g.cell_faces
-            entry_pressure = cells_to_faces @ entry_pressure
-            # Divide inner faces by 2 to obtain the averaged value.
-            entry_pressure[g.get_internal_faces()] /= 2
+            # Map to faces.
+            if kwargs.get("faces", False):
+                cells_to_faces = g.cell_faces
+                entry_pressure = cells_to_faces @ entry_pressure
+                # Divide inner faces by 2 to obtain the averaged value.
+                entry_pressure[g.get_internal_faces()] /= 2
 
-        return entry_pressure
+            return entry_pressure
+        else:
+            return self.params["spe11_entry_pressure"]
 
     def cap_press(
         self,
@@ -373,7 +456,7 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
         maximum_func = pp.ad.Function(
             partial(
                 pp.ad.maximum,
-                var_1=self.spe11_params["CAP_PRESS_LIMIT"],
+                var_1=self.spe11_params["MAX_CAP_PRESS"],
             ),
             "max",
         )
@@ -391,7 +474,7 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
             saturation_w, cap_press_constants, **kwargs
         )
         # Limit the capillary pressure to a maximum value.
-        cap_press = np.maximum(cap_press, self.spe11_params["CAP_PRESS_LIMIT"])
+        cap_press = np.maximum(cap_press, self.spe11_params["MAX_CAP_PRESS"])
         return cap_press
 
     # TODO
@@ -423,7 +506,7 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
         )
         # Limit the capillary pressure to a maximum value.
         cap_press_deriv = np.where(
-            cap_press > self.spe11_params["CAP_PRESS_LIMIT"], 0.0, cap_press_deriv
+            cap_press > self.spe11_params["MAX_CAP_PRESS"], 0.0, cap_press_deriv
         )
         return cap_press_deriv
 
@@ -465,28 +548,52 @@ class EquationsSPE11(SPE11Protocol, TPFProtocol):
         """
         if phase.name == self.nonwetting.name:
             array: np.ndarray = super().phase_fluid_source(g, phase)
-            # Upper well.
-            array[
-                cell_id_position(
-                    g,
-                    self.spe11_params["WELL_1_POS"][0],
-                    self.spe11_params["WELL_1_POS"][1],
-                    percentages=False,
-                )
-            ] = phase.convert_units(
-                self.spe11_params["INJECTION_RATE"], "m^3"
-            ) / phase.convert_units(pp.SECOND, "s")
             # Lower well.
-            array[
-                cell_id_position(
-                    g,
-                    self.spe11_params["WELL_2_POS"][0],
-                    self.spe11_params["WELL_2_POS"][1],
-                    percentages=False,
-                )
-            ] = phase.convert_units(
+            well_1_ids: np.ndarray = well_cell_id(
+                g,
+                np.array(
+                    [
+                        [
+                            self.spe11_params["WELL_1_POS"][0]
+                            - self.spe11_params["WELL_SIZE"] / 2,
+                            self.spe11_params["WELL_1_POS"][1]
+                            - self.spe11_params["WELL_SIZE"] / 2,
+                        ],
+                        [
+                            self.spe11_params["WELL_1_POS"][0]
+                            + self.spe11_params["WELL_SIZE"] / 2,
+                            self.spe11_params["WELL_1_POS"][1]
+                            + self.spe11_params["WELL_SIZE"] / 2,
+                        ],
+                    ]
+                ),
+            )
+            array[well_1_ids] = phase.convert_units(
                 self.spe11_params["INJECTION_RATE"], "m^3"
-            ) / phase.convert_units(pp.SECOND, "s")
+            ) / (phase.convert_units(pp.SECOND, "s") * len(well_1_ids))
+            # Upper well.
+            well_2_ids: np.ndarray = well_cell_id(
+                g,
+                np.array(
+                    [
+                        [
+                            self.spe11_params["WELL_2_POS"][0]
+                            - self.spe11_params["WELL_SIZE"] / 2,
+                            self.spe11_params["WELL_2_POS"][1]
+                            - self.spe11_params["WELL_SIZE"] / 2,
+                        ],
+                        [
+                            self.spe11_params["WELL_2_POS"][0]
+                            + self.spe11_params["WELL_SIZE"] / 2,
+                            self.spe11_params["WELL_2_POS"][1]
+                            + self.spe11_params["WELL_SIZE"] / 2,
+                        ],
+                    ]
+                ),
+            )
+            array[well_2_ids] = phase.convert_units(
+                self.spe11_params["INJECTION_RATE"], "m^3"
+            ) / (phase.convert_units(pp.SECOND, "s") * len(well_2_ids))
             return array
         elif phase.name == self.wetting.name:
             return super().phase_fluid_source(g, phase)
@@ -546,13 +653,11 @@ class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):
         }
         self._domain = pp.Domain(box)
 
-    def set_fractures(self) -> None:
-        pass
-
     def set_geometry(self) -> None:
         self.set_domain()
         self.mdg = load_spe11_data(
             DATA_DIR,
+            self.spe11_params,
             self.params["meshing_arguments"].get("spe11_refinement_factor", 10.0),
         )
         self.nd: int = self.mdg.dim_max()
@@ -581,7 +686,7 @@ class SolutionStrategySPE11(TPFProtocol):
         if self.spe11_case == "A":
             self.spe11_params = case_A
         elif self.spe11_case == "B":
-            self.spe11_params = case_B
+            self.spe11_params = case_A
         else:
             raise ValueError(
                 f"Unknown SPE11 case {self.spe11_case}. "
@@ -633,7 +738,9 @@ class SolutionStrategySPE11(TPFProtocol):
         for dim, perm in self.permeability(self.g).items():  # type: ignore
             data.append((self.g, "permeability_" + dim, perm))
         data.append((self.g, "porosity", self.porosity(self.g)))
-        data.append((self.g, "entry_pressure", self.entry_pressure_np(self.g)))  # type: ignore
+        # Entry pressure is only a distribution if it is heterogeneous.
+        if self.params["spe11_heterogeneous_cap_pressure"]:
+            data.append((self.g, "entry_pressure", self.entry_pressure_np(self.g)))  # type: ignore
         self.exporter.add_constant_data(data)
 
         # For convenience, add the porosity and permeability to the iteration exporter

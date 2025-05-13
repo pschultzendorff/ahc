@@ -47,6 +47,7 @@ from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
+from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 # region SETUP
@@ -142,6 +143,9 @@ default_params: dict[str, Any] = {
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
+    # SPE11 parameters:
+    "spe11_heterogeneous_cap_pressure": False,
+    "spe11_entry_pressure": 100.0,  # [Pa]
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
 }
@@ -314,6 +318,95 @@ def run_simulation(config: SimulationConfig) -> None:
     try:
         model = model_class(params)
         pp.run_time_dependent_model(model=model, params=params)
+
+        def plot_pressure(pressure: str) -> None:
+            """Plot quadratic pressures."""
+            plot_quadratic_pressures(
+                model.g,
+                model.domain.bounding_box,
+                pp.get_solution_values(
+                    f"{pressure}_coeffs",
+                    model.mdg.subdomains(return_data=True)[0][1],
+                    iterate_index=0,
+                ),
+                title=" ".join(pressure.split("_")),
+                save_path=config.folder_name / f"{pressure}.png",
+            )
+
+        for pressure in [
+            "global_pressure_postprocessed",
+            "global_pressure_reconstructed",
+            "complimentary_pressure_postprocessed",
+            "complimentary_pressure_reconstructed",
+        ]:
+            plot_pressure(pressure)
+
+        global_pressure_diff_coeffs: np.ndarray = pp.get_solution_values(
+            "global_pressure_reconstructed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        ) - pp.get_solution_values(
+            "global_pressure_postprocessed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        )
+
+        plot_quadratic_pressures(
+            model.g,
+            model.domain.bounding_box,
+            global_pressure_diff_coeffs,
+            title="Global pressure difference reconstructed - postprocessed",
+            save_path=config.folder_name / "global_pressure_difference.png",
+        )
+        global_pressure_diff_deriv_x_coeffs: np.ndarray = np.zeros_like(
+            global_pressure_diff_coeffs
+        )
+        global_pressure_diff_deriv_x_coeffs[:, 2] = (
+            2 * global_pressure_diff_coeffs[:, 0]
+        )
+        global_pressure_diff_deriv_x_coeffs[:, 4] = global_pressure_diff_coeffs[:, 1]
+        global_pressure_diff_deriv_x_coeffs[:, 5] = global_pressure_diff_coeffs[:, 2]
+        global_pressure_diff_deriv_y_coeffs: np.ndarray = np.zeros_like(
+            global_pressure_diff_coeffs
+        )
+        global_pressure_diff_deriv_y_coeffs[:, 4] = (
+            2 * global_pressure_diff_coeffs[:, 3]
+        )
+        global_pressure_diff_deriv_y_coeffs[:, 2] = global_pressure_diff_coeffs[:, 1]
+        global_pressure_diff_deriv_y_coeffs[:, 5] = global_pressure_diff_coeffs[:, 4]
+
+        plot_quadratic_pressures(
+            model.g,
+            model.domain.bounding_box,
+            global_pressure_diff_deriv_x_coeffs,
+            title=r"Global pressure difference $\partial_x(reconstructed - postprocessed)$",
+            save_path=config.folder_name / "global_pressure_difference_deriv_x.png",
+        )
+        plot_quadratic_pressures(
+            model.g,
+            model.domain.bounding_box,
+            global_pressure_diff_deriv_y_coeffs,
+            title=r"Global pressure difference $\partial_y(reconstructed - postprocessed)$",
+            save_path=config.folder_name / "global_pressure_difference_deriv_y.png",
+        )
+
+        plot_quadratic_pressures(
+            model.g,
+            model.domain.bounding_box,
+            pp.get_solution_values(
+                "complimentary_pressure_reconstructed_coeffs",
+                model.mdg.subdomains(return_data=True)[0][1],
+                iterate_index=0,
+            )
+            - pp.get_solution_values(
+                "complimentary_pressure_postprocessed_coeffs",
+                model.mdg.subdomains(return_data=True)[0][1],
+                iterate_index=0,
+            ),
+            title="Complimentary pressure difference reconstructed - postprocessed",
+            save_path=config.folder_name / "complimentary_pressure_difference.png",
+        )
+
     except Exception as e:
         with (config.folder_name / "failure.txt").open("w") as f:
             f.write(str(e))
@@ -325,7 +418,7 @@ def run_simulation(config: SimulationConfig) -> None:
 # region RUN
 solvers: list[str] = ["AHC", "Newton", "NewtonAppleyard"]
 adaptive_error_ratios: list[float] = [0.1, 0.00005]
-refinement_factors: list[float] = [5, 1, 0.5]
+refinement_factors: list[float] = [10, 5, 1, 0.5]
 
 rp_models: dict[str, Any] = {
     "Brooks-Corey": {
@@ -358,6 +451,7 @@ def generate_configs() -> list[SimulationConfig]:
     configs = []
     # Varying rel. perm. models at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
+        continue
         for rp_model_name, rp_model in rp_models.items():
             for solver_name, adaptive_error_ratio in itertools.product(
                 solvers, adaptive_error_ratios
@@ -377,7 +471,7 @@ def generate_configs() -> list[SimulationConfig]:
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        refinement_factor=5,
+                        refinement_factor=refinement_factors[0],
                         init_s=init_s,
                         rp_model_1={"model": "linear", "limit": False},
                         rp_model_2=rp_model,
@@ -388,7 +482,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
-        for refinement_factor in refinement_factors[1:2]:
+        for refinement_factor in refinement_factors:
             # Highest resolution at init_s = 0.9 takes too long, mostly due to the fact
             # that adaptive Newton only makes sense for small-sized updates to produce
             # physical solutions. But setting ``hc_nl_convergence_tol`` low makes AHC
@@ -399,6 +493,10 @@ def generate_configs() -> list[SimulationConfig]:
             for solver_name, adaptive_error_ratio in itertools.product(
                 solvers, adaptive_error_ratios
             ):
+                if solver_name.startswith("Newton"):
+                    continue
+                if adaptive_error_ratio <= 0.005:
+                    continue
                 if solver_name.startswith("Newton") and adaptive_error_ratio <= 0.005:
                     continue
                 file_name = f"ref_fac_{refinement_factor:.2f}"

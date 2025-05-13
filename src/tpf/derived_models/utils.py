@@ -2,7 +2,7 @@ import numpy as np
 import porepy as pp
 
 
-def cell_id_position(
+def position_cell_id(
     g: pp.Grid, x: float, y: float, percentages: bool = True
 ) -> np.intp:
     """Identify the id of the cell corresponding to the given position.
@@ -50,7 +50,7 @@ def center_cell_id(g: pp.Grid) -> np.intp:
         center: Index of the center cell.
 
     """
-    return cell_id_position(g, 0.5, 0.5)
+    return position_cell_id(g, 0.5, 0.5)
 
 
 def corner_faces_id(g: pp.Grid, height: float, width: float, well_size) -> np.ndarray:
@@ -134,3 +134,39 @@ def corner_faces_id(g: pp.Grid, height: float, width: float, well_size) -> np.nd
         )
     )
     return boundary_faces[np.concatenate(indices).flatten()]
+
+
+def well_cell_id(
+    g: pp.Grid,
+    well_boundaries: np.ndarray,
+) -> np.ndarray:
+    """Identify the cells inside a well boundary.
+
+    Assumes that a grid cell is either fully inside or outside the well. Thus it
+    suffices, to check only cell centers to find whether a cell is inside a well.
+
+    Parameters:
+        g: Grid.
+        well_boundaries ``shape=(2, nd)``: Lower left and upper right corner of the
+            square well.
+
+    Returns:
+        corners: Indices of the cells inside the well.
+
+    """
+    # Ignore z-values of the grid.
+    cell_centers: np.ndarray = g.cell_centers[:2, :]
+    # Find indices of cells inside the well.
+    indices = np.argwhere(
+        np.logical_and(
+            np.logical_and(
+                cell_centers[0] >= well_boundaries[0, 0],
+                cell_centers[0] <= well_boundaries[1, 0],
+            ),
+            np.logical_and(
+                cell_centers[1] >= well_boundaries[0, 1],
+                cell_centers[1] <= well_boundaries[1, 1],
+            ),
+        )
+    )
+    return indices

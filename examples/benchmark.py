@@ -90,7 +90,7 @@ class Benchmark(
 # endregion
 
 # region RUN
-foldername: pathlib.Path = pathlib.Path(__file__).parent / "benchmark"
+foldername: pathlib.Path = pathlib.Path(__file__).parent.resolve() / "benchmark"
 
 params = {
     "folder_name": foldername,

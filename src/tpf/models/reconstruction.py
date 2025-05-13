@@ -354,7 +354,8 @@ class PressureReconstructionMixin(TPFProtocol):
                 i.e., the values ``f"{flux_name}_flux{flux_specifier}_RT0_coeffs"`` in
                 the data dir are accessed.
             prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
-                Stores values additionally for the time step.
+                Stores zero coefficients for all pressures. Stores values additionally
+                for the time step.
 
         Returns:
             None
@@ -421,6 +422,10 @@ class PressureReconstructionMixin(TPFProtocol):
         # Now, we can compute the constant C, one per cell.
         s[:, 5] = p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
 
+        # TODO Don't need to run everything before.
+        if prepare_simulation:
+            s = np.zeros_like(s)
+
         # Store post-processed but not reconstructed pressure at the nodes.
         pp.set_solution_values(
             f"{pressure_key}_postprocessed_coeffs",
@@ -448,7 +453,8 @@ class PressureReconstructionMixin(TPFProtocol):
                 i.e., the values ``f"{flux_name}_flux{flux_specifier}_RT0_coeffs"`` in
                 the data dir are accessed.
             prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
-                Stores values additionally for the time step.
+                Stores zero coefficients for all pressures. Stores values additionally
+                for the time step.
 
         Returns:
             None
@@ -583,6 +589,8 @@ class PressureReconstructionMixin(TPFProtocol):
             [point_val, point_coo, coeffs_reconstructed_pressure],
             ["point_val", "point_coo", "coeffs"],
         ):
+            if prepare_simulation:
+                value = np.zeros_like(value)
             pp.set_solution_values(
                 f"{pressure_key}_reconstructed_{name}",
                 value,

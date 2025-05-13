@@ -32,7 +32,7 @@ from tpf.utils.constants_and_typing import FEET, NONWETTING, PSI, WETTING
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent / "spe10_data"
+DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent.resolve() / "spe10_data"
 ZIP_FILENAME: str = "por_perm_case2a.zip"
 URL: str = "https://www.spe.org/web/csp/datasets/por_perm_case2a.zip"
 
@@ -318,7 +318,7 @@ class SolutionStrategySPE10(TPFProtocol):
                     + f" Continuing with default value {value}"
                 )
 
-        perm, poro = load_spe10_data(pathlib.Path(__file__).parent / "data")
+        perm, poro = load_spe10_data(pathlib.Path(__file__).parent.resolve() / "data")
         if isotropic_perm:
             self._permeability: np.ndarray = np.zeros((1, g.num_cells))
         else:

@@ -40,11 +40,11 @@ from typing import Any
 
 import numpy as np
 import porepy as pp
-from tpf.derived_models.spe11 import INITIAL_PRESSURE, SPE11Mixin
+from tpf.derived_models.spe11 import SPE11Mixin, case_A
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
-from tpf.utils.constants_and_typing import FEET
+from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 from tpf.viz.solver_statistics import SolverStatisticsANewton
 
 # region SETUP
@@ -79,7 +79,7 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 class InitialConditionsMixin(TPFProtocol):
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
-        initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
+        initial_pressure = np.full(self.g.num_cells, case_A["INITIAL_PRESSURE"])
         initial_saturation = np.full(
             self.g.num_cells, self.params["spe11_initial_saturation"]
         )
@@ -136,7 +136,7 @@ default_params: dict[str, Any] = {
 }
 
 time_manager_params: dict[str, Any] = {
-    "schedule": np.array([0.0, 10.0 * pp.DAY]),
+    "schedule": np.array([0.0, 1.0 * pp.DAY]),
     "dt_init": 0.1 * pp.DAY,
     "constant_dt": True,
 }
@@ -235,13 +235,86 @@ def run_simulation(config: SimulationConfig) -> None:
     except Exception:
         pass
 
-    try:
-        model = model_class(params)
-        pp.run_time_dependent_model(model=model, params=params)
-    except Exception as e:
-        with (config.folder_name / "failure.txt").open("w") as f:
-            f.write(str(e))
-        logger.error(f"Run failed with error: {e}.")
+    model = model_class(params)
+    pp.run_time_dependent_model(model=model, params=params)
+
+    plot_quadratic_pressures(
+        model.g,
+        model.domain.bounding_box,
+        pp.get_solution_values(
+            "global_pressure_postprocessed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        ),
+        title="Global pressure postprocessed",
+        save_path=config.folder_name / "global_pressure_postprocessed.png",
+    )
+    plot_quadratic_pressures(
+        model.g,
+        model.domain.bounding_box,
+        pp.get_solution_values(
+            "global_pressure_reconstructed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        ),
+        title="Global pressure reconstructed",
+        save_path=config.folder_name / "global_pressure_reconstructed.png",
+    )
+    plot_quadratic_pressures(
+        model.g,
+        model.domain.bounding_box,
+        pp.get_solution_values(
+            "global_pressure_reconstructed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        )
+        - pp.get_solution_values(
+            "global_pressure_postprocessed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        ),
+        title="Global pressure difference reconstructed - postprocessed",
+        save_path=config.folder_name / "global_pressure_difference.png",
+    )
+
+    plot_quadratic_pressures(
+        model.g,
+        model.domain.bounding_box,
+        pp.get_solution_values(
+            "complimentary_pressure_postprocessed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        ),
+        title="Complimentary pressure postprocessed",
+        save_path=config.folder_name / "complimentary_pressure_postprocessed.png",
+    )
+    plot_quadratic_pressures(
+        model.g,
+        model.domain.bounding_box,
+        pp.get_solution_values(
+            "complimentary_pressure_reconstructed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        ),
+        title="Complimentary pressure reconstructed",
+        save_path=config.folder_name / "complimentary_pressure_reconstructed.png",
+    )
+    plot_quadratic_pressures(
+        model.g,
+        model.domain.bounding_box,
+        pp.get_solution_values(
+            "complimentary_pressure_reconstructed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        )
+        - pp.get_solution_values(
+            "complimentary_pressure_postprocessed_coeffs",
+            model.mdg.subdomains(return_data=True)[0][1],
+            iterate_index=0,
+        ),
+        title="Complimentary pressure difference reconstructed - postprocessed",
+        save_path=config.folder_name / "complimentary_pressure_difference.png",
+    )
 
 
 # endregion
@@ -276,5 +349,4 @@ if __name__ == "__main__":
     )
 
     run_simulation(config)
-
 # endregion

@@ -461,11 +461,11 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             # Calculate global values at current and previous time step.
             # NOTE The values stored were the squares of the elementwise norms, hence we
             # do not need to square here.
-            global_integral_new: float = (local_integral_NC_new).sum()
+            global_integral_new: float = local_integral_NC_new.sum()
             global_integral_inner_product_new_old: float = (
-                local_integral_NC_inner_product_new_old**2
-            ).sum()
-            global_integral_old: float = (local_integral_NC_old).sum()
+                local_integral_NC_inner_product_new_old.sum()
+            )
+            global_integral_old: float = local_integral_NC_old.sum()
             # Finally, estimate the time integral.
             estimators[pressure_key] = (
                 self.time_manager.dt
@@ -595,7 +595,7 @@ class SolutionStrategyEst(  # type: ignore
             ["total", "wetting_from_ff"],
             ["R_estimator", "F_estimator", "F_estimator_old", "energy_norm_flux_part"],
         ):
-            if specifier.endswith("estimator"):
+            if specifier.endswith("estimator") or specifier == "F_estimator_old":
                 name: str = f"{flux_name}_{specifier}"
                 initial_values: np.ndarray = np.zeros(self.g.num_cells)
             else:
@@ -610,7 +610,6 @@ class SolutionStrategyEst(  # type: ignore
                 time_step_index=0,
                 iterate_index=0,
             )
-        # FIXME This should not be zero!
         for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
             pp.set_solution_values(
                 f"{pressure_key}_NC_estimator",
