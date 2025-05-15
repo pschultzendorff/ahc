@@ -9,21 +9,36 @@ from tpf.derived_models.spe10 import HEIGHT
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
-total_flow: float = 0.3  # []
-permeability: float = 2e-10  # [m^2]
+RESOLUTION: int = 100  # Resolution for the 2D plots.
 
+# Model parameters.
 mu_w: float = water["viscosity"]  # Viscosity of wetting phase [mP??]
 mu_n: float = oil["viscosity"]  # Viscosity of non-wetting phase [mP??]
 rho_w: float = water["density"]  # Density of wetting phase [kg m^-3]
 rho_n: float = oil["density"]  # Density of non-wetting phase [kg m^-3]
 
-G: float = 9.81 * HEIGHT / 100  # Gravity [m^2s^-2]
-
-L: float = HEIGHT / 100  # Characteristic length scale [m]
+permeability: float = (
+    (2.5e-12) ** -1 + (1.3e-13) ** -1
+) ** -1  # [m^2] # Permeability of the porous medium. Harmonic mean of the two cells in
+# the high permeability region.
+L: float = HEIGHT / (2 * 100)  # Characteristic length scale [m]
 P_c_bar: float = 100 * pp.PASCAL  # Characteristic capillary pressure [Pa]
 
-P_e: float = total_flow * mu_n * L / (permeability * P_c_bar)
-N_g: float = permeability * (rho_w - rho_n) * G / (mu_n * total_flow)
+# Representative total flow rate from two cells in the high permeability region. It is
+# important to have the SAME length scale and permeability that goes into the Peclet
+# number to get the right ratio of viscous and capillary flux over the SAME interface.
+# We multiply by 0.5 to account for the fact that the total mobility is less than 1.
+total_flow: float = (
+    0.5 * (5.3e7 * pp.PASCAL - 5.2e7 * pp.PASCAL) / L * permeability
+)  # [m^3 s^-1]
+# Gravity gradient between two cells. It is important to have the SAME length scale that
+# goes into the gravity number to get the right ratio of viscous and buoyancy flux over
+# the SAME interface.
+grad_G: float = 9.81 * L  # Gravity [m^2s^-2]
+
+
+peclet: float = total_flow * mu_n * L / (permeability * P_c_bar)
+N_g: float = permeability * (rho_w - rho_n) * grad_G / (mu_n * total_flow)
 
 
 def k_rw(S: ArrayLike, model: str) -> np.ndarray:
@@ -186,7 +201,7 @@ def capillary_flow(
     S: ArrayLike,
     rp_model: str,
     grad_pc: ArrayLike,
-    p_e: ArrayLike,
+    peclet: ArrayLike,
 ) -> np.ndarray:
     r"""Capillary flux function.
 
@@ -197,19 +212,19 @@ def capillary_flow(
     Parameters:
         S: Saturation
         grad_pc: Gradient of capillary pressure, :math:`∇P_c`.
-        p_e: Peclet number specifying the ratio :math:`P_e(P_c/L)`.
+        peclet: Peclet number specifying the ratio of viscous to capillary force.
 
     Returns:
         The value of the capillary flux function.
 
     """
     grad_pc = np.array(grad_pc)
-    p_e = np.array(p_e)
+    peclet = np.array(peclet)
 
     lambda_total = lambda_w(S, rp_model) + lambda_n(S, rp_model)
 
     return (lambda_w(S, rp_model) * k_rn(S, rp_model) / lambda_total) * (
-        grad_pc / (p_e * P_c_bar / L)
+        grad_pc / (peclet * P_c_bar / L)
     )
 
 
@@ -218,7 +233,7 @@ def f_w(
     rp_model: str,
     n_g: ArrayLike = N_g,
     grad_pc: ArrayLike = 0.0,
-    p_e: ArrayLike = P_e,
+    peclet: ArrayLike = peclet,
 ) -> np.ndarray:
     r"""Wetting phase fractional flow function in the absence of gravity.
 
@@ -231,7 +246,7 @@ def f_w(
         rp_model: Relative permeability model.
         n_g: Gravity number, :math:`N_g`. Default is `N_g`.
         grad_pc: Gradient of capillary pressure, :math:`\nabla P_c`. Default is 0.0.
-        p_e: Peclet number specifying the ratio ratio :math:`P_e(P_c/L)`. Default is
+        peclet: Peclet number specifying the ratio ratio :math:`P_e(P_c/L)`. Default is
             `P_e`.
 
     Returns:
@@ -241,12 +256,12 @@ def f_w(
     return (
         viscous_flow(S, rp_model)
         + buoyancy_flow(S, rp_model, n_g)
-        + capillary_flow(S, rp_model, grad_pc, p_e)
+        + capillary_flow(S, rp_model, grad_pc, peclet)
     )
 
 
 def cap_press_gradient(
-    S_U: ArrayLike, S_D: ArrayLike, cp_model: str, **kwargs
+    S_U: ArrayLike, S_D: ArrayLike, cp_model: str, entry_pressure: float
 ) -> np.ndarray:
     """Calculate the capillary pressure gradient.
 
@@ -254,14 +269,15 @@ def cap_press_gradient(
         S_U: Upstream saturation
         S_D: Downstream saturation
         cp_model: Capillary pressure model
+        entry_pressure: Entry pressure for the capillary pressure model
 
     Returns:
         The value of the capillary pressure gradient.
 
     """
     # Calculate the capillary pressure for upstream and downstream saturations.
-    p_c_U = p_c(S_U, cp_model, entry_pressure=P_c_bar)
-    p_c_D = p_c(S_D, cp_model, entry_pressure=P_c_bar)
+    p_c_U = p_c(S_U, cp_model, entry_pressure)
+    p_c_D = p_c(S_D, cp_model, entry_pressure)
 
     # Calculate the discretized capillary pressure gradient.
     return (p_c_D - p_c_U) / L
@@ -316,6 +332,7 @@ def F_with_capillary(
     S_D: ArrayLike,
     rp_model: str,
     cp_model: str,
+    entry_pressure: float,
     upwinding: bool = True,
     **kwargs,
 ) -> np.ndarray:
@@ -328,6 +345,7 @@ def F_with_capillary(
         S_D: Downstream saturation.
         rp_model: Relative permeability model.
         cp_model: Capillary pressure model.
+        entry_pressure: Entry pressure for the capillary pressure model.
         upwinding: Boolean flag for upwinding. If False, uses averaged mobility. Default
             is True.
 
@@ -339,7 +357,7 @@ def F_with_capillary(
     S_D = np.array(S_D)
 
     # Calculate capillary pressure gradient.
-    grad_pcs: np.ndarray = cap_press_gradient(S_U, S_D, cp_model)
+    grad_pcs: np.ndarray = cap_press_gradient(S_U, S_D, cp_model, entry_pressure)
 
     # Calculate flux function based on upstream saturations. Set gravity to 0.
     f_w_SU: np.ndarray = f_w(S_U, rp_model, n_g=0.0, grad_pc=grad_pcs, **kwargs)
@@ -358,13 +376,13 @@ def F_with_capillary(
         # Co-current, wetting forward, nonwetting forward.
         co_current: np.ndarray = (
             lambda_wSU
-            * (1 + k_rn_SU * grad_pcs / (kwargs.get("p_e", 1.0) * P_c_bar / L))
+            * (1 + k_rn_SU * grad_pcs / (kwargs.get("peclet", peclet) * P_c_bar / L))
             / (lambda_wSU + lambda_nSU)
         )
         # Counter-current, wetting forward, nonwetting backward.
         counter_current_1: np.ndarray = (
             lambda_wSU
-            * (1 + k_rn_SD * grad_pcs / (kwargs.get("p_e", 1.0) * P_c_bar / L))
+            * (1 + k_rn_SD * grad_pcs / (kwargs.get("peclet", peclet) * P_c_bar / L))
             / (
                 lambda_wSD + lambda_nSD + 1e-20
             )  # Due to upwinding, we can have a division by zero.
@@ -372,7 +390,7 @@ def F_with_capillary(
         # Counter-current, wetting backward, nonwetting forward.
         counter_current_2: np.ndarray = (
             lambda_wSD
-            * (1 + k_rn_SU * grad_pcs / (kwargs.get("p_e", 1.0) * P_c_bar / L))
+            * (1 + k_rn_SU * grad_pcs / (kwargs.get("peclet", peclet) * P_c_bar / L))
             / (
                 lambda_wSD + lambda_nSU + 1e-20
             )  # Due to upwinding, we can have a division by zero.
@@ -395,7 +413,7 @@ def F_with_capillary(
         # Compute numerical flux for averaged mobility.
         num_flux = (
             lambda_wAVG
-            * (1 + k_rnAVG * grad_pcs / (kwargs.get("p_e", 1.0) * P_c_bar / L))
+            * (1 + k_rnAVG * grad_pcs / (kwargs.get("peclet", peclet) * P_c_bar / L))
             / (lambda_wAVG + lambda_nAVG)
         )
 
@@ -447,13 +465,13 @@ def F_with_gravity(
         # Co-current, wetting forward, nonwetting forward.
         co_current: np.ndarray = (
             lambda_wSU
-            * (1 - k_rn_SU * kwargs.get("n_g", 1.0))
+            * (1 - k_rn_SU * kwargs.get("n_g", N_g))
             / (lambda_wSU + lambda_nSU)
         )
         # Counter-current, wetting backward, nonwetting forward.
         counter_current_1: np.ndarray = (
             lambda_wSU
-            * (1 - k_rn_SD * kwargs.get("n_g", 1.0))
+            * (1 - k_rn_SD * kwargs.get("n_g", N_g))
             / (
                 lambda_wSU + lambda_nSD + 1e-20
             )  # Due to upwinding, we can have a division by zero.
@@ -461,7 +479,7 @@ def F_with_gravity(
         # Counter-current, wetting forward, nonwetting backward.
         counter_current_2: np.ndarray = (
             lambda_wSD
-            * (1 - k_rn_SU * kwargs.get("n_g", 1.0))
+            * (1 - k_rn_SU * kwargs.get("n_g", N_g))
             / (
                 lambda_wSD + lambda_nSU + 1e-20
             )  # Due to upwinding, we can have a division by zero.
@@ -471,7 +489,7 @@ def F_with_gravity(
         # number, we have a zero flux point. For a positive gravity number, we have a
         # unit flux point.
         num_flux: np.ndarray = np.where(
-            kwargs.get("n_g", 1.0) <= 0,
+            kwargs.get("n_g", N_g) <= 0,
             np.where(f_w_SU >= 1, counter_current_1, co_current),
             np.where(f_w_SU <= 0, counter_current_2, co_current),
         )
@@ -485,7 +503,7 @@ def F_with_gravity(
         # Compute numerical flux for averaged mobility.
         num_flux = (
             lambda_wAVG
-            * (1 - k_rnAVG * kwargs.get("n_g", 1.0))
+            * (1 - k_rnAVG * kwargs.get("n_g", N_g))
             / (lambda_wAVG + lambda_nAVG)
         )
 
@@ -503,8 +521,11 @@ def plot_f_w() -> None:
 
     rp_models = ["linear", "Corey", "Brooks-Corey"]
     ng_values = [-10.0, 1.0, 10.0]  # Strong to weak gravity effects
-    pe_values = [0.1, 1.0, 10.0]  # Strong to weak capillary effects
-    grad_pc = 1.0  # Fixed gradient of capillary pressure
+    grad_pc_values = [
+        30.0 * pp.PASCAL,
+        100.0 * pp.PASCAL,
+        500.0 * pp.PASCAL,
+    ]  # Weak to strong capillary effects
 
     # Create figure with subplots
     fig, axes = plt.subplots(3, 3, figsize=(15, 5))
@@ -537,10 +558,10 @@ def plot_f_w() -> None:
 
     # Create figure with subplots
     fig, axes = plt.subplots(3, 3, figsize=(15, 5))
-    for i, p_e in enumerate(pe_values):
+    for i, grad_pc in enumerate(grad_pc_values):
         for j, rp_model in enumerate(rp_models):
             # Calculate f_w for the current Peclet number and zero buoyancy flux.
-            f_values = f_w(S, rp_model, n_g=0.0, grad_pc=grad_pc, p_e=p_e)
+            f_values = f_w(S, rp_model, n_g=0.0, grad_pc=grad_pc, peclet=peclet)
 
             # Plot the curve
             axes[i, j].plot(
@@ -554,7 +575,9 @@ def plot_f_w() -> None:
             # Configure plot
             axes[i, j].set_xlabel("Saturation (S)")
             axes[i, j].set_ylabel("Fractional Flow (f_w)")
-            axes[i, j].set_title(rf"$P_e$ = {p_e}, Model = {rp_model}")
+            axes[i, j].set_title(
+                rf"$\nabla p_c$ = {grad_pc} Pa, Rel. perm. model = {rp_model}"
+            )
             axes[i, j].grid(True, alpha=0.3)
             axes[i, j].legend()
             axes[i, j].set_xlim(0, 1)
@@ -571,15 +594,19 @@ def plot_F_capillary() -> None:
 
     """
     # Create a grid of S_U and S_D values
-    S_values = np.linspace(0, 1, 50)
+    S_values = np.linspace(0, 1, RESOLUTION)
     S_D_grid, S_U_grid = np.meshgrid(S_values, S_values)
 
-    pe_values = [1.0, 3.0, 10.0]  # Strong to weak capillary effects
+    pe_values = [
+        30.0 * pp.PASCAL,
+        100.0 * pp.PASCAL,
+        500.0 * pp.PASCAL,
+    ]  # Weak to strong capillary effects
     rp_models = ["linear", "Corey", "Brooks-Corey"]
     cp_models = ["linear", "Brooks-Corey"]
     upwinding_flags = [True, False]
 
-    for i, p_e in enumerate(pe_values):
+    for p_e in pe_values:
         for upwinding in upwinding_flags:
             # Create figure with subplots
             fig, axes = plt.subplots(
@@ -591,42 +618,42 @@ def plot_F_capillary() -> None:
 
             # Loop through relative permeability and capillary pressure models and plot
             # numerical flux function.
-            for j, rp_model in enumerate(rp_models):
-                for k, cp_model in enumerate(cp_models):
+            for i, rp_model in enumerate(rp_models):
+                for j, cp_model in enumerate(cp_models):
                     F_values = F_with_capillary(
                         S_U_grid,
                         S_D_grid,
                         rp_model=rp_model,
                         cp_model=cp_model,
+                        entry_pressure=p_e,
                         upwinding=upwinding,
-                        p_e=p_e,
                     )
 
                     # Plot the surface
-                    axes[j, k].plot_surface(
+                    axes[i, j].plot_surface(
                         S_D_grid, S_U_grid, F_values, cmap="viridis"
                     )
 
                     # Set labels and title
-                    axes[j, k].set_xlabel(r"$s_D$")
-                    axes[j, k].set_ylabel(r"$s_U$")
-                    axes[j, k].set_zlabel(r"$F(s_U, s_D)$")
+                    axes[i, j].set_xlabel(r"$s_D$")
+                    axes[i, j].set_ylabel(r"$s_U$")
+                    axes[i, j].set_zlabel(r"$F(s_U, s_D)$")
 
                     # Split title into two lines for better readability
-                    title_line1 = rf"$P_e$ = {p_e}, RP Model = {rp_model}"
+                    title_line1 = rf"$p_e$ = {p_e} Pa, RP Model = {rp_model}"
                     title_line2 = f"CP Model = {cp_model}, Upwinding = {upwinding}"
-                    axes[j, k].set_title(f"{title_line1}\n{title_line2}")
+                    axes[i, j].set_title(f"{title_line1}\n{title_line2}")
 
                     # Turn to have the origin in the front.
-                    axes[j, k].view_init(azim=-135)
-                    axes[j, k].set_xlim(0.0, 1.0)
-                    axes[j, k].set_ylim(0.0, 1.0)
-                    axes[j, k].set_zlim(-3.5, 3.5)
+                    axes[i, j].view_init(azim=-135)
+                    axes[i, j].set_xlim(0.0, 1.0)
+                    axes[i, j].set_ylim(0.0, 1.0)
+                    axes[i, j].set_zlim(-3.5, 3.5)
 
             # Add more padding between subplots
             plt.tight_layout(pad=3.0)
             fig.savefig(
-                dirname / f"F_cap_plot_Pe_{p_e}_upwinding_{upwinding}.png",
+                dirname / f"F_cap_plot_p_e_{p_e}_upwinding_{upwinding}.png",
                 dpi=300,
                 bbox_inches="tight",
             )
@@ -640,15 +667,19 @@ def plot_dSU_F_capillary() -> None:
 
     """
     # Create a grid of S_U and S_D values. For the derivative, we need a finer grid.
-    S_values = np.linspace(0, 1, 300)
+    S_values = np.linspace(0, 1, RESOLUTION)
     S_D_grid, S_U_grid = np.meshgrid(S_values, S_values)
 
-    pe_values = [1.0, 3.0, 10.0]  # Strong to weak capillary effects
+    pe_values = [
+        30.0 * pp.PASCAL,
+        100.0 * pp.PASCAL,
+        500.0 * pp.PASCAL,
+    ]  # Weak to strong capillary effects
     rp_models = ["linear", "Corey", "Brooks-Corey"]
     cp_models = ["linear", "Brooks-Corey"]
     upwinding_flags = [True, False]
 
-    for i, p_e in enumerate(pe_values):
+    for p_e in pe_values:
         for upwinding in upwinding_flags:
             # Create figure with subplots
             fig, axes = plt.subplots(
@@ -660,42 +691,42 @@ def plot_dSU_F_capillary() -> None:
 
             # Loop through relative permeability and capillary pressure models and plot
             # numerical flux function.
-            for j, rp_model in enumerate(rp_models):
-                for k, cp_model in enumerate(cp_models):
+            for i, rp_model in enumerate(rp_models):
+                for j, cp_model in enumerate(cp_models):
                     F_values = F_with_capillary(
                         S_U_grid,
                         S_D_grid,
                         rp_model=rp_model,
                         cp_model=cp_model,
+                        entry_pressure=p_e,
                         upwinding=upwinding,
-                        p_e=p_e,
                     )
                     dSD_F_Values = np.gradient(F_values, 1 / 299, axis=1)
 
                     # Plot the surface
-                    axes[j, k].plot_surface(
+                    axes[i, j].plot_surface(
                         dSD_F_Values, S_U_grid, F_values, cmap="viridis"
                     )
 
                     # Set labels and title
-                    axes[j, k].set_xlabel(r"$s_D$")
-                    axes[j, k].set_ylabel(r"$s_U$")
-                    axes[j, k].set_zlabel(r"$\partial_{s_D} F(s_U, s_D)$")
+                    axes[i, j].set_xlabel(r"$s_D$")
+                    axes[i, j].set_ylabel(r"$s_U$")
+                    axes[i, j].set_zlabel(r"$\partial_{s_D} F(s_U, s_D)$")
 
                     # Split title into two lines for better readability
-                    title_line1 = rf"$P_e$ = {p_e}, RP Model = {rp_model}"
+                    title_line1 = rf"$p_e$ = {p_e} Pa, RP Model = {rp_model}"
                     title_line2 = f"CP Model = {cp_model}, Upwinding = {upwinding}"
-                    axes[j, k].set_title(f"{title_line1}\n{title_line2}")
+                    axes[i, j].set_title(f"{title_line1}\n{title_line2}")
 
                     # Turn to have the origin in the front.
-                    axes[j, k].view_init(azim=-135)
-                    axes[j, k].set_xlim(0.0, 1.0)
-                    axes[j, k].set_ylim(0.0, 1.0)
+                    axes[i, j].view_init(azim=-135)
+                    axes[i, j].set_xlim(0.0, 1.0)
+                    axes[i, j].set_ylim(0.0, 1.0)
 
             # Add more padding between subplots
             plt.tight_layout(pad=3.0)
             fig.savefig(
-                dirname / f"dSD_F_cap_plot_Pe_{p_e}_upwinding_{upwinding}.png",
+                dirname / f"dSD_F_cap_plot_p_e_{p_e}_upwinding_{upwinding}.png",
                 dpi=300,
                 bbox_inches="tight",
             )
@@ -708,7 +739,7 @@ def plot_F_gravity() -> None:
 
     """
     # Create a grid of S_U and S_D values
-    S_values = np.linspace(0, 1, 50)
+    S_values = np.linspace(0, 1, RESOLUTION)
     S_D_grid, S_U_grid = np.meshgrid(S_values, S_values)
 
     ng_values = [-3.0, -1.0, 1.0, 3.0]  # Strong to weak capillary effects
@@ -765,7 +796,7 @@ def plot_F_gravity() -> None:
 
 
 if __name__ == "__main__":
-    plot_f_w()
+    # plot_f_w()
     plot_F_capillary()
     # plot_dSU_F_capillary()
-    plot_F_gravity()
+    # plot_F_gravity()
