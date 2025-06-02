@@ -2,7 +2,7 @@ from typing import Literal
 
 import porepy as pp
 import pytest
-from tpf.derived_models.utils import cell_id_position, center_cell_id, corner_faces_id
+from tpf.derived_models.utils import position_cell_id, center_cell_id, corner_faces_id
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def cartesian_grid_3d():
 )
 def test_cell_id_position(grid: Literal['cartesian_grid_2d'] | Literal['cartesian_grid_3d'], expected_corner: list[int]):
     grid = 
-    assert set(cell_id_position(grid)) == set(expected_corners)
+    assert set(position_cell_id(grid)) == set(expected_corners)
 
 
 @pytest.mark.parametrize(

@@ -6,7 +6,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-from ahc import SimulationConfig, generate_configs
+from run import SimulationConfig, generate_configs
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 sns.set_theme()
@@ -327,7 +327,7 @@ def plot_spatial_convergence(
     title: str | None = None,
     combine_disc_est: bool = True,
 ) -> plt.Figure:
-    """Create a plot showing the evolution of different error estimators over time.
+    """Plot estimators for different mesh sizes.
 
     Returns:
         A matplotlib figure with the plotted estimators.
@@ -393,7 +393,7 @@ def plot_spatial_convergence(
         fontweight="bold",
     )
     if title is None:
-        title = "Error Estimators Evolution"
+        title = "Spatial Convergence of Error Estimators"
     ax.set_title(
         title,
         fontsize=16,
@@ -425,7 +425,7 @@ if __name__ == "__main__":
     configs_varying_rp_init_s_09 = configs[12:24]
     configs_varying_ref_init_s_08 = configs[:4] + configs[24:28]
     configs_varying_ref_init_s_09 = configs[12:16] + configs[28:]
-    data = {}
+    data_1 = {}
     for config in configs_varying_rp_init_s_08:
         if config.rp_model_2["model"] == "Corey":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
@@ -435,18 +435,18 @@ if __name__ == "__main__":
             statistics = read_data(config)
         except ValueError:
             statistics = SimulationStatistics()
-        data[key] = statistics
+        data_1[key] = statistics
     fig1 = plot_nl_iterations(
-        data,
+        data_1,
         "rel. perm. model",
     )
     fig1a = plot_estimators(
-        data["AHC_5e-05_Brooks-Corey-Mualem"],
+        data_1["AHC_5e-05_Brooks-Corey-Mualem"],
         title="AHC 0.00005 Brooks-Corey-Mualem",
         combine_disc_est=True,
     )
 
-    data = {}
+    data_2 = {}
     for config in configs_varying_rp_init_s_09:
         if config.rp_model_2["model"] == "Corey":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
@@ -456,40 +456,40 @@ if __name__ == "__main__":
             statistics = read_data(config)
         except ValueError:
             statistics = SimulationStatistics()
-        data[key] = statistics
+        data_2[key] = statistics
     fig2 = plot_nl_iterations(
-        data,
+        data_2,
         "rel. perm. model",
     )
-    data = {}
+    data_3 = {}
     for config in configs_varying_ref_init_s_08:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
         try:
             statistics = read_data(config)
         except ValueError:
             statistics = SimulationStatistics()
-        data[key] = statistics
+        data_3[key] = statistics
     fig3 = plot_nl_iterations(
-        data,
+        data_3,
         "refinement factor",
     )
     fig3a = plot_spatial_convergence(
-        list(data.values())[::4], [5.0, 1.0, 0.5], combine_disc_est=True
+        list(data_3.values())[::4], [5.0, 1.0, 0.5], combine_disc_est=True
     )
     fig3b = plot_spatial_convergence(
-        list(data.values())[3::4], [5.0, 1.0, 0.5], combine_disc_est=True
+        list(data_3.values())[3::4], [5.0, 1.0, 0.5], combine_disc_est=True
     )
 
-    data = {}
+    data_4 = {}
     for config in configs_varying_ref_init_s_09:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
         try:
             statistics = read_data(config)
         except ValueError:
             statistics = SimulationStatistics()
-        data[key] = statistics
+        data_4[key] = statistics
     fig4 = plot_nl_iterations(
-        data,
+        data_4,
         "refinement factor",
     )
 

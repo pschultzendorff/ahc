@@ -1256,6 +1256,7 @@ class SolutionStrategyAHC(
             self.compute_hc_decay(recompute_decay=True)
             # No need to reset the initial guess for the nonlinear solver, as this is
             # done by :meth:`before_nonlinear_loop`. anyways.
+            # TODO Possible failure to do this?
 
     # endregion
 

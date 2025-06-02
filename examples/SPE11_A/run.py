@@ -41,12 +41,13 @@ from typing import Any, Type
 
 import numpy as np
 import porepy as pp
-from tpf.derived_models.spe11 import INITIAL_PRESSURE, SPE11Mixin
+from tpf.derived_models.spe11 import SPE11Mixin, case_A
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
 from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
+from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 # region SETUP
@@ -72,7 +73,7 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-dirname: pathlib.Path = pathlib.Path(__file__).parent
+dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # endregion
 
@@ -81,7 +82,7 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent
 class InitialConditionsMixin(TPFProtocol):
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
-        initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
+        initial_pressure = np.full(self.g.num_cells, case_A["INITIAL_PRESSURE"])
         initial_saturation = np.full(
             self.g.num_cells, self.params["spe11_initial_saturation"]
         )
@@ -142,6 +143,9 @@ default_params: dict[str, Any] = {
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
+    # SPE11 parameters:
+    "spe11_heterogeneous_cap_pressure": False,
+    "spe11_entry_pressure": 100.0,  # [Pa]
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
 }
@@ -208,11 +212,11 @@ def setup_solver(
             "hc_adaptive": True,
             "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
             "nl_error_ratio": 0.1,
-            "hc_nl_convergence_tol": 1e-2,
+            "hc_nl_convergence_tol": 1e-4,
             # Nonlinear solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
-            "max_iterations": 150,
+            "max_iterations": 50,
             "nl_appleyard_chopping": False,
         }
         model_class = SPE11HC
@@ -224,12 +228,12 @@ def setup_solver(
             # Adaptivity:
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e-2,
+            "nl_adaptive_convergence_tol": 1e-4,
             # Further parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": False,
-            "max_iterations": 20,
+            "max_iterations": 50,
         }
         model_class = SPE11Newton
     elif solver == "NewtonAppleyard":
@@ -239,7 +243,7 @@ def setup_solver(
             "nonlinear_solver": pp.NewtonSolver,
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e-2,
+            "nl_adaptive_convergence_tol": 1e-4,
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,
@@ -314,6 +318,7 @@ def run_simulation(config: SimulationConfig) -> None:
     try:
         model = model_class(params)
         pp.run_time_dependent_model(model=model, params=params)
+
     except Exception as e:
         with (config.folder_name / "failure.txt").open("w") as f:
             f.write(str(e))
@@ -324,8 +329,8 @@ def run_simulation(config: SimulationConfig) -> None:
 
 # region RUN
 solvers: list[str] = ["AHC", "Newton", "NewtonAppleyard"]
-adaptive_error_ratios: list[float] = [0.1, 0.00001]
-refinement_factors: list[float] = [20, 10, 5]
+adaptive_error_ratios: list[float] = [0.1, 0.00005]
+refinement_factors: list[float] = [10, 5, 1, 0.5]
 
 rp_models: dict[str, Any] = {
     "Brooks-Corey": {
@@ -377,7 +382,7 @@ def generate_configs() -> list[SimulationConfig]:
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        refinement_factor=20,
+                        refinement_factor=refinement_factors[0],
                         init_s=init_s,
                         rp_model_1={"model": "linear", "limit": False},
                         rp_model_2=rp_model,
@@ -388,14 +393,13 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
-        for refinement_factor in refinement_factors[1:]:
+        for refinement_factor in refinement_factors:
             # Highest resolution at init_s = 0.9 takes too long, mostly due to the fact
             # that adaptive Newton only makes sense for small-sized updates to produce
             # physical solutions. But setting ``hc_nl_convergence_tol`` low makes AHC
             # require a lot of time steps.
-            if init_s == 0.9 and refinement_factor == 5:
+            if init_s == 0.9 and refinement_factor == 0.5:
                 continue
-
             for solver_name, adaptive_error_ratio in itertools.product(
                 solvers, adaptive_error_ratios
             ):

@@ -6,7 +6,7 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
-from ahc import SimulationConfig, generate_configs
+from run import SimulationConfig, generate_configs
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 sns.set_theme()
@@ -23,6 +23,7 @@ class SimulationStatistics:
     temp_estimator: list = field(default_factory=list)
     hc_estimator: list = field(default_factory=list)
     lin_estimator: list = field(default_factory=list)
+    lambdas: list = field(default_factory=list)
 
 
 def flatten(xx: list[list]) -> list:
@@ -30,9 +31,10 @@ def flatten(xx: list[list]) -> list:
 
 
 def read_data(config: SimulationConfig) -> SimulationStatistics:
-    # Check if the solver failed at some point.
+    # Check if the solver failed at some time step and return empty statistics.
     if "failure" in [f.stem for f in config.folder_name.iterdir()]:
-        raise ValueError("Simulation did not complete.")
+        # raise ValueError("Simulation did not complete.")
+        return SimulationStatistics()
 
     # If not we can read the data.
     with open(config.folder_name / "solver_statistics.json", "r") as f:
@@ -58,6 +60,7 @@ def read_data(config: SimulationConfig) -> SimulationStatistics:
                 hc_estimator.append(hc_step["hc_error_estimates"])
                 lin_estimator.append(hc_step["linearization_error_estimates"])
             statistics.hc_estimator.append(hc_estimator)
+            statistics.lambdas.append(time_step["hc_lambdas"])
         elif config.solver_name.startswith("Newton"):
             if config.solver_name == "NewtonAppleyard":
                 pass
@@ -80,6 +83,7 @@ def read_data(config: SimulationConfig) -> SimulationStatistics:
         zip(statistics.time_steps[:-1], statistics.time_steps[1:])
     ):
         # TODO Fix this!
+        # QUESTION What is wrong?
         if ts > next_ts:
             time_steps_copy[i] = next_ts
     statistics.time_steps = time_steps_copy
@@ -104,7 +108,7 @@ def plot_nl_iterations(
     solvers = sorted(set("\n".join(case.split("_")[:2]) for case in cases))
     x_ticks = sorted(
         set(" ".join(case.split("_")[2:]) for case in cases),
-        key=lambda x: (x.isdigit(), x),
+        key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else x,
     )
 
     # Transform data to two arrays for iterations and annotations.
@@ -190,6 +194,10 @@ def plot_estimators(
 
     fig, ax = plt.subplots(figsize=(8, 6))
 
+    if uses_hc:
+        # Create a secondary y-axis for lambdas.
+        ax2 = ax.twinx()
+
     tot_nl_iterations: int = 0
     tot_nl_iterations_fine: int = 0
     # Plot spatial estimator
@@ -202,8 +210,8 @@ def plot_estimators(
         )
     ):
         if uses_hc:
-            # Plot NL est for each HC iteration.
-            for lin_est_i in lin_est:
+            for j, lin_est_i in enumerate(lin_est):
+                # Plot NL est for each HC iteration.
                 ax.plot(
                     range(
                         tot_nl_iterations_fine, tot_nl_iterations_fine + len(lin_est_i)
@@ -215,12 +223,25 @@ def plot_estimators(
                     markerfacecolor="none",
                     label=r"$\eta_{lin}$" if i == 0 else "",
                 )
+                # Plot lambdas on the second y-axis
+                ax2.plot(
+                    range(
+                        tot_nl_iterations_fine, tot_nl_iterations_fine + len(lin_est_i)
+                    ),
+                    [statistics.lambdas[i][j]]
+                    * len(lin_est_i),  # Same lambda for each HC step.
+                    "orange",
+                    linestyle="-",
+                    marker="s",
+                    markersize=4,
+                    alpha=0.7,
+                    label=r"$\beta$" if i == 0 else "",
+                )
                 tot_nl_iterations_fine += len(lin_est_i)
 
             hc_est_flat = flatten(statistics.hc_estimator[i])
             spat_est_flat = flatten(spat_est)
             temp_est_flat = flatten(temp_est)
-
         else:
             ax.plot(
                 range(tot_nl_iterations, tot_nl_iterations + len(lin_est)),
@@ -246,7 +267,7 @@ def plot_estimators(
                 label=r"$\eta_{hc}$" if i == 0 else "",
             )
 
-        # Plot spatial and temporal estimators for the full time step.
+        # Plot spatial and temporal estimators for each time step.
         if combine_disc_est:
             # Combine spatial and temporal estimators.
             disc_est_flat = np.array(spat_est_flat) + np.array(temp_est_flat)
@@ -280,11 +301,23 @@ def plot_estimators(
 
         # Update number of nl iterations.
         tot_nl_iterations += len(spat_est_flat)
+        # Plot a dotted grey vertical line to separate time steps.
+
+        if i < len(statistics.time_steps) - 1:
+            ax.axvline(
+                x=tot_nl_iterations - 0.5,
+                color="grey",
+                linestyle="--",
+                linewidth=2.0,
+                alpha=0.5,
+            )
 
     # Set y scale to log
     ax.set_yscale("log")
 
     # Add labels and title
+    # Set ticks to integers only
+    ax.set_xticks(range(0, tot_nl_iterations + 1, max(1, tot_nl_iterations // 10)))
     ax.tick_params(axis="both", labelsize=12)
     ax.set_xlabel(
         "Nonlinear iteration",
@@ -296,6 +329,15 @@ def plot_estimators(
         fontsize=14,
         fontweight="bold",
     )
+
+    if uses_hc:
+        ax2.tick_params(axis="y", labelcolor="orange")
+        ax2.set_ylabel(
+            r"$\beta$ values", color="orange", fontsize=14, fontweight="bold"
+        )
+        # Disable grid for secondary axis.
+        ax2.grid(False)
+
     if title is None:
         title = "Error Estimators Evolution"
     ax.set_title(
@@ -307,12 +349,21 @@ def plot_estimators(
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
     # Add legend
+    # Get handles and labels from primary axis
     handles, labels = ax.get_legend_handles_labels()
+
+    # If using HC estimator, also get handles and labels from secondary axis
+    if uses_hc:
+        handles2, labels2 = ax2.get_legend_handles_labels()
+        handles.extend(handles2)
+        labels.extend(labels2)
+
+    # Remove duplicates while preserving order
     by_label = dict(zip(labels, handles))
     ax.legend(
         by_label.values(),
         by_label.keys(),
-        loc="best",
+        loc="lower left",
         ncol=2,
         prop={"size": 14, "weight": "bold"},
     )
@@ -329,61 +380,69 @@ if __name__ == "__main__":
     configs_varying_rp_init_s_03 = configs[12:24]
     configs_varying_init_s = configs[:4] + configs[24:36] + configs[12:16]
     configs_cap_press = configs[36:]
-    data = {}
-    # for config in configs_varying_rp_init_s_02:
-    #     if config.rp_model_2["model"] == "Corey":
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-    #     else:
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
-    #     data[key] = read_data(config)
-    # fig1 = plot_nl_iterations(
-    #     data,
-    #     "rel. perm. model",
-    # )
-    # data = {}
-    # for config in configs_varying_rp_init_s_03:
-    #     if config.rp_model_2["model"] == "Corey":
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-    #     else:
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
-    #     data[key] = read_data(config)
-    # fig2 = plot_nl_iterations(
-    #     data,
-    #     "rel. perm. model",
-    # )
-    data = {}
+    data_1 = {}
+    for config in configs_varying_rp_init_s_02:
+        if config.rp_model_2["model"] == "Corey":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
+        else:
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        data_1[key] = read_data(config)
+    fig1 = plot_nl_iterations(
+        data_1,
+        "rel. perm. model",
+    )
+    data_2 = {}
+    for config in configs_varying_rp_init_s_03:
+        if config.rp_model_2["model"] == "Corey":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
+        else:
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        data_2[key] = read_data(config)
+    fig2 = plot_nl_iterations(
+        data_2,
+        "rel. perm. model",
+    )
+    data_3 = {}
     for config in configs_varying_init_s:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
         try:
             statistics = read_data(config)
         except ValueError:
             statistics = SimulationStatistics()
-        data[key] = statistics
-    # fig3 = plot_nl_iterations(
-    #     data,
-    #     r"$s_{w,init}$",
-    # )
-    # data = {}
-    # for config in configs_cap_press:
-    #     assert config.cp_model_2["model"] != "linear", "Wrong config chosen"
-    #     key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
-    #     try:
-    #         statistics = read_data(config)
-    #     except ValueError:
-    #         statistics = SimulationStatistics()
-    #     data[key] = statistics
-    # fig4 = plot_nl_iterations(
-    #     data,
-    #     "entry pressure [Pa]",
-    # )
+        data_3[key] = statistics
+    fig3 = plot_nl_iterations(
+        data_3,
+        r"$s_{w,init}$",
+    )
+    data_4 = {}
+    for config in configs_cap_press:
+        if config.solver_name.startswith("Newton"):
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
+        else:
+            assert config.cp_model_2["model"] != "linear", "Wrong config chosen"
+            # No need to plot AHC designs for the adaptive error ratio 0.1, which stops
+            # at the simple problem anyways.
+            if config.adaptive_error_ratio == 0.1:
+                continue
+            else:
+                key = f"{config.solver_name} from {config.cp_model_1['model']}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
+        try:
+            statistics = read_data(config)
+        except ValueError:
+            statistics = SimulationStatistics()
+        data_4[key] = statistics
+    fig4 = plot_nl_iterations(
+        data_4,
+        "entry pressure [Pa]",
+    )
 
     # fig1.savefig(dirname / "nl_iters_rp_model_s_init_02.png")
     # fig2.savefig(dirname / "nl_iters_rp_model_s_init_03.png")
     # fig3.savefig(dirname / "nl_iters_s_init.png")
     # fig4.savefig(dirname / "nl_iters_cap_press.png")
-    fig4 = plot_estimators(data["NewtonAppleyard_0.1_0.2"])
-    fig4.savefig(dirname / "estimators_newton_appleyard.png")
-    fig5 = plot_estimators(data["AHC_0.1_0.2"], combine_disc_est=True)
-    fig5.savefig(dirname / "estimators_ahc_0.1.png")
-    fig5 = plot_estimators(data["AHC_0.005_0.2"], combine_disc_est=True)
-    fig5.savefig(dirname / "estimators_ahc_0.005.png")
+    fig5 = plot_estimators(data_1["AHC_0.005_Corey 2"], combine_disc_est=True)
+    fig5.savefig(dirname / "estimators_ahc_s0.2_Corey_2.png")
+    fig6 = plot_estimators(data_1["NewtonAppleyard_0.1_Corey 2"])
+    fig6.savefig(dirname / "estimators_NewtonAppleyard_s0.2_Corey_2.png")
+    fig7 = plot_estimators(data_4["AHC from None_0.005_100.0"], combine_disc_est=True)
+    fig7.savefig(dirname / "estimators_ahc_cp100.png")

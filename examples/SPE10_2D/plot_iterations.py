@@ -1,5 +1,5 @@
-r"""Study convergence of solvers with different rel. perm./cap. pressure models and
- different initial saturations.
+r"""Study behavior during AHC/Newton iterations. We only run one time step, even if it
+ fails.
 
 The following solvers are employed:
 - Adaptive homotopy continuation (AHC) with Newton
@@ -153,12 +153,7 @@ default_params: dict[str, Any] = {
 time_manager_params: dict[str, Any] = {
     "schedule": np.array([0.0, 30.0 * pp.DAY]),
     "dt_init": 30.0 * pp.DAY,
-    "constant_dt": False,
-    "dt_min_max": (1e-3 * pp.DAY, 30.0 * pp.DAY),
-    "iter_optimal_range": (9, 12),
-    "iter_relax_factors": (0.7, 1.3),
-    "recomp_factor": 0.1,
-    "recomp_max": 5,
+    "constant_dt": True,
 }
 
 

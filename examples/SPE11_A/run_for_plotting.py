@@ -44,7 +44,6 @@ from tpf.derived_models.spe11 import SPE11Mixin, case_A
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
-from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 from tpf.viz.solver_statistics import SolverStatisticsANewton
 
 # region SETUP
@@ -131,12 +130,15 @@ default_params: dict[str, Any] = {
     "rel_perm_constants": {},
     "cap_press_constants": {},
     "grid_type": "simplex",
+    # SPE11 parameters:
+    "spe11_heterogeneous_cap_pressure": False,
+    "spe11_entry_pressure": 100.0,  # [Pa]
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
 }
 
 time_manager_params: dict[str, Any] = {
-    "schedule": np.array([0.0, 1.0 * pp.DAY]),
+    "schedule": np.array([0.0, 10.0 * pp.DAY]),
     "dt_init": 0.1 * pp.DAY,
     "constant_dt": True,
 }
@@ -238,84 +240,6 @@ def run_simulation(config: SimulationConfig) -> None:
     model = model_class(params)
     pp.run_time_dependent_model(model=model, params=params)
 
-    plot_quadratic_pressures(
-        model.g,
-        model.domain.bounding_box,
-        pp.get_solution_values(
-            "global_pressure_postprocessed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        ),
-        title="Global pressure postprocessed",
-        save_path=config.folder_name / "global_pressure_postprocessed.png",
-    )
-    plot_quadratic_pressures(
-        model.g,
-        model.domain.bounding_box,
-        pp.get_solution_values(
-            "global_pressure_reconstructed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        ),
-        title="Global pressure reconstructed",
-        save_path=config.folder_name / "global_pressure_reconstructed.png",
-    )
-    plot_quadratic_pressures(
-        model.g,
-        model.domain.bounding_box,
-        pp.get_solution_values(
-            "global_pressure_reconstructed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        )
-        - pp.get_solution_values(
-            "global_pressure_postprocessed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        ),
-        title="Global pressure difference reconstructed - postprocessed",
-        save_path=config.folder_name / "global_pressure_difference.png",
-    )
-
-    plot_quadratic_pressures(
-        model.g,
-        model.domain.bounding_box,
-        pp.get_solution_values(
-            "complimentary_pressure_postprocessed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        ),
-        title="Complimentary pressure postprocessed",
-        save_path=config.folder_name / "complimentary_pressure_postprocessed.png",
-    )
-    plot_quadratic_pressures(
-        model.g,
-        model.domain.bounding_box,
-        pp.get_solution_values(
-            "complimentary_pressure_reconstructed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        ),
-        title="Complimentary pressure reconstructed",
-        save_path=config.folder_name / "complimentary_pressure_reconstructed.png",
-    )
-    plot_quadratic_pressures(
-        model.g,
-        model.domain.bounding_box,
-        pp.get_solution_values(
-            "complimentary_pressure_reconstructed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        )
-        - pp.get_solution_values(
-            "complimentary_pressure_postprocessed_coeffs",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        ),
-        title="Complimentary pressure difference reconstructed - postprocessed",
-        save_path=config.folder_name / "complimentary_pressure_difference.png",
-    )
-
 
 # endregion
 
@@ -333,14 +257,13 @@ if __name__ == "__main__":
     cp_model: dict[str, Any] = {
         "model": "Brooks-Corey",
         "n_b": 2.0,
-        "entry_pressure": 30 * pp.PASCAL,
     }
     config = SimulationConfig(
         file_name="plotting",
         folder_name=dirname / "plotting",
         solver_name="NewtonAppleyard",
-        adaptive_error_ratio=0.1,
-        refinement_factor=5,
+        adaptive_error_ratio=0.0,  # Disregarded
+        refinement_factor=1.0,
         init_s=0.8,
         rp_model_1=rp_model,
         rp_model_2=rp_model,

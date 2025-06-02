@@ -158,11 +158,13 @@ class SimulationConfig:
     cp_model_2: dict[str, Any]
 
 
-def setup_solver() -> tuple[type[SPE10HC], dict[str, Any]]:
+def setup_solver(adaptive_error_ratio: float) -> tuple[type[SPE10HC], dict[str, Any]]:
     """Return a tuple of solver-specific parameters and model class based on the solver
     name.
 
     Parameters:
+        adaptive_error_ratio: The adaptive error ratio to be used in the homotopy
+            continuation solver.
 
     Returns:
         A tuple ``(model_class, solver_params)``, where ``model_class`` is the model
@@ -184,7 +186,7 @@ def setup_solver() -> tuple[type[SPE10HC], dict[str, Any]]:
         "hc_decay_recomp_max": 5,
         # Adaptivity:
         "hc_adaptive": True,
-        "hc_error_ratio": 0.005,  # adaptive error for homotopy
+        "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
         "nl_error_ratio": 0.1,
         "hc_nl_convergence_tol": 1e-3,
         # Nonlinear solver parameters:
@@ -209,7 +211,7 @@ def run_simulation(config: SimulationConfig) -> None:
         f"CP model: {config.cp_model_2}."
     )
 
-    model_class, solver_params = setup_solver()
+    model_class, solver_params = setup_solver(config.adaptive_error_ratio)
 
     # Build params dictionary
     params = default_params.copy()
@@ -286,27 +288,44 @@ if __name__ == "__main__":
         },
     }
 
+    init_s: float = 0.3
+
     # Linear
     config = SimulationConfig(
-        file_name="linear",
-        folder_name=dirname / "linear",
+        file_name=f"linear_{init_s}",
+        folder_name=dirname / f"linear_{init_s}",
         solver_name="AHC",  # Disregarded
-        adaptive_error_ratio=0.0,  # Disregarded
+        adaptive_error_ratio=0.005,
         cell_size=600 * FEET / 30,
-        init_s=0.2,
+        init_s=0.3,
         rp_model_1=rp_models["linear"],
         rp_model_2=rp_models["linear"],
         cp_model_1=cp_models["None"],
         cp_model_2=cp_models["None"],
     )
-    run_simulation(config)
+    # run_simulation(config)
 
     # Nonlinear
     config = SimulationConfig(
-        file_name="nonlinear",
-        folder_name=dirname / "nonlinear",
+        file_name=f"nonlinear_{init_s}",
+        folder_name=dirname / f"nonlinear_{init_s}",
         solver_name="AHC",  # Disregarded
-        adaptive_error_ratio=0.0,  # Disregarded
+        adaptive_error_ratio=0.005,
+        cell_size=600 * FEET / 30,
+        init_s=0.3,
+        rp_model_1=rp_models["linear"],
+        rp_model_2=rp_models["Brooks-Corey"],
+        cp_model_1=cp_models["None"],
+        cp_model_2=cp_models["linear_30"],
+    )
+    # run_simulation(config)
+
+    # Nonlinear
+    config = SimulationConfig(
+        file_name=f"nonlinear_stop_early_{init_s}",
+        folder_name=dirname / f"nonlinear_stop_early_{init_s}",
+        solver_name="AHC",  # Disregarded
+        adaptive_error_ratio=1.0,  # Stop early
         cell_size=600 * FEET / 30,
         init_s=0.2,
         rp_model_1=rp_models["linear"],
@@ -314,6 +333,7 @@ if __name__ == "__main__":
         cp_model_1=cp_models["None"],
         cp_model_2=cp_models["linear_30"],
     )
-    # run_simulation(config)
+    run_simulation(config)
+
 
 # endregion
