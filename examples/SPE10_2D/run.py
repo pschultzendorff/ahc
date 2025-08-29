@@ -386,6 +386,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3.
     for init_s in [0.2, 0.3]:
+        continue
         for rp_model_name, rp_model in rp_models.items():
             for solver_name, adaptive_error_ratio in itertools.product(
                 solvers, adaptive_error_ratios
@@ -423,6 +424,7 @@ def generate_configs() -> list[SimulationConfig]:
         for solver_name, adaptive_error_ratio in itertools.product(
             solvers, adaptive_error_ratios
         ):
+            continue
             # Newton at an adaptive error ratio of 0.005 causes problems and is skipped.
             if solver_name.startswith("Newton") and adaptive_error_ratio == 0.005:
                 continue
@@ -459,7 +461,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Brooks-Corey cap. pressure with different initial pressures.
     # Homotopy continuation starts with no cap. pressure. model.
-    for entry_pressure in [30, 100, 500]:  # , 1000]:
+    for entry_pressure in [300]:  # [30, 100, 300]:  # , 1000]:
         for solver_name, adaptive_error_ratio in itertools.product(
             solvers, adaptive_error_ratios
         ):
@@ -467,6 +469,8 @@ def generate_configs() -> list[SimulationConfig]:
                 continue
             # AHCAppleyard is only run with adaptive error ratio 0.005.
             if solver_name == "AHCAppleyard" and adaptive_error_ratio != 0.005:
+                continue
+            if solver_name == "AHCAppleyard":
                 continue
             file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
             folder_name = (
@@ -495,6 +499,7 @@ def generate_configs() -> list[SimulationConfig]:
     # Brooks-Corey cap. pressure with different initial pressures.
     # Run only for s_init = 0.3. For s_init = 0.2, we get a divide by zero error.
     for entry_pressure in [30, 100, 500]:  # 1000]:
+        continue
         for solver_name, adaptive_error_ratio in itertools.product(
             solvers, adaptive_error_ratios
         ):

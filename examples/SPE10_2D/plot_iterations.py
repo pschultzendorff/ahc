@@ -43,7 +43,6 @@ Model description:
 
 """
 
-import itertools
 import logging
 import os
 import pathlib
@@ -60,6 +59,7 @@ from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
 from tpf.utils.constants_and_typing import FEET
+from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 # region SETUP
@@ -115,6 +115,7 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class SPE10HC(
+    IterationExportingMixin,
     InitialConditionsMixin,
     SPE10Mixin,
     TwoPhaseFlowAHC,
@@ -123,6 +124,7 @@ class SPE10HC(
 
 
 class SPE10Newton(
+    IterationExportingMixin,
     InitialConditionsMixin,
     SPE10Mixin,
     TwoPhaseFlowANewton,
@@ -207,7 +209,7 @@ def setup_solver(
             "hc_adaptive": True,
             "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
             "nl_error_ratio": 0.1,
-            "hc_nl_convergence_tol": 1e2,
+            "hc_nl_convergence_tol": 1e-1,
             # Nonlinear solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -223,7 +225,7 @@ def setup_solver(
             # Adaptivity:
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e2,
+            "nl_adaptive_convergence_tol": 1e-1,
             # Further parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -320,8 +322,11 @@ def run_simulation(config: SimulationConfig) -> None:
 # endregion
 
 # region RUN
-solvers: list[str] = ["AHC", "Newton", "NewtonAppleyard"]
-adaptive_error_ratios: list[float] = [0.1, 0.005]
+solvers: list[tuple[str, float]] = [
+    ("AHC", 0.005),
+    ("Newton", 0.1),
+    ("NewtonAppleyard", 0.1),
+]
 
 rp_models: dict[str, Any] = {
     "Brooks-Corey": {
@@ -330,53 +335,16 @@ rp_models: dict[str, Any] = {
         "n_b": 1.0,
         "eta": 2.0,
     },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-    "Corey_power_2": {"model": "Corey", "limit": True, "power": 2},
-    "Corey_power_3": {"model": "Corey", "limit": True, "power": 3},
 }
 
 cp_models: dict[str, Any] = {
     "None": {
         "model": None,
     },
-    "linear_30": {
+    "linear": {
         "model": "linear",
         "entry_pressure": 30 * pp.PASCAL,
         "linear_param": 3.0,
-    },
-    "Brooks-Corey_30": {
-        "model": "Brooks-Corey",
-        "n_b": 2.0,
-        "entry_pressure": 30 * pp.PASCAL,
-    },
-    "linear_100": {
-        "model": "linear",
-        "entry_pressure": 100 * pp.PASCAL,
-        "linear_param": 3.0,
-    },
-    "Brooks-Corey_100": {
-        "model": "Brooks-Corey",
-        "n_b": 2.0,
-        "entry_pressure": 100 * pp.PASCAL,
-    },
-    "linear_500": {
-        "model": "linear",
-        "entry_pressure": 500 * pp.PASCAL,
-        "linear_param": 3.0,
-    },
-    "Brooks-Corey_500": {
-        "model": "Brooks-Corey",
-        "n_b": 2.0,
-        "entry_pressure": 500 * pp.PASCAL,
-    },
-    "linear_1000": {
-        "model": "linear",
-        "entry_pressure": 1000 * pp.PASCAL,
-        "linear_param": 3.0,
-    },
-    "Brooks-Corey_1000": {
-        "model": "Brooks-Corey",
-        "n_b": 2.0,
-        "entry_pressure": 1000 * pp.PASCAL,
     },
 }
 
@@ -385,51 +353,14 @@ def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
     configs = []
 
-    # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3.
-    for init_s in [0.2, 0.3]:
-        continue
-        for rp_model_name, rp_model in rp_models.items():
-            for solver_name, adaptive_error_ratio in itertools.product(
-                solvers, adaptive_error_ratios
-            ):
-                # Newton at an adaptive error ratio of 0.01 causes problems and is skipped.
-                if solver_name.startswith("Newton") and adaptive_error_ratio == 0.005:
-                    continue
-                folder_name = (
-                    dirname
-                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                    / "varying_rp"
-                    / f"init_s_{init_s}"
-                    / rp_model_name
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=rp_model_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        adaptive_error_ratio=adaptive_error_ratio,
-                        cell_size=600 * FEET / 30,
-                        init_s=init_s,
-                        rp_model_1={"model": "linear", "limit": False},
-                        rp_model_2=rp_model,
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["linear_30"],
-                    )
-                )
-
     # # Varying init_s for the Brooks-Corey model.
-    for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
-        for solver_name, adaptive_error_ratio in itertools.product(
-            solvers, adaptive_error_ratios
-        ):
-            # Newton at an adaptive error ratio of 0.01 causes problems and is skipped.
-            if solver_name.startswith("Newton") and adaptive_error_ratio == 0.005:
-                continue
+    for init_s in [0.2, 0.3, 0.5]:
+        for solver_name, adaptive_error_ratio in solvers:
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
                 dirname
+                / "iteration_plotting"
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / "varying_init_s"
                 / file_name
             )
             configs.append(
@@ -441,45 +372,9 @@ def generate_configs() -> list[SimulationConfig]:
                     cell_size=600 * FEET / 30,
                     init_s=init_s,
                     rp_model_1={"model": "linear", "limit": False},
-                    rp_model_2={
-                        "model": "Brooks-Corey",
-                        "limit": True,
-                        "n1": 2,
-                        "n2": 2,
-                        "n3": 1,
-                    },
-                    cp_model_1=cp_models["None"],
-                    cp_model_2=cp_models["linear_30"],
-                )
-            )
-
-    # Brooks-Corey cap. pressure with different initial pressures.
-    # Run only for s_init = 0.3. For s_init = 0.2, we get a divide by zero error.
-    for entry_pressure in [30, 100, 500, 1000]:
-        for solver_name, adaptive_error_ratio in itertools.product(
-            solvers, adaptive_error_ratios
-        ):
-            if solver_name.startswith("Newton") and adaptive_error_ratio == 0.005:
-                continue
-            file_name = f"entry_pressure_{entry_pressure}"
-            folder_name = (
-                dirname
-                / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / "capillary_pressure"
-                / file_name
-            )
-            configs.append(
-                SimulationConfig(
-                    file_name=file_name,
-                    folder_name=folder_name,
-                    solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
-                    cell_size=600 * FEET / 30,
-                    init_s=0.3,
-                    rp_model_1={"model": "linear", "limit": False},
                     rp_model_2=rp_models["Brooks-Corey"],
-                    cp_model_1=cp_models[f"linear_{entry_pressure}"],
-                    cp_model_2=cp_models[f"Brooks-Corey_{entry_pressure}"],
+                    cp_model_1=cp_models["None"],
+                    cp_model_2=cp_models["linear"],
                 )
             )
 

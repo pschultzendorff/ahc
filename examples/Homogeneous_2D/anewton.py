@@ -151,9 +151,7 @@ cell_sizes: list[float] = [
     # 600 * FEET / 7.5,
     # 600 * FEET / 15,
     # 600 * FEET / 30,
-    600
-    * FEET
-    / 60,
+    600 * FEET / 60,
 ]
 appleyard_chopping_list: list[bool] = [False, True]
 initial_saturation_list: np.ndarray = np.linspace(0.2, 0.3, 5)
@@ -184,7 +182,7 @@ for i, (
 
     filename: str = f"cellsz_{int(cell_size)}"
     foldername: pathlib.Path = (
-        pathlib.Path(__file__).parent
+        pathlib.Path(__file__).parent.resolve()
         / solver_name
         / "varying_cell_sizes"
         / f"init_s_{initial_saturation}"

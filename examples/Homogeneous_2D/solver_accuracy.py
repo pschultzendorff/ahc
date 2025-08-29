@@ -80,7 +80,9 @@ logger.setLevel(logging.INFO)
 
 initial_saturation: float = 0.2
 dirname: pathlib.Path = (
-    pathlib.Path(__file__).parent / "solver_accuracy" / f"init_{initial_saturation}"
+    pathlib.Path(__file__).parent.resolve()
+    / "solver_accuracy"
+    / f"init_{initial_saturation}"
 )
 
 # endregion

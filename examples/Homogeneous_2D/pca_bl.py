@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 
 from tpf_PorePy.src.tpf.viz.pca import biplot, screeplot
 
-dirname: pathlib.Path = pathlib.Path(__file__).parent
+dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 (dirname / "pca_bl").mkdir(exist_ok=True)
 logger = logging.getLogger(__name__)
 

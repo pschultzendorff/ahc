@@ -117,7 +117,6 @@ class ModifiedEquations(EquationsTPF):
 
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
-
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann)."""
         # Dirichlet conditions for both phases.
@@ -131,7 +130,9 @@ class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, TwoPhaseFlow): .
 
 # Set up folder and files for logging/plots/saved time steps.
 foldername: pathlib.Path = (
-    pathlib.Path(__file__).parent / "results" / "brooks-corey_no_pc_simplex_test"
+    pathlib.Path(__file__).parent.resolve()
+    / "results"
+    / "brooks-corey_no_pc_simplex_test"
 )
 
 try:

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tpf.utils.constants_and_typing import FEET
 
-dirname: pathlib.Path = pathlib.Path(__file__).parent
+dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 solvers: list[str] = [
     "ahc_0.1",
     "ahc_0.01",

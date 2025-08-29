@@ -141,9 +141,7 @@ params = {
 cell_sizes: list[float] = [
     # 600 * FEET / 7.5,
     # 600 * FEET / 15,
-    600
-    * FEET
-    / 30,
+    600 * FEET / 30,
 ]
 rel_perm_constants_list: list[dict[str, Any]] = [
     {"model": "linear", "limit": True},
@@ -167,7 +165,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
     # distinguishing different runs in ParaView easier.
     filename: str = f"cellsz_{int(cell_size)}"
     foldername: pathlib.Path = (
-        pathlib.Path(__file__).parent
+        pathlib.Path(__file__).parent.resolve()
         / "grid_convergence"
         / f"rp_{rp_model['model']}_cp._{cp_model['model']}"
         / filename
@@ -217,7 +215,7 @@ for i, (cell_size, rp_model, cp_model) in enumerate(
 ):
     filename: str = f"cellsz_{int(cell_size)}"
     foldername: pathlib.Path = (
-        pathlib.Path(__file__).parent
+        pathlib.Path(__file__).parent.resolve()
         / "grid_convergence"
         / f"rp_{rp_model['model']}_cp._{cp_model['model']}"
         / filename
@@ -350,13 +348,21 @@ ax4.set_ylabel("Global energy norm")
 ax4.set_title(f"Global energy")
 ax4.legend()
 
-fig1.savefig(pathlib.Path(__file__).parent / "grid_convergence" / "total_estimator.png")
+fig1.savefig(
+    pathlib.Path(__file__).parent.resolve() / "grid_convergence" / "total_estimator.png"
+)
 fig2.savefig(
-    pathlib.Path(__file__).parent / "grid_convergence" / "equilibration_mismatch.png"
+    pathlib.Path(__file__).parent.resolve()
+    / "grid_convergence"
+    / "equilibration_mismatch.png"
 )
 fig3.savefig(
-    pathlib.Path(__file__).parent / "grid_convergence" / "relative_estimators.png"
+    pathlib.Path(__file__).parent.resolve()
+    / "grid_convergence"
+    / "relative_estimators.png"
 )
-fig4.savefig(pathlib.Path(__file__).parent / "grid_convergence" / "global_energy.png")
+fig4.savefig(
+    pathlib.Path(__file__).parent.resolve() / "grid_convergence" / "global_energy.png"
+)
 
 # endregion

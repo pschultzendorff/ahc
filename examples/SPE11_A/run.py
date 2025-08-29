@@ -330,7 +330,7 @@ def run_simulation(config: SimulationConfig) -> None:
 # region RUN
 solvers: list[str] = ["AHC", "Newton", "NewtonAppleyard"]
 adaptive_error_ratios: list[float] = [0.1, 0.00005]
-refinement_factors: list[float] = [10, 5, 1, 0.5]
+refinement_factors: list[float] = [10, 5, 1]  # , 0.5]
 
 rp_models: dict[str, Any] = {
     "Brooks-Corey": {

@@ -33,7 +33,7 @@ print(total_mobility)
 total_flow: float = (
     total_mobility * (5.36e7 * pp.PASCAL - 5.348e7 * pp.PASCAL) / L * permeability
 )  # [m^3 s^-1]
-
+total_flow = 0.5 * (5.3e7 * pp.PASCAL - 5.2e7 * pp.PASCAL) / L * permeability
 # Gravity gradient between two cells. It is important to have the SAME length scale that
 # goes into the gravity number to get the right ratio of viscous and buoyancy flow over
 # the SAME interface.
@@ -421,7 +421,8 @@ def F_with_capillary(
     # Calculate capillary pressure gradient.
     grad_pcs: np.ndarray = cap_press_gradient(s_U, s_D, cp_model, entry_pressure)
 
-    # Calculate flow function based on upstream saturations. Set gravity to 0.
+    # Calculate fractional flow function based on upstream saturations. Set gravity to
+    # 0.
     f_w_SU: np.ndarray = f_w(s_U, rp_model, n_g=0.0, grad_pc=grad_pcs, **kwargs)
 
     # Precompute rel. perms. and mobility values.
@@ -450,7 +451,7 @@ def F_with_capillary(
             lambda_wSU
             * (1 + k_rn_SD * grad_pcs / (peclet_local * Pc_bar_local / L_local))
             / (
-                lambda_wSD + lambda_nSD + 1e-20
+                lambda_wSU + lambda_nSD + 1e-20
             )  # Due to upwinding, we can have a division by zero.
         )
         # Counter-current, wetting backward, nonwetting forward.
@@ -667,9 +668,10 @@ def plot_F_capillary() -> None:
         30.0 * pp.PASCAL,
         100.0 * pp.PASCAL,
         500.0 * pp.PASCAL,
+        # 2000 * pp.PASCAL,
     ]  # Weak to strong capillary effects
     rp_models = ["Corey_2", "Corey_3", "Brooks-Corey"]
-    upwinding_flags = [True, False]
+    upwinding_flags = [True]  # , False]
 
     for p_e in pe_values:
         for upwinding in upwinding_flags:
@@ -699,9 +701,9 @@ def plot_F_capillary() -> None:
                 ax.plot_surface(s_D_grid, s_U_grid, F_values, cmap="viridis")  # type: ignore
 
                 # Set labels and title
-                ax.set_xlabel(r"$s_D$")
-                ax.set_ylabel(r"$s_U$")
-                ax.set_zlabel(r"$F(s_U, s_D)$")  # type: ignore
+                ax.set_xlabel(r"$\hat{s}_{w,D}$")
+                ax.set_ylabel(r"$\hat{s}_{w,U}$")
+                ax.set_zlabel(r"$f_w(s_U, s_D)$")  # type: ignore
 
                 # Split title into two lines for better readability
                 # Peclet number only makes sense for nonzero capillary pressure.
@@ -731,7 +733,7 @@ def plot_F_capillary() -> None:
                 "linear",
                 "linear",
                 0.0,
-                dirname / f"F_cap_p_e_{p_e}_upwinding_{upwinding}_0.png",
+                dirname / f"F_cap_p_e_{0.0}_upwinding_{upwinding}_0.png",
             )
             # Linear rel. perm., linear capillary pressure.
             plot(
@@ -763,12 +765,12 @@ def plot_dSU_F_capillary() -> None:
     s_D_grid, s_U_grid = np.meshgrid(S_values, S_values)
 
     pe_values = [
-        30.0 * pp.PASCAL,
-        100.0 * pp.PASCAL,
+        # 30.0 * pp.PASCAL,
+        # 100.0 * pp.PASCAL,
         500.0 * pp.PASCAL,
     ]  # Weak to strong capillary effects
-    rp_models = ["Corey_2", "Corey_3", "Brooks-Corey"]
-    upwinding_flags = [True, False]
+    rp_models = ["Corey_2"]  # , "Corey_3", "Brooks-Corey"]
+    upwinding_flags = [True]  # , False]
 
     for p_e in pe_values:
         for upwinding in upwinding_flags:
@@ -806,7 +808,7 @@ def plot_dSU_F_capillary() -> None:
                 )
 
                 # Set labels and title
-                axes[i, j].set_xlabel(r"$s_D$")
+                axes[i, j].set_xlabel(r"$s_{w,D}$")
                 axes[i, j].set_ylabel(r"$s_U$")
                 axes[i, j].set_zlabel(r"$\partial_{s_U} F(s_U, s_D)$")
 

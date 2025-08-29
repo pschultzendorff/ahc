@@ -104,7 +104,7 @@ def plot_nl_iterations(
     solvers = sorted(set("\n".join(case.split("_")[:2]) for case in cases))
     x_ticks = sorted(
         set(" ".join(case.split("_")[2:]) for case in cases),
-        key=lambda x: (x.isdigit(), x),
+        key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else x,
     )
 
     # Transform data to two arrays for iterations and annotations.
@@ -423,8 +423,8 @@ if __name__ == "__main__":
     configs = generate_configs()
     configs_varying_rp_init_s_08 = configs[:12]
     configs_varying_rp_init_s_09 = configs[12:24]
-    configs_varying_ref_init_s_08 = configs[:4] + configs[24:28]
-    configs_varying_ref_init_s_09 = configs[12:16] + configs[28:]
+    configs_varying_ref_init_s_08 = configs[24:36]
+    configs_varying_ref_init_s_09 = configs[36:]
     data_1 = {}
     for config in configs_varying_rp_init_s_08:
         if config.rp_model_2["model"] == "Corey":
@@ -494,11 +494,11 @@ if __name__ == "__main__":
     )
 
     fig1.savefig(dirname / "nl_iters_rp_model_s_init_08.png")
-    fig1a.savefig(dirname / "estimators_rp_model_s_init_08.png")
+    # fig1a.savefig(dirname / "estimators_rp_model_s_init_08.png")
     fig2.savefig(dirname / "nl_iters_rp_model_s_init_09.png")
     fig3.savefig(dirname / "nl_iters_ref_fac_s_init_08.png")
-    fig3a.savefig(dirname / "ahc_spatial_convergence_s_init_08.png")
-    fig3b.savefig(dirname / "newtonappleyard_spatial_convergence_s_init_08.png")
+    # fig3a.savefig(dirname / "ahc_spatial_convergence_s_init_08.png")
+    # fig3b.savefig(dirname / "newtonappleyard_spatial_convergence_s_init_08.png")
     fig4.savefig(dirname / "nl_iters_ref_fac_s_init_09.png")
     # fig5 = plot_estimators(data["AHC_0.1_0.2"], combine_disc_est=True)
     # fig5.savefig(dirname / "estimators_ahc_0.1.png")

@@ -190,7 +190,7 @@ for i, (
 
     filename: str = f"cellsz_{int(cell_size)}"
     foldername: pathlib.Path = (
-        pathlib.Path(__file__).parent
+        pathlib.Path(__file__).parent.resolve()
         / f"ahc_{adaptive_error_ratio}"
         / "varying_cell_sizes"
         / f"init_s_{initial_saturation}"
