@@ -231,13 +231,8 @@ def run_simulation(config: SimulationConfig) -> None:
     except Exception:
         pass
 
-    try:
-        model = model_class(params)
-        pp.run_time_dependent_model(model=model, params=params)
-    except Exception as e:
-        with (config.folder_name / "failure.txt").open("w") as f:
-            f.write(str(e))
-        logger.error(f"Run failed with error: {e}.")
+    model = model_class(params)
+    pp.run_time_dependent_model(model=model, params=params)
 
 
 # endregion

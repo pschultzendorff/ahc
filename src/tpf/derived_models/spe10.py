@@ -318,7 +318,7 @@ class SolutionStrategySPE10(TPFProtocol):
                     + f" Continuing with default value {value}"
                 )
 
-        perm, poro = load_spe10_data(pathlib.Path(__file__).parent.resolve() / "data")
+        perm, poro = load_spe10_data(DATA_DIR)
         if isotropic_perm:
             self._permeability: np.ndarray = np.zeros((1, g.num_cells))
         else:

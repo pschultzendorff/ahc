@@ -3,6 +3,7 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -133,12 +134,16 @@ def plot_nl_iterations(
     # Create heatmap figure
     fig, ax = plt.subplots(figsize=(8, 4))
 
+    # Failed time steps are marked in red.
+    cmap = matplotlib.colormaps["Blues"]
+    cmap.set_bad(color="red")
+
     sns.heatmap(
         iterations,
         mask=mask,
         annot=annotations,
         fmt="s",
-        cmap="Blues",
+        cmap=cmap,
         cbar=True,
         cbar_kws={"label": "Number of nonlinear iterations"},
         xticklabels=x_ticks,

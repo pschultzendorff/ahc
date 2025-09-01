@@ -37,18 +37,23 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR: pathlib.Path = pathlib.Path(__file__).parent.resolve() / "spe11_data"
 ZIP_FILENAME: str = "por_perm_case2a.zip"
-URL: str = "https://raw.githubusercontent.com/Simulation-Benchmarks/11thSPE-CSP/refs/heads/main/geometries/spe11a.geo"
+URL_CASE_A: str = "https://raw.githubusercontent.com/Simulation-Benchmarks/11thSPE-CSP/refs/heads/main/geometries/spe11a.geo"
+URL_CASE_B: str = "https://raw.githubusercontent.com/Simulation-Benchmarks/11thSPE-CSP/refs/heads/main/geometries/spe11b.geo"
+
+GEO_FILE_CASE_A: str = "spe11a.geo"
+GEO_FILE_CASE_B: str = "spe11b.geo"
 
 # region MODEL_PARAMETERS
-ATM: float = 101325.0  # [Pa], atmospheric pressure
+ATM: float = 0.0  # [Pa], atmospheric pressure
+# ATM: float = 0.0  # [Pa], atmospheric pressure
 
 # region case A
 case_A: dict[str, Any] = {
     "WIDTH": 2.8,  # [m]
     "HEIGHT": 1.2,  # [m]
     "INITIAL_PRESSURE": ATM,  # [Pa]
-    "INITIAL_SATURATION": 0.9,  # [-], initial saturation. Domain filled with water.
-    "INJECTION_RATE": 1.75e-7 / _co2["density"],  # 1.7x10^-5 kg/s
+    "INITIAL_SATURATION": 0.8,  # [-], initial saturation. Domain filled with water.
+    "INJECTION_RATE": 1.7e-7 / _co2["density"],  # 1.7x10^- 7kg/s
     "WELL_SIZE": 0.02,  # [m]
     "WELL_1_POS": (0.9, 0.3),  # [m]
     "WELL_2_POS": (1.7, 0.68),  # [m], slightly lower so it's fully inside facies 4.
@@ -90,9 +95,10 @@ case_B: dict[str, Any] = {
     "INITIAL_PRESSURE": 3e7,  # [Pa], specified only in the center of well 1. Without
     # calculating an equilibrium, we just assume this holds for the full domain.
     "INITIAL_SATURATION": 0.9,  # [-], initial saturation. Domain filled with water.
-    "INJECTION_RATE": 1.75e-7 / _co2["density"],  # 1.7x10^-5 kg/s
+    "INJECTION_RATE": 0.035 / _co2["density"],  # 0.035 kg/s
     "WELL_1_POS": (2700, 300),  # [m]
     "WELL_2_POS": (5100, 700),  # [m]
+    "WELL_SIZE": 0.2,  # [m]
     "MAX_CAP_PRESS": 3e7,  # [Pa], upper limit on capillary pressure.
     "PERMEABILITY": {  # Permeability in [m^2]
         "facies 1": 1e-16,
@@ -141,12 +147,14 @@ def download_spe11_data(data_dir: pathlib.Path) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
 
     # Download the ZIP file.
-    logger.info(f"Downloading dataset from {URL}")
-    response = requests.get(URL)
-    response.raise_for_status()
+    for url, file in zip([URL_CASE_A, URL_CASE_B], [GEO_FILE_CASE_A, GEO_FILE_CASE_B]):
+        logger.info(f"Downloading dataset from {url}")
+        response = requests.get(url)
+        response.raise_for_status()
 
-    with (data_dir / "spe11a.geo").open("wb") as f:
-        f.write(response.content)
+        with (data_dir / file).open("wb") as f:
+            f.write(response.content)
+
     logger.info("Download completed.")
 
 
@@ -154,7 +162,8 @@ def read_refinement_factor(geo_file: pathlib.Path) -> float:
     """Read the refinement factor in the SPE11 geometric information."""
     with geo_file.open("r") as f:
         lines: list[str] = f.readlines()
-    return float(lines[3][36:-3])
+    line_idx = 3 if geo_file.name == GEO_FILE_CASE_A else 4
+    return float(lines[line_idx][36:-3])
 
 
 def write_refinement_factor(
@@ -163,7 +172,10 @@ def write_refinement_factor(
     """Adjust the refinement factor in the SPE11 geometric information."""
     with geo_file.open("r+") as f:
         lines: list[str] = f.readlines()
-        lines[3] = f"DefineConstant[ refinement_factor = {refinement_factor} ];\n"
+        line_idx = 3 if geo_file.name == GEO_FILE_CASE_A else 4
+        lines[line_idx] = (
+            f"DefineConstant[ refinement_factor = {refinement_factor} ];\n"
+        )
         # Replace the current content of the file.
         f.seek(0)
         f.write("".join(lines))
@@ -319,24 +331,38 @@ def load_spe11_data(
     # Ensure the destination directory exists.
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Assure that the `.geo` file is available. In lieu of a goto statement, run the
+    geo_file: pathlib.Path = data_dir / (
+        GEO_FILE_CASE_A if case == case_A else GEO_FILE_CASE_B
+    )
+
+    # Assure that the `.geo` file exists. In lieu of a goto statement, run the
     # following loop at maximum twice.
     i: int = 0
-    geo_file: pathlib.Path | None = None
     while True:
-        for filename in data_dir.iterdir():
-            if filename.suffix == ".geo":
-                geo_file = data_dir / filename
-        if geo_file is None:
-            if i >= 1:
-                raise FileNotFoundError(
-                    "Could not locate the .geo file. Perhaps, the download failed"
-                )
-            logger.info(".geo file not found. Downloading again ...")
-            download_spe11_data(data_dir)
-        else:
+        if geo_file.exists():
             break
+        if i >= 1:
+            raise FileNotFoundError(
+                "Could not locate the .geo file. Perhaps, the download failed"
+            )
+        logger.info(".geo file not found. Downloading again ...")
+        download_spe11_data(data_dir)
         i += 1
+
+    # while True:
+    #     for filename in data_dir.iterdir():
+    #         if filename.suffix == ".geo":
+    #             geo_file = data_dir / filename
+    #     if geo_file is None:
+    #         if i >= 1:
+    #             raise FileNotFoundError(
+    #                 "Could not locate the .geo file. Perhaps, the download failed"
+    #             )
+    #         logger.info(".geo file not found. Downloading again ...")
+    #         download_spe11_data(data_dir)
+    #     else:
+    #         break
+    #     i += 1
 
     if read_refinement_factor(geo_file) != refinement_factor:
         logger.info(
@@ -607,10 +633,12 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
 
         """
         domain_sides = self.domain_boundary_sides(g)
-        # return pp.BoundaryCondition(
-        #     g, faces=np.logical_or(domain_sides.west, domain_sides.east), cond="dir"
-        # )
-        return pp.BoundaryCondition(g, faces=domain_sides.north, cond="dir")
+        # return pp.BoundaryCondition(g, faces=domain_sides.west, cond="dir")
+        return pp.BoundaryCondition(
+            g,
+            faces=np.logical_or(domain_sides.west, domain_sides.east),
+            cond="dir",
+        )
 
     def _bc_dirichlet_pressure_values(
         self, g: pp.Grid, phase: FluidPhase
@@ -618,12 +646,10 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
         """Dirichle pressure values."""
         if phase == self.nonwetting:
             domain_sides = self.domain_boundary_sides(g)
-            # bc: np.ndarray = np.zeros(g.num_faces)
-            # bc[np.logical_or(domain_sides.west, domain_sides.east)] = (
-            #     phase.convert_units(ATM, "kg*m^-1*s^-2")
-            # )
             bc: np.ndarray = np.zeros(g.num_faces)
-            bc[domain_sides.north] = phase.convert_units(ATM, "kg*m^-1*s^-2")
+            bc[np.logical_or(domain_sides.west, domain_sides.east)] = (
+                phase.convert_units(ATM, "kg*m^-1*s^-2")
+            )
             return bc
         else:
             raise NotImplementedError(
@@ -686,7 +712,7 @@ class SolutionStrategySPE11(TPFProtocol):
         if self.spe11_case == "A":
             self.spe11_params = case_A
         elif self.spe11_case == "B":
-            self.spe11_params = case_A
+            self.spe11_params = case_B
         else:
             raise ValueError(
                 f"Unknown SPE11 case {self.spe11_case}. "

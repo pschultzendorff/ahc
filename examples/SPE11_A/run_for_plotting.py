@@ -1,11 +1,4 @@
-r"""Study convergence of solvers on different grid sizes and with different rel.
- perm./cap. pressure models.
-
-The following solvers are employed:
-- Adaptive homotopy continuation (AHC) with Newton
-- Newton
-- Newton with Appleyard chopping
-
+r"""Run the SPE11 A example with small time steps for plotting.
 
 
 Model description:
@@ -42,6 +35,7 @@ import numpy as np
 import porepy as pp
 from tpf.derived_models.spe11 import SPE11Mixin, case_A
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
+from tpf.models.flow_and_transport import TwoPhaseFlow
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.viz.solver_statistics import SolverStatisticsANewton
@@ -114,7 +108,7 @@ class InitialConditionsMixin(TPFProtocol):
 class SPE11Newton(
     InitialConditionsMixin,
     SPE11Mixin,
-    TwoPhaseFlowANewton,
+    TwoPhaseFlow,
 ):  # type: ignore
     ...
 
@@ -131,6 +125,7 @@ default_params: dict[str, Any] = {
     "cap_press_constants": {},
     "grid_type": "simplex",
     # SPE11 parameters:
+    "spe11_case": "A",
     "spe11_heterogeneous_cap_pressure": False,
     "spe11_entry_pressure": 100.0,  # [Pa]
     # Nonlinear solver:
