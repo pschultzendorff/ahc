@@ -16,7 +16,7 @@ from tpf.models.reconstruction import (
 )
 from tpf.numerics.quadrature import Integral, TriangleQuadrature
 from tpf.utils.constants_and_typing import (
-    COMPLIMENTARY_PRESSURE,
+    COMPLEMENTARY_PRESSURE,
     GLOBAL_PRESSURE,
     PRESSURE_KEY,
 )
@@ -236,7 +236,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             r"""
 
             The integrand can take two different forms, exemplarily shown for
-            complimentary pressure:
+            complementary pressure:
             .. math::
                 (\kappa \nabla (\tilde{\mathfrac{q}^n} - \mathfrac{q}^n))^2, \\
                 \kappa \nabla (\tilde{\mathfrac{q}}^n - \mathfrac{q}^n) \cdot
@@ -423,7 +423,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         We follow the construction of Vohralík and M. F. Wheeler, “A posteriori error
         estimates, stopping criteria, and adaptivity for two-phase flows,” 2013,
         doi:10.1007/s10596-013-9356-0. The time integrals are approximated by
-        (exemplarily for complimentary pressure):
+        (exemplarily for complementary pressure):
         .. math::
             \frac{|t_n - t_{n-1}|}{3} \sum_{K \in \mathcal{T}_h}
             \left[
@@ -438,7 +438,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         """
         estimators: dict[str, float] = {}
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
             # Satisfy mypy.
             pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
             # Calculate local estimatorss.
@@ -481,7 +481,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 + f" {estimators[pressure_key]}"
             )
 
-        return estimators[GLOBAL_PRESSURE], estimators[COMPLIMENTARY_PRESSURE]
+        return estimators[GLOBAL_PRESSURE], estimators[COMPLEMENTARY_PRESSURE]
 
     def local_energy_norm(self) -> None:
         r"""Calculate the local in space and time energy norm of the numerical
@@ -610,7 +610,7 @@ class SolutionStrategyEst(  # type: ignore
                 time_step_index=0,
                 iterate_index=0,
             )
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
             pp.set_solution_values(
                 f"{pressure_key}_NC_estimator",
                 np.zeros(self.g.num_cells),
@@ -630,7 +630,7 @@ class SolutionStrategyEst(  # type: ignore
             nonlinear_increment, residual, reference_residual, nl_params
         )
         residual_and_flux_est: float = self.global_res_and_flux_est()
-        global_pressure_nc_est, complimentary_pressure_nc_est = (
+        global_pressure_nc_est, complementary_pressure_nc_est = (
             self.global_nonconformity_est()
         )
         global_energy_norm: float = self.global_energy_norm()
@@ -640,7 +640,7 @@ class SolutionStrategyEst(  # type: ignore
             residual_and_flux_est=residual_and_flux_est,
             nonconformity_est={
                 GLOBAL_PRESSURE: global_pressure_nc_est,
-                COMPLIMENTARY_PRESSURE: complimentary_pressure_nc_est,
+                COMPLEMENTARY_PRESSURE: complementary_pressure_nc_est,
             },
             global_energy_norm=global_energy_norm,
         )
@@ -650,7 +650,7 @@ class SolutionStrategyEst(  # type: ignore
         super().after_nonlinear_convergence()
 
         # Update time step values for local in space and time estimators.
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
             pressure_values: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}_NC_estimator", self.g_data, iterate_index=0
             )
@@ -716,7 +716,7 @@ class DataSavingEst(DataSavingRec):
                 )
             except KeyError:
                 pass
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
             try:
                 data.append(
                     (

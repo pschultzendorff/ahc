@@ -141,8 +141,6 @@ else:
             self,
             saturation: pp.ad.Operator,
             phase: FluidPhase | None = None,
-            limit: bool = False,
-            epsilon: float = 0.0,
         ) -> pp.ad.Operator:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
             ...
@@ -151,8 +149,6 @@ else:
             self,
             saturation: np.ndarray,
             phase: FluidPhase,
-            limit: bool = False,
-            epsilon: float = 0.0,
         ) -> np.ndarray:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
             ...
@@ -160,8 +156,6 @@ else:
         def normalize_saturation_deriv(
             self,
             phase: FluidPhase,
-            # limit: bool = False,
-            # epsilon: float = 0.0,
         ) -> pp.ad.Operator:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
             ...
@@ -169,8 +163,6 @@ else:
         def normalize_saturation_deriv_np(
             self,
             phase: FluidPhase,
-            # limit: bool = False,
-            # epsilon: float = 0.0,
         ) -> float:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
             ...
@@ -349,6 +341,16 @@ else:
             ...
 
         # SolutionStrategyTPF attributes and methods:
+        def bound_saturation(
+            self,
+            s_w: np.ndarray,
+            is_increment: bool = False,
+            time_step_index: int | None = None,
+            iterate_index: int | None = None,
+        ) -> np.ndarray:
+            """Bound saturation values to physical limits."""
+            ...
+
         def assemble_residual(self) -> np.ndarray:
             """Assemble the residual."""
             ...
@@ -481,7 +483,7 @@ else:
             ...
 
         def calc_pressure_interpolants(self) -> None:
-            """Calculate interpolants values for the global and complimentary pressure."""
+            """Calculate interpolants values for the global and complementary pressure."""
             ...
 
         def eval_glob_compl_pressure(
@@ -490,9 +492,8 @@ else:
             pressure_key: PRESSURE_KEY,
             entry_pressure: ArrayLike = 1.0,
             p_n: np.ndarray | None = None,
-            epsilon: float = 1e-6,
         ) -> np.ndarray:
-            """Evaluate the global or complimentary pressure field for the given pressure
+            """Evaluate the global or complementary pressure field for the given pressure
             and saturation values.
 
             """
@@ -500,10 +501,9 @@ else:
 
         def eval_glob_compl_pressure_on_domain(
             self,
-            pressure_key: PRESSURE_KEY,
-            prepare_simulation: bool = False,
+            time_step_index: int | None = None,
         ) -> None:
-            """Evaluate the global or complimentary pressure field on the full domain and
+            """Evaluate the global and complementary pressure fields on the full domain and
             store it in the data dictionary.
 
             """
@@ -518,17 +518,17 @@ else:
             """
             ...
 
-        def complimentary_pressure_integral_part(
+        def complementary_pressure_integral_part(
             self, s_0: np.ndarray, s_1: np.ndarray
         ) -> np.ndarray:
-            r"""Compute complimentary pressure from the rel. perm. and capillary pressure
+            r"""Compute complementary pressure from the rel. perm. and capillary pressure
             functions.
 
             """
             ...
 
         def set_boundary_pressures(self) -> None:
-            """Set boundary pressures for the global and complimentary pressure fields."""
+            """Set boundary pressures for the global and complementary pressure fields."""
             ...
 
         # PressureReconstructionMixin attributes and methods:
@@ -594,7 +594,7 @@ else:
             """Set equations for additional variables."""
             ...
 
-        def eval_val_and_jac_fluxes(self, prepare_simulation: bool = False) -> None:
+        def eval_val_and_jac_fluxes(self) -> None:
             """Evaluate residual and Jacobian of fluxes to be equilibrated."""
             ...
 

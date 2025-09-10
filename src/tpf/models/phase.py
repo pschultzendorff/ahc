@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import porepy as pp
+
 from tpf.utils.constants_and_typing import PHASENAME
 
 
@@ -51,6 +52,7 @@ class FluidPhase(pp.MaterialConstants):
             "thermal_expansion": 0,
             "normal_thermal_conductivity": 1,
             "specific_heat_capacity": 1,
+            "saturation_epsilon": 1e-4,
         }
         return default_constants
 
@@ -119,3 +121,13 @@ class FluidPhase(pp.MaterialConstants):
 
         """
         return self.convert_units(self.constants["residual_saturation"], "-")
+
+    @property
+    def saturation_epsilon(self) -> pp.number:
+        """Epsilon added to residual saturation to avoid numerical issues.
+
+        Returns:
+            Small number added to residual saturation.
+
+        """
+        return self.constants["saturation_epsilon"]

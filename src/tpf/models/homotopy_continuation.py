@@ -34,7 +34,7 @@ from tpf.models.reconstruction import (
 )
 from tpf.numerics.quadrature import Integral
 from tpf.utils.constants_and_typing import (
-    COMPLIMENTARY_PRESSURE,
+    COMPLEMENTARY_PRESSURE,
     GLOBAL_PRESSURE,
     PRESSURE_KEY,
 )
@@ -51,65 +51,58 @@ np.seterr(under="ignore")
 # ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
 # practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
 # the error.
-class DarcyFluxesHC(HCProtocol, DarcyFluxes):
-    r"""Mobility is averaged when :math:`\beta=1` and upwinded when :math:`\beta=0`."""
+class HybridUpwindingHC(HCProtocol, DarcyFluxes):
+    r"""Mobility upwinded for viscous flux and averaged for capillary flux.
 
-    def phase_mobility(
-        self,
-        g: pp.Grid,
-        phase: FluidPhase,
-    ) -> pp.ad.Operator:
-        r"""See :meth:`tpf.models.flow_and_transport.DarcyFluxes.phase_mobility` for
-        documentation of the upwinded case. Here, we add cell-averaging.
+    F. P. Hamon, B. T. Mallison, and H. A. Tchelepi, “Implicit Hybrid Upwinding for
+          two-phase flow in heterogeneous porous media with buoyancy and
+          capillarity,” Computer Methods in Applied Mechanics and Engineering, vol.
+          331, pp. 701–727, Apr. 2018, doi: 10.1016/j.cma.2017.10.008.
 
-        """
-        upwinded_mobility = super().phase_mobility(g, phase)
+    """
 
-        saturation_w = self.wetting.s
-        saturation_w_bc = pp.ad.DenseArray(
-            self.bc_dirichlet_saturation_values(g, self.wetting),
-            name=f"{self.wetting.name}_s_bc",
-        )
-        viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
+    # def prepare_simulation(self) -> None:
+    #     super().prepare_simulation()
+    #     self.calc_capillary_diffusion_interpolants()
 
-        # Take mobility in cells, map to faces and divide by 2 to obtain averaged
-        # mobility.
-        cells_to_faces: pp.ad.Operator = pp.ad.SparseArray(g.cell_faces)
+    # def calc_capillary_diffusion_interpolants(self) -> None:
+    #     hybrid_upwind_constants: dict[str, Any] = self.params.get(
+    #         "hc_hybrid_upwind_constants", {}
+    #     )
+    #     self.s_interpol_vals: np.ndarray = np.linspace(
+    #         self.wetting.residual_saturation + self.wetting.saturation_epsilon,
+    #         1
+    #         - self.nonwetting.residual_saturation
+    #         - self.nonwetting.saturation_epsilon,
+    #         hybrid_upwind_constants.get("interpolation_degree", 100),
+    #     )
 
-        # Create a mask hiding all internal faces.
-        boundary_faces_mask_np: np.ndarray = np.zeros(g.num_faces)
-        boundary_faces_mask_np[g.get_boundary_faces()] = 1.0
-        boundary_faces_mask: pp.ad.Operator = pp.ad.DenseArray(boundary_faces_mask_np)
+    #     def capillary_diffusion(s_w: np.ndarray) -> np.ndarray:
+    #         return (
+    #             self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
+    #             * self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
+    #             / (
+    #                 self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
+    #                 * self.wetting.viscosity
+    #                 / self.nonwetting.viscosity
+    #                 * self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
+    #             )
+    #             * self.cap_press_deriv_np(s_w, self._cap_press_constants_1)
+    #         )
 
-        # The bc rel. perms. are defined on all faces, we just mask the internal faces.
-        # The internal rel. perms. are defined on cells and mapped to faces.
-        averaged_mobility: pp.ad.Operator = (
-            cells_to_faces @ self.rel_perm(saturation_w, phase)
-            + boundary_faces_mask * self.rel_perm(saturation_w_bc, phase)
-        ) / (pp.ad.Scalar(2) * viscosity)
+    #     self.capillary_diffusion_vals: np.ndarray = capillary_diffusion(
+    #         self.s_interpol_vals
+    #     )
 
-        # Flux on Neumann faces is treated in :meth:`wetting_flux_from_fractional_flow`
-        # and :meth:`total_flux`. The mobility at these faces is set to zero to not
-        # introduce any inconsistencies.
-        dir_faces_mask_np: np.ndarray = np.zeros(g.num_faces)
-        dir_faces_mask_np[self.bc_type(g).is_dir] = 1.0
-        dir_faces_mask: pp.ad.Operator = pp.ad.DenseArray(dir_faces_mask_np)
-        averaged_mobility *= dir_faces_mask
-
-        # Add some epsilon to avoid zero mobility.
-        averaged_mobility += pp.ad.Scalar(1e-7)
-
-        hc_mobility: pp.ad.Operator = (
-            self.nonlinear_solver_statistics.hc_lambda_ad * averaged_mobility
-            + (pp.ad.Scalar(1) - self.nonlinear_solver_statistics.hc_lambda_ad)
-            * upwinded_mobility
-        )
-        hc_mobility.set_name(f"{phase.name} hc mobility")
-
-        return (
-            self.hc_toggle_ad * hc_mobility
-            + (pp.ad.Scalar(1) - self.hc_toggle_ad) * upwinded_mobility
-        )
+    # def capillary_flux(self, g: pp.Grid) -> pp.ad.Operator:
+    #     tpfa = pp.ad.TpfaAd(self.flux_key, [g])
+    #     diffusion_coeff = np.interp(
+    #         self.s_interpol_vals, self.capillary_diffusion_vals
+    #     )(self.wetting.s)
+    #     cap_flux = (
+    #         tpfa.flux() @ self.wetting.s
+    #         + tpfa.bound_flux() @ self.bc_dirichlet_saturation_values(g, self.wetting)
+    #     )
 
 
 # ``HCProtocol`` and ``TPFProtocol`` define different types for
@@ -138,10 +131,12 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         self._rel_perm_constants_1 = RelPermConstants(**rel_perm_1_constants)
         self._rel_perm_constants_2 = RelPermConstants(**rel_perm_2_constants)
 
-    # Ignore mypy complaining about incompatible signature with supertype.
     @typing.override
     def rel_perm(
-        self, saturation_w: pp.ad.Operator, phase: FluidPhase
+        self,
+        saturation_w: pp.ad.Operator,
+        phase: FluidPhase,
+        # Ignore mypy complaining about incompatible signature with supertype.
     ) -> pp.ad.Operator:  # type: ignore[override]
         # Return homotopy continuation relative permeability.
         # Mypy gives an error here, because it thinks the empty ``HCProtocol.rel_perm``
@@ -207,16 +202,16 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
         self._cap_press_constants_1 = CapPressConstants(**cap_press_1_constants)
         self._cap_press_constants_2 = CapPressConstants(**cap_press_2_constants)
 
-    # Ignore mypy complaining about incompatible signature with supertype.
     @typing.override
     def cap_press(
         self,
         saturation_w: pp.ad.Operator,
         cap_press_constants: CapPressConstants | None = None,
         **kwargs,
+        # Ignore mypy complaining about incompatible signature with supertype.
     ) -> pp.ad.Operator:  # type: ignore[override]
-        # Return homotopy continuation relative permeability.
-        # Mypy gives an error here, because it thinks the empty ``HCProtocol.rel_perm``
+        # Return homotopy continuation capillary pressure.
+        # Mypy gives an error here, because it thinks the empty ``HCProtocol.cap_press``
         # is called. During runtime, ``HCProtocol`` does not have this method, hence we
         # can ignore the error. Additionally, we ignore complaints about the wrong
         # number of arguments and wrong arguemnt types.
@@ -263,6 +258,8 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
         )
         return self.hc_toggle_fl * hc_cap_press + (1 - self.hc_toggle_fl) * cap_press_2
 
+    # Ensure that global and complementary pressure tables are calculated with the
+    # target capillary pressure function.
     @typing.override
     def cap_press_deriv_np(
         self,
@@ -410,7 +407,9 @@ class EstimatesHCMixin(
               linearization error estimator.
 
         """
-        # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
+        # Retrieve flux w.r.t. goal rel. perm. and equilbirated flux coeffs.
+        # TODO Could be made more efficient by just storing the Newton update times
+        # derivative of the fluxes.
         fv_coeffs = pp.get_solution_values(
             f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
         )
@@ -495,10 +494,8 @@ class EstimatesHCMixin(
         # integral over time and domain of the squared local estimators. Its part in the
         # global error estimator multiplied by 3 before taking the square root. Instead
         # of writing
-        # estimator: float = (3 * residual_estimator**2) ** (1 / 2) +
-        # sum(nc_estimators),
-        # we multiply by np.sqrt(3).
-        estimator: float = np.sqrt(3) * residual_estimator + sum(nc_estimators)
+        # estimator: float = (residual_estimator**2) ** (1 / 2) + sum(nc_estimators),
+        estimator: float = residual_estimator + sum(nc_estimators)
         logger.info(f"Global spatial discretization error estimator: {estimator}")
         return estimator
 
@@ -521,10 +518,10 @@ class EstimatesHCMixin(
             global_integral: float = local_integral.sum()
             # Integrate in time by multiplying with time step size / 3. This comes from
             # writing the local estimator as an affine function of :math:`t` that is
-            # zero at :math:`t^n` and calcualting the integral exactly.
+            # zero at :math:`t^n` and calculating the integral exactly.
             estimators[flux_name] = self.time_manager.dt / 3.0 * global_integral
         # Sum estimators for both equations.
-        estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
+        estimator: float = sum(estimators.values()) ** (1 / 2)
         logger.info(f"Global temporal discretization error estimator: {estimator}")
         return estimator
 
@@ -565,7 +562,7 @@ class EstimatesHCMixin(
             # Integrate in time by multiplying with time step size.
             estimators[flux_name] = self.time_manager.dt * global_integral
         # Sum estimators for both equations.
-        estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
+        estimator: float = sum(estimators.values()) ** (1 / 2)
         logger.info(f"Global continuation error estimator: {estimator}")
         return estimator
 
@@ -588,7 +585,7 @@ class EstimatesHCMixin(
             # Integrate in time by multiplying with time step size.
             estimators[flux_name] = self.time_manager.dt * global_integral
         # Sum estimators for both equations.
-        estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
+        estimator: float = sum(estimators.values()) ** (1 / 2)
         logger.info(f"Global linearization error estimator: {estimator}")
         return estimator
 
@@ -655,7 +652,7 @@ class SolutionStrategyAHC(
 
     def prepare_simulation(self) -> None:
         # Switch to goal cap. press. and rel. perms. to calculate interpolants for
-        # global and complimentary pressure.
+        # global and complementary pressure.
         self.hc_toggle_fl = 0.0
         self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
@@ -682,6 +679,7 @@ class SolutionStrategyAHC(
         self.hc_decay_recomp_max: int = hc_params["hc_decay_recomp_max"]
         self.hc_decay_recomp_counter: int = 0
 
+    @typing.override
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
         self.equation_system.set_variable_values(
@@ -778,7 +776,7 @@ class SolutionStrategyAHC(
 
         # Set time step values for reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
-            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
+            [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
             ["", "_postprocessed_coeffs", "_reconstructed_coeffs", "_NC_estimator"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(
@@ -879,7 +877,8 @@ class SolutionStrategyAHC(
             # Non-adaptive stopping criterion.
             elif (
                 not hc_params["hc_adaptive"]
-                and self.nonlinear_solver_statistics.hc_lambda_fl
+                # Check the lambda before decay, which was actually solved.
+                and self.nonlinear_solver_statistics.hc_lambda_fl / self.hc_decay
                 <= hc_params["hc_lambda_min"]
             ):
                 logger.info(
@@ -1003,25 +1002,16 @@ class SolutionStrategyAHC(
         # solution from the previous HC iteration is already good enough. This way, we
         # would avoid one Newton iteration.
 
-    def eval_additional_vars(self, prepare_simulation: bool = False) -> None:
+    def eval_additional_vars(self, time_step_index: int | None = None) -> None:
         """Calculate numerical fluxes w.r.t. the goal relative permeabilities.
 
         This is done for the fluxes used in pressure reconstruction as well as for
         the fluxes used in the continuation estimator.
 
         """
-        if prepare_simulation:
-            time_step_index: int | None = 0
-        else:
-            time_step_index = None
 
         # Save FV P0 pressures.
-        self.eval_glob_compl_pressure_on_domain(
-            GLOBAL_PRESSURE, prepare_simulation=prepare_simulation
-        )
-        self.eval_glob_compl_pressure_on_domain(
-            COMPLIMENTARY_PRESSURE, prepare_simulation=prepare_simulation
-        )
+        self.eval_glob_compl_pressure_on_domain(time_step_index=time_step_index)
 
         # Switch rel. perm. to goal rel. perm, calculate fluxes.
         self.hc_toggle_fl = 0.0
@@ -1058,7 +1048,6 @@ class SolutionStrategyAHC(
         self.hc_toggle_fl = 1.0
         self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
-    @typing.override
     def postprocess_solution(
         self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
     ) -> None:
@@ -1087,7 +1076,7 @@ class SolutionStrategyAHC(
                 )
 
         # NOTE The fluxes w.r.t. goal rel. perm are only used to post-process the global
-        # and complimentary pressures and in the contination estimators and do not need
+        # and complementary pressures and in the contination estimators and do not need
         # to be equilibrated.
         for flux_name in [
             "total",
@@ -1111,7 +1100,7 @@ class SolutionStrategyAHC(
                 prepare_simulation=prepare_simulation,
             )
 
-        for pressure_key in [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE]:
+        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
             # Satisfy mypy.
             pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
             self.postprocess_pressure_vohralik(
@@ -1203,7 +1192,7 @@ class SolutionStrategyAHC(
 
         # Reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
-            [GLOBAL_PRESSURE, COMPLIMENTARY_PRESSURE],
+            [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
             ["", "_postprocessed_coeffs", "_reconstructed_coeffs", "_NC_estimator"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(

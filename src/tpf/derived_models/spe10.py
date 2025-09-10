@@ -248,17 +248,6 @@ class ModifiedBoundarySPE10(TPFProtocol):
                 "Dirichlet pressure values not implemented for the wetting phase."
             )
 
-    def _bc_dirichlet_saturation_values(
-        self, g: pp.Grid, phase: FluidPhase
-    ) -> np.ndarray:
-        if phase.name == self.wetting.name:
-            s_bc: np.ndarray = np.full(g.num_faces, INITIAL_SATURATION)
-        elif phase.name == self.nonwetting.name:
-            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
-                g, self.wetting
-            )
-        return s_bc
-
 
 class SolutionStrategySPE10(TPFProtocol):
     """Mixin class to provide the SPE10 model data.
@@ -338,7 +327,7 @@ class SolutionStrategySPE10(TPFProtocol):
     def add_constant_spe10_data(self) -> None:
         """Save the SPE10 data to the exporter."""
         data: list[DataInput] = []
-        for dim, perm in self.permeability(self.g).items():
+        for dim, perm in self.permeability(self.g).items():  # type: ignore
             data.append((self.g, "permeability_" + dim, perm))
         data.append((self.g, "porosity", self.porosity(self.g)))
         self.exporter.add_constant_data(data)
@@ -346,7 +335,7 @@ class SolutionStrategySPE10(TPFProtocol):
         # For convenience, add the porosity and permeability to the iteration exporter
         # if it exists.
         if hasattr(self, "iteration_exporter"):
-            self.iteration_exporter.add_constant_data(data)
+            self.iteration_exporter.add_constant_data(data)  # type: ignore
 
         # # Additionally, add them to the list of variables to make plotting easier.
         # pp.set_solution_values(
@@ -376,14 +365,14 @@ class SolutionStrategySPE10(TPFProtocol):
         )
 
     def prepare_simulation(self) -> None:
-        self.set_materials()
+        self.set_materials()  # type: ignore
         self.set_geometry()
         # Initialize permeability and porosity now. Must be done after setting the
         # geometry but before setting equations.
         self.load_spe10_model(self.mdg.subdomains()[0])
         # Continue with the simulation preparation. This will run ``set_geometry`` and
         # ``set_materials`` again, which is not an issue.
-        super().prepare_simulation()
+        super().prepare_simulation()  # type: ignore
         # Save porosity and permeability only after the exporter is initialized. Else,
         # they would be overwritten.
         self.add_constant_spe10_data()

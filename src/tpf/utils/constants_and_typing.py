@@ -19,13 +19,13 @@ CAP_PRESS_MODEL = Literal["Brooks-Corey", "linear", "van Genuchten", None]
 
 # region KEYWORDS
 # Keywords:
-PRESSURE_KEY = Literal["global_pressure", "complimentary_pressure"]
+PRESSURE_KEY = Literal["global_pressure", "complementary_pressure"]
 GLOBAL_PRESSURE: Final = "global_pressure"
-COMPLIMENTARY_PRESSURE: Final = "complimentary_pressure"
+COMPLEMENTARY_PRESSURE: Final = "complementary_pressure"
 
-FLUX_KEY = Literal["global_flux", "complimentary_flux"]
+FLUX_KEY = Literal["global_flux", "complementary_flux"]
 GLOBAL_FLUX: Final = "global_flux"
-COMPLIMENTARY_FLUX: Final = "complimentary_flux"
+complementary_FLUX: Final = "complementary_flux"
 
 # Homotopy continuation:
 CONTINUATION_SOLUTIONS: str = "continuation_solutions"
