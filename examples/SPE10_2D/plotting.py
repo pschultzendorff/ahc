@@ -3,13 +3,16 @@ import pathlib
 from dataclasses import dataclass, field
 from typing import Any
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from run import SimulationConfig, generate_configs
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
-sns.set_theme()
+
+sns.set_theme("paper")
+sns.set_style("whitegrid")
 
 
 # region UTILS
@@ -24,6 +27,8 @@ class SimulationStatistics:
     hc_estimator: list = field(default_factory=list)
     lin_estimator: list = field(default_factory=list)
     lambdas: list = field(default_factory=list)
+    converged: bool = True
+    final_time: float = 0.0
 
 
 def flatten(xx: list[list]) -> list:
@@ -31,20 +36,21 @@ def flatten(xx: list[list]) -> list:
 
 
 def read_data(config: SimulationConfig) -> SimulationStatistics:
-    # Check if the solver failed at some time step and return empty statistics.
-    if "failure" in [f.stem for f in config.folder_name.iterdir()]:
-        # raise ValueError("Simulation did not complete.")
-        return SimulationStatistics()
-
     # If not we can read the data.
     with open(config.folder_name / "solver_statistics.json", "r") as f:
         data: dict[str, Any] = json.load(f)
 
+    # Check if the solver failed at some time step and return reduced statistics.
+    if "failure" in [f.stem for f in config.folder_name.iterdir()]:
+        final_time = list(data.values())[-1]["current time"]
+        return SimulationStatistics(converged=False, final_time=final_time)
+
+    # Else, read all estimators etc.
     statistics = SimulationStatistics()
 
     for time_step in list(data.values())[1:]:
         # Treat different solvers.
-        if config.solver_name.startswith("AHC"):
+        if config.solver_name.startswith("AHC") or config.solver_name.startswith("HC"):
             # Create lists for the outer loop.
             num_nl_iterations = []
             spat_estimator = []
@@ -106,6 +112,23 @@ def plot_nl_iterations(
     # Extract solvers and parameter values from case names
     cases = list(data.keys())
     solvers = sorted(set("\n".join(case.split("_")[:2]) for case in cases))
+    solvers = []
+    for case in cases:
+        solver_name, adaptive_error_ratio_str, varying_param = case.split("_")
+        if solver_name == "HC":
+            solvers.append(solver_name)
+        elif solver_name.startswith("AHC"):
+            solvers.append(
+                f"{solver_name}\n"
+                + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio_str}$"
+            )
+        elif solver_name.startswith("Newton"):
+            solvers.append(
+                f"{solver_name}\n"
+                + rf"$\gamma_\mathrm{{lin}} = {adaptive_error_ratio_str}$"
+            )
+    solvers = sorted(set(solvers))
+
     x_ticks = sorted(
         set(" ".join(case.split("_")[2:]) for case in cases),
         key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else x,
@@ -115,22 +138,37 @@ def plot_nl_iterations(
     iterations = np.empty((len(solvers), len(x_ticks)))
     annotations = np.empty((len(solvers), len(x_ticks)), dtype="<U25")
 
+    final_times = np.empty((len(solvers), len(x_ticks)))
+
     for case, stat in data.items():
         solver_name, adaptive_error_ratio_str, varying_param = case.split("_")
 
         adaptive_error_ratio = float(adaptive_error_ratio_str)
 
-        i = solvers.index(f"{solver_name}\n{adaptive_error_ratio}")
+        if solver_name == "HC":
+            # Standard HC solver does not have an adaptive error ratio.
+            i = solvers.index(solver_name)
+        elif solver_name.startswith("AHC"):
+            i = solvers.index(
+                f"{solver_name}\n" + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio}$"
+            )
+        elif solver_name.startswith("Newton"):
+            i = solvers.index(
+                f"{solver_name}\n"
+                + rf"$\gamma_\mathrm{{lin}} = {adaptive_error_ratio}$"
+            )
+
         j = x_ticks.index(varying_param)
 
         tot_nl_iters = (
-            sum(flatten(stat.timestep_nl_iters))
-            if solver_name.startswith("AHC")
-            else sum(stat.timestep_nl_iters)
+            sum(stat.timestep_nl_iters)
+            if solver_name.startswith("Newton")
+            else sum(flatten(stat.timestep_nl_iters))
         )
 
         iterations[i, j] = tot_nl_iters
         annotations[i, j] = f"{tot_nl_iters}\n({len(stat.time_steps)})"
+        final_times[i, j] = stat.final_time
 
     mask = iterations == 0
 
@@ -162,7 +200,10 @@ def plot_nl_iterations(
                 ax.text(
                     j + 0.5,
                     i + 0.5,
-                    r"Reached min. $\Delta t$",
+                    r"Reached min. $\Delta t$"
+                    + "\n"
+                    # i and j are switched in the flattened data.
+                    + f"at t={final_times[i, j] / 86400:.1f} d",
                     ha="center",
                     va="center",
                     fontsize=10,
@@ -380,32 +421,33 @@ def plot_estimators(
 
 if __name__ == "__main__":
     configs = generate_configs()
-    configs_varying_rp_init_s_02 = configs[:12]
-    configs_varying_rp_init_s_03 = configs[12:24]
-    configs_varying_init_s = configs[:4] + configs[24:36] + configs[12:16]
-    configs_cap_press = configs[36:]
+    # TODO: Check this!
+    # configs_varying_rp_init_s_02 = configs[:15]
+    configs_varying_rp_init_s_03 = configs[0:16]
+    configs_varying_init_s = configs[16:] + configs[:4]
+    # configs_cap_press = configs[15:20] + configs[45:]
     data_1 = {}
-    for config in configs_varying_rp_init_s_02:
+    for config in configs_varying_rp_init_s_03:
         if config.rp_model_2["model"] == "Corey":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-        else:
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_Br.-Corey {config.rp_model_2['n_b']}"
         data_1[key] = read_data(config)
     fig1 = plot_nl_iterations(
         data_1,
         "rel. perm. model",
     )
-    data_2 = {}
-    for config in configs_varying_rp_init_s_03:
-        if config.rp_model_2["model"] == "Corey":
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-        else:
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
-        data_2[key] = read_data(config)
-    fig2 = plot_nl_iterations(
-        data_2,
-        "rel. perm. model",
-    )
+    # data_2 = {}
+    # for config in configs_varying_rp_init_s_03:
+    #     if config.rp_model_2["model"] == "Corey":
+    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
+    #     else:
+    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+    #     data_2[key] = read_data(config)
+    # fig2 = plot_nl_iterations(
+    #     data_2,
+    #     "rel. perm. model",
+    # )
     data_3 = {}
     for config in configs_varying_init_s:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
@@ -416,37 +458,39 @@ if __name__ == "__main__":
         data_3[key] = statistics
     fig3 = plot_nl_iterations(
         data_3,
-        r"$s_{w,init}$",
+        r"$s_\mathrm{w}^0$",
     )
-    data_4 = {}
-    for config in configs_cap_press:
-        if config.solver_name.startswith("Newton"):
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
-        else:
-            assert config.cp_model_2["model"] != "linear", "Wrong config chosen"
-            # No need to plot AHC designs for the adaptive error ratio 0.1, which stops
-            # at the simple problem anyways.
-            if config.adaptive_error_ratio == 0.1:
-                continue
-            else:
-                key = f"{config.solver_name} from {config.cp_model_1['model']}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
-        try:
-            statistics = read_data(config)
-        except ValueError:
-            statistics = SimulationStatistics()
-        data_4[key] = statistics
-    fig4 = plot_nl_iterations(
-        data_4,
-        "entry pressure [Pa]",
-    )
+    # data_4 = {}
+    # for config in configs_cap_press:
+    #     if not config.solver_name.startswith("AHC"):
+    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
+    #     else:
+    #         # TODO Fix this! Run from None with p_e=30 as well and change configs for
+    #         # cap. pressure above!!!!
+    #         # assert config.cp_model_2["model"] != "linear", "Wrong config chosen"
+    #         # No need to plot AHC designs for the adaptive error ratio 0.1, which stops
+    #         # at the simple problem anyways.
+    #         if config.adaptive_error_ratio == 0.1:
+    #             continue
+    #         else:
+    #             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
+    #     try:
+    #         statistics = read_data(config)
+    #     except ValueError:
+    #         statistics = SimulationStatistics()
+    #     data_4[key] = statistics
+    # fig4 = plot_nl_iterations(
+    #     data_4,
+    #     "entry pressure [Pa]",
+    # )
 
-    # fig1.savefig(dirname / "nl_iters_rp_model_s_init_02.png")
+    fig1.savefig(dirname / "nl_iters_rp_model_s_init_03.png")
     # fig2.savefig(dirname / "nl_iters_rp_model_s_init_03.png")
-    # fig3.savefig(dirname / "nl_iters_s_init.png")
+    fig3.savefig(dirname / "nl_iters_s_init.png")
     # fig4.savefig(dirname / "nl_iters_cap_press.png")
-    fig5 = plot_estimators(data_1["AHC_0.005_Corey 2"], combine_disc_est=True)
-    fig5.savefig(dirname / "estimators_ahc_s0.2_Corey_2.png")
-    fig6 = plot_estimators(data_1["NewtonAppleyard_0.1_Corey 2"])
-    fig6.savefig(dirname / "estimators_NewtonAppleyard_s0.2_Corey_2.png")
-    fig7 = plot_estimators(data_4["AHC from None_0.005_100.0"], combine_disc_est=True)
-    fig7.savefig(dirname / "estimators_ahc_cp100.png")
+    # fig5 = plot_estimators(data_1["AHC_0.005_Corey 2"], combine_disc_est=True)
+    # fig5.savefig(dirname / "estimators_ahc_s0.2_Corey_2.png")
+    # fig6 = plot_estimators(data_1["NewtonAppleyard_0.1_Corey 2"])
+    # fig6.savefig(dirname / "estimators_NewtonAppleyard_s0.2_Corey_2.png")
+    # fig7 = plot_estimators(data_4["AHC from None_0.005_100.0"], combine_disc_est=True)
+    # fig7.savefig(dirname / "estimators_ahc_cp100.png")

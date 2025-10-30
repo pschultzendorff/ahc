@@ -10,7 +10,9 @@ import seaborn as sns
 from run import SimulationConfig, generate_configs
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
-sns.set_theme()
+
+sns.set_theme("paper")
+sns.set_style("whitegrid")
 
 
 # region UTILS

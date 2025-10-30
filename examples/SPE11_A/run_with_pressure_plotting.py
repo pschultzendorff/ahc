@@ -71,7 +71,7 @@ warnings.filterwarnings("default")
 
 # Setup logging.
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
@@ -336,8 +336,8 @@ def run_simulation(config: SimulationConfig) -> None:
         for pressure in [
             "global_pressure_postprocessed",
             "global_pressure_reconstructed",
-            "complimentary_pressure_postprocessed",
-            "complimentary_pressure_reconstructed",
+            "complementary_pressure_postprocessed",
+            "complementary_pressure_reconstructed",
         ]:
             plot_pressure(pressure)
 
@@ -394,17 +394,17 @@ def run_simulation(config: SimulationConfig) -> None:
             model.g,
             model.domain.bounding_box,
             pp.get_solution_values(
-                "complimentary_pressure_reconstructed_coeffs",
+                "complementary_pressure_reconstructed_coeffs",
                 model.mdg.subdomains(return_data=True)[0][1],
                 iterate_index=0,
             )
             - pp.get_solution_values(
-                "complimentary_pressure_postprocessed_coeffs",
+                "complementary_pressure_postprocessed_coeffs",
                 model.mdg.subdomains(return_data=True)[0][1],
                 iterate_index=0,
             ),
-            title="Complimentary pressure difference reconstructed - postprocessed",
-            save_path=config.folder_name / "complimentary_pressure_difference.png",
+            title="complementary pressure difference reconstructed - postprocessed",
+            save_path=config.folder_name / "complementary_pressure_difference.png",
         )
 
     except Exception as e:

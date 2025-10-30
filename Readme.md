@@ -36,7 +36,7 @@ functions for cell-centered finite volume approximations to the Darcy problem,â€
 Proceeding Series of the Brazilian Society of Computational and Applied Mathematics,
 vol. 11, no. 1, Art. no. 1, Jan. 2025, doi: 10.5540/03.2025.011.01.0332.]
 
-- Implements functions to calculate global and complimentary pressure, equilibrate
+- Implements functions to calculate global and complementary pressure, equilibrate
   fluxes, and post-process and reconstruct pressures. 
 - Guaranted error estimates
 - Decomposition of the error into discretization, homotopy continuation, and

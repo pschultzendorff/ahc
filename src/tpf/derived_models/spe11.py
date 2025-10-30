@@ -325,7 +325,7 @@ def load_spe11_data(
         data_dir: The directory containing the .geo file.
 
     Returns:
-        tuple: A tuple containing:
+        mdg: PorePy grid.
 
     """
     # Ensure the destination directory exists.

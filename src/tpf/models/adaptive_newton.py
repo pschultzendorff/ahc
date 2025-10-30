@@ -20,13 +20,19 @@ from typing import Any, Literal
 
 import numpy as np
 import porepy as pp
+
 from tpf.models.error_estimate import (
     DataSavingEst,
     ErrorEstimateMixin,
     SolutionStrategyEst,
 )
 from tpf.models.flow_and_transport import SolutionStrategyTPF, TwoPhaseFlow
-from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFProtocol
+from tpf.models.protocol import (
+    AdaptiveNewtonProtocol,
+    EstimatesProtocol,
+    ReconstructionProtocol,
+    TPFProtocol,
+)
 from tpf.models.reconstruction import (
     EquationsRecMixin,
     EquilibratedFluxMixin,
@@ -38,8 +44,9 @@ from tpf.numerics.quadrature import Integral
 logger = logging.getLogger(__name__)
 
 
-class ErrorEstimateANewtonMixin(EstimatesProtocol, ReconstructionProtocol, TPFProtocol):
-
+class ErrorEstimateANewtonMixin(
+    AdaptiveNewtonProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
+):
     def local_temp_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
         r"""Calculate the local-in-space temporal error estimators.
 
@@ -203,14 +210,7 @@ class ErrorEstimateANewtonMixin(EstimatesProtocol, ReconstructionProtocol, TPFPr
         """Evaluate the global spatial discretization error estimator."""
         residual_estimator: float = self.global_res_est()
         nc_estimators: tuple[float, float] = self.global_nonconformity_est()
-        # The global residual estimator is the square root of the sum over both fluxes,
-        # integral over time and domain of the squared local estimators. Its part in the
-        # global error estimator multiplied by 3 before taking the square root. Instead
-        # of writing
-        # estimator: float = (3 * residual_estimator**2) ** (1 / 2) +
-        # sum(nc_estimators),
-        # we multiply by np.sqrt(3).
-        estimator: float = np.sqrt(3) * residual_estimator + sum(nc_estimators)
+        estimator: float = residual_estimator + sum(nc_estimators)
         logger.info(f"Global spatial discretization error estimator: {estimator}")
         return estimator
 
@@ -231,10 +231,12 @@ class ErrorEstimateANewtonMixin(EstimatesProtocol, ReconstructionProtocol, TPFPr
             # NOTE The values stored were the squares of the elementwise norms, hence we
             # do not need to square here.
             global_integral: float = local_integral.sum()
-            # Integrate in time by multiplying with time step size / 2.
-            estimators[flux_name] = self.time_manager.dt / 2.0 * global_integral
+            # Integrate in time by multiplying with time step size / 3. This comes from
+            # writing the local estimator as an affine function of :math:`t` that is
+            # zero at :math:`t^n` and calculating the integral exactly.
+            estimators[flux_name] = self.time_manager.dt / 3.0 * global_integral
         # Sum estimators for both equations.
-        estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
+        estimator: float = sum(estimators.values()) ** (1 / 2)
         logger.info(f"Global temporal discretization error estimator: {estimator}")
         return estimator
 
@@ -273,16 +275,19 @@ class ErrorEstimateANewtonMixin(EstimatesProtocol, ReconstructionProtocol, TPFPr
             # Integrate in time by multiplying with time step size.
             estimators[flux_name] = self.time_manager.dt * global_integral
         # Sum estimators for both equations.
-        estimator: float = (3 * sum(estimators.values())) ** (1 / 2)
+        estimator: float = sum(estimators.values()) ** (1 / 2)
         logger.info(f"Global linearization error estimator: {estimator}")
         return estimator
 
 
-class SolutionStrategyANewtonMixin(EstimatesProtocol, TPFProtocol):
-
+class SolutionStrategyANewtonMixin(
+    AdaptiveNewtonProtocol, EstimatesProtocol, TPFProtocol
+):
     def set_initial_estimators(self) -> None:
         """Initialize iterate and time step values for additional error estimators."""
-        super().set_initial_estimators()
+        # In ``EstimatesProtocol``, this method is abstract and
+        # not implemented, which mypy complains about
+        super().set_initial_estimators()  # type: ignore
         for flux_name, specifier in itertools.product(
             ["total", "wetting_from_ff"],
             ["T_estimator", "L_estimator"],
@@ -306,8 +311,12 @@ class SolutionStrategyANewtonMixin(EstimatesProtocol, TPFProtocol):
         # ``SolutionStrategyEstMixin.check_convergence``, but
         # ``TwoPhaseFlow.check_convergence``. The former logs estimators we are not
         # interested in.
-        converged, diverged = SolutionStrategyTPF.check_convergence(  # type: ignore
-            self, nonlinear_increment, residual, reference_residual, nl_params
+        converged, diverged = SolutionStrategyTPF.check_convergence(
+            self,  # type: ignore
+            nonlinear_increment,
+            residual,
+            reference_residual,
+            nl_params,
         )
 
         linearization_est: float = self.global_linearization_est()
@@ -349,7 +358,7 @@ class SolutionStrategyANewtonMixin(EstimatesProtocol, TPFProtocol):
         has changed too much
 
         """
-        super().after_nonlinear_convergence()
+        super().after_nonlinear_convergence()  # type: ignore
         for flux_name, specifier in itertools.product(
             ["total", "wetting_from_ff"],
             [

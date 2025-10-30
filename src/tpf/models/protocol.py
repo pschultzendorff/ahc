@@ -4,6 +4,7 @@ from numpy.typing import ArrayLike
 
 from tpf.numerics.quadrature import TriangleQuadrature
 from tpf.viz.solver_statistics import (
+    SolverStatisticsANewton,
     SolverStatisticsEst,
     SolverStatisticsHC,
     SolverStatisticsTPF,
@@ -108,6 +109,10 @@ else:
 
         formulation: Literal["fractional_flow"]
         """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
+        flow_equation_weight: float
+        """Weighting factor for the flow equation in the residual and Jacobian."""
+        transport_equation_weight: float
+        """Weighting factor for the transport equation in the residual and Jacobian."""
 
         # Discretization keywords
         flux_key: str
@@ -676,6 +681,17 @@ else:
         # SolutionStrategyEstimatesMixin attributes and methods:
         def set_initial_estimators(self) -> None:
             """Initialize time step values for error estimators."""
+            ...
+
+    class AdaptiveNewtonProtocol(Protocol):
+        nonlinear_solver_statistics: SolverStatisticsANewton
+
+        def global_spatial_est(self) -> float:
+            """Estimate for global spatial discretization error."""
+            ...
+
+        def global_temp_est(self) -> float:
+            """Estimate for global temporal discretization error."""
             ...
 
     class SPE11Protocol(Protocol):

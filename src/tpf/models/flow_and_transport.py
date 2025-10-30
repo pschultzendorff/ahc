@@ -485,8 +485,10 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
                 self.wetting_flux_from_fractional_flow(self.g)
             )
 
-            flow_equation = div @ flux_t - source_ad_t
-            transport_equation = (
+            flow_equation = pp.ad.Scalar(self.flow_equation_weight) * (
+                div @ flux_t - source_ad_t
+            )
+            transport_equation = pp.ad.Scalar(self.transport_equation_weight) * (
                 porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
                 + div @ wetting_flux_from_fractional_flow
                 - source_ad_w
@@ -825,6 +827,12 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             'fractional_flow':
 
         """
+        self.flow_equation_weight: float = self.params.get("flow_equation_weight", 1.0)
+        """Weighting factor for the flow equation in the residual and Jacobian."""
+        self.transport_equation_weight: float = self.params.get(
+            "transport_equation_weight", 1.0
+        )
+        """Weighting factor for the transport equation in the residual and Jacobian."""
 
         # Initialize fluid phases. NOTE This is already done during initialization and
         # not prepare simulation s.t. the keywords can be defined based on the phase
@@ -1036,7 +1044,12 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
     @typing.override
     def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation."""
+        """Set initial values for pressure and saturation.
+
+        Note: The initial pressure values serve only as an initial guess to the
+        nonlinear solver but do not influence the solution.
+
+        """
         self.equation_system.set_variable_values(
             np.full(self.g.num_cells * 2, 0.0),
             [self.wetting.p, self.nonwetting.p],

@@ -61,7 +61,7 @@ warnings.filterwarnings("default")
 
 # Setup logging.
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 

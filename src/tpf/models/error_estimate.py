@@ -597,12 +597,9 @@ class SolutionStrategyEst(  # type: ignore
         ):
             if specifier.endswith("estimator") or specifier == "F_estimator_old":
                 name: str = f"{flux_name}_{specifier}"
-                initial_values: np.ndarray = np.zeros(self.g.num_cells)
             else:
                 name = f"energy_norm_{flux_name}_flux_part"
-                # Initialize energies with one s.t. we do not encounter a divide by zero
-                # error when calculating relative errors.
-                initial_values = np.ones(self.g.num_cells)
+            initial_values: np.ndarray = np.zeros(self.g.num_cells)
             pp.set_solution_values(
                 name,
                 initial_values,

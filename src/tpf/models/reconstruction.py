@@ -93,9 +93,6 @@ class GlobalPressureMixin(TPFProtocol):
         """
         # Limit saturation from below to 0 and from above to 1 in case of negative or >1
         # saturation values during Newton.
-        # FIXME Using epsilon here instead of at the normalized saturation is not the
-        # same! Think about this! Also, we add epsilon when calculating the
-        # interpolants.
         s_w[
             s_w
             > 1
@@ -409,13 +406,6 @@ class PressureReconstructionMixin(TPFProtocol):
 
         Parameters:
             pressure_key: Name of the pressure field to be reconstructed.
-            flux_specifier: Specify the name of the flux field used to post-process the
-                pressure. Used, e.g., in homotopy continuation, where the fluxes used
-                are ``f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs"`` instead of
-                ``f"{flux_name}_flux_RT0_coeffs"``.
-                Gets appended between ``f"{flux_name}_flux"`` and ``"_RT0_coeffs"``,
-                i.e., the values ``f"{flux_name}_flux{flux_specifier}_RT0_coeffs"`` in
-                the data dir are accessed.
             prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
                 Stores zero coefficients for all pressures. Stores values additionally
                 for the time step.
@@ -434,14 +424,14 @@ class PressureReconstructionMixin(TPFProtocol):
 
             bg, bg_data = self.mdg.boundaries(return_data=True)[0]
 
-            s: np.ndarray = pp.get_solution_values(
+            pressure_postprocessed_coeffs: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}_postprocessed_coeffs",
                 self.g_data,
                 iterate_index=0,
             )
 
             # Sanity check
-            if not s.shape == (self.g.num_cells, 6):
+            if not pressure_postprocessed_coeffs.shape == (self.g.num_cells, 6):
                 raise ValueError("Wrong shape of P2 polynomial.")
 
             # Abbreviations
@@ -459,12 +449,14 @@ class PressureReconstructionMixin(TPFProtocol):
             # Compute node pressures
             for col in range(dim + 1):
                 nodes_p[:, col] = (
-                    s[:, 0] * nx[:, col] ** 2  # c0x^2
-                    + s[:, 1] * nx[:, col] * ny[:, col]  # c1xy
-                    + s[:, 2] * nx[:, col]  # c2x
-                    + s[:, 3] * ny[:, col] ** 2  # c3y^2
-                    + s[:, 4] * ny[:, col]  # c4y
-                    + s[:, 5]  # c5
+                    pressure_postprocessed_coeffs[:, 0] * nx[:, col] ** 2  # c0x^2
+                    + pressure_postprocessed_coeffs[:, 1]
+                    * nx[:, col]
+                    * ny[:, col]  # c1xy
+                    + pressure_postprocessed_coeffs[:, 2] * nx[:, col]  # c2x
+                    + pressure_postprocessed_coeffs[:, 3] * ny[:, col] ** 2  # c3y^2
+                    + pressure_postprocessed_coeffs[:, 4] * ny[:, col]  # c4y
+                    + pressure_postprocessed_coeffs[:, 5]  # c5
                 )
 
             # Average nodal pressure
@@ -488,12 +480,14 @@ class PressureReconstructionMixin(TPFProtocol):
 
             for col in range(3):
                 faces_p[:, col] = (
-                    s[:, 0] * fx[:, col] ** 2  # c0x^2
-                    + s[:, 1] * fx[:, col] * fy[:, col]  # c1xy
-                    + s[:, 2] * fx[:, col]  # c2x
-                    + s[:, 3] * fy[:, col] ** 2  # c3y^2
-                    + s[:, 4] * fy[:, col]  # c4x
-                    + s[:, 5]  # c5
+                    pressure_postprocessed_coeffs[:, 0] * fx[:, col] ** 2  # c0x^2
+                    + pressure_postprocessed_coeffs[:, 1]
+                    * fx[:, col]
+                    * fy[:, col]  # c1xy
+                    + pressure_postprocessed_coeffs[:, 2] * fx[:, col]  # c2x
+                    + pressure_postprocessed_coeffs[:, 3] * fy[:, col] ** 2  # c3y^2
+                    + pressure_postprocessed_coeffs[:, 4] * fy[:, col]  # c4x
+                    + pressure_postprocessed_coeffs[:, 5]  # c5
                 )
 
             # Average face pressure
@@ -956,7 +950,7 @@ class SolutionStrategyRec(  # type: ignore
                     + " saturations."
                 )
 
-        # If Newton diverged,  and postprocessing might fail because
+        # If Newton diverged, postprocessing might fail because
         # ``linalg_solve_batch`` cannot handle infs or nans.
         try:
             self.postprocess_solution(nonlinear_increment)

@@ -490,11 +490,6 @@ class EstimatesHCMixin(
         """Evaluate the global spatial discretization error estimator."""
         residual_estimator: float = self.global_res_est()
         nc_estimators: tuple[float, float] = self.global_nonconformity_est()
-        # The global residual estimator is the square root of the sum over both fluxes,
-        # integral over time and domain of the squared local estimators. Its part in the
-        # global error estimator multiplied by 3 before taking the square root. Instead
-        # of writing
-        # estimator: float = (residual_estimator**2) ** (1 / 2) + sum(nc_estimators),
         estimator: float = residual_estimator + sum(nc_estimators)
         logger.info(f"Global spatial discretization error estimator: {estimator}")
         return estimator

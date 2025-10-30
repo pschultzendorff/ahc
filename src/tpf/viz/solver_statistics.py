@@ -8,7 +8,6 @@ import porepy as pp
 
 
 class SolverStatisticsTPF(pp.SolverStatistics):
-
     time_step_index: int = 0
     """Time step count."""
     time: float = 0.0
@@ -76,7 +75,6 @@ class SolverStatisticsTPF(pp.SolverStatistics):
 
 @dataclass
 class SolverStatisticsRec(SolverStatisticsTPF):
-
     equilibrated_flux_mismatch: list[dict[str, float]] = field(default_factory=list)
     """List of mismatches of equilibrated fluxes for each non-linear iteration."""
 
@@ -206,12 +204,11 @@ class SolverStatisticsEst(SolverStatisticsRec):
 
 @dataclass
 class SolverStatisticsANewton(SolverStatisticsRec):
-
     spatial_est: list[float] = field(default_factory=list)
     """List of spatial discretization estimates for each non-linear iteration."""
-    temp_est: list[dict[str, float]] = field(default_factory=list)
+    temp_est: list[float] = field(default_factory=list)
     """List of temporal discretization error estimates for each non-linear iteration."""
-    linearization_est: list[dict[str, float]] = field(default_factory=list)
+    linearization_est: list[float] = field(default_factory=list)
     """List of linearization error estimates for each non-linear iteration."""
 
     @typing.override
