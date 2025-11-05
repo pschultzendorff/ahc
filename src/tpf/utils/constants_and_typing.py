@@ -23,9 +23,9 @@ PRESSURE_KEY = Literal["global_pressure", "complementary_pressure"]
 GLOBAL_PRESSURE: Final = "global_pressure"
 COMPLEMENTARY_PRESSURE: Final = "complementary_pressure"
 
-FLUX_KEY = Literal["global_flux", "complementary_flux"]
-GLOBAL_FLUX: Final = "global_flux"
-complementary_FLUX: Final = "complementary_flux"
+FLUX_NAME = Literal["total_flux", "wetting_flux"]
+TOTAL_FLUX: Final = "total_flux"
+WETTING_FLUX: Final = "wetting_flux"
 
 # Homotopy continuation:
 CONTINUATION_SOLUTIONS: str = "continuation_solutions"

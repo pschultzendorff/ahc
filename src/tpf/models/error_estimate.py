@@ -37,13 +37,14 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
     """
 
+    DEFAULT_QUAD_DEGREE_EST = 4
+
     def setup_estimates(self) -> None:
-        self.quadrature_estimate_degree: int = 4
         """Degree of quadrature rule for the error estimators."""
-        self.quadrature_estimate = TriangleQuadrature(self.quadrature_estimate_degree)
+        self.quadrature_est = TriangleQuadrature(self.DEFAULT_QUAD_DEGREE_EST)
         """Quadrature rule for the error estimators.
 
-        Note: For efficiency, :attr:`self.quadrature_reconstructions` could be used.
+        Note: For efficiency, :attr:`self.quadrature_rec` could be used.
             However, we may want to have the flexibility to use different degrees for
             estimates and reconstruction.
 
@@ -54,9 +55,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
     def poincare_constant(g: pp.Grid) -> np.ndarray:
         return g.cell_diameters() / np.pi
 
-    def local_residual_est(
-        self, flux_name: Literal["total", "wetting_from_ff"]
-    ) -> None:
+    def local_residual_est(self, flux_name: Literal["total", "wetting"]) -> None:
         r"""Calculate and store the local residual estimator for each element.
 
 
@@ -70,7 +69,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # Integrating gives the element source again.
         source: np.ndarray = (
             self.phase_fluid_source(self.g, self.wetting)
-            if flux_name == "wetting_from_ff"
+            if flux_name == "wetting"
             else self.total_fluid_source(self.g)
         ) / self.g.cell_volumes
 
@@ -88,7 +87,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # NOTE The saturation term, source term, and divergence of the flux
         # reconstruction, are all elementwise constant. Therefore, we can integrate
         # explicitely by multiplying with the element volume.
-        if flux_name == "wetting_from_ff":
+        if flux_name == "wetting":
             dt = pp.ad.Scalar(self.time_manager.dt)
             dt_s_ad = pp.ad.time_derivatives.dt(self.wetting.s, dt)
             dt_s: np.ndarray = (dt_s_ad).value(self.equation_system)  # type: ignore
@@ -116,7 +115,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             iterate_index=0,
         )
 
-    def local_flux_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
+    def local_flux_est(self, flux_name: Literal["total", "wetting"]) -> None:
         r"""Calculate and store the local flux estimator for each element.
 
 
@@ -164,7 +163,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         # Integrate elementwise and store the result.
         for specifier in ["", "_old"]:
-            integral: Integral = self.quadrature_estimate.integrate(
+            integral: Integral = self.quadrature_est.integrate(
                 functools.partial(
                     integrand,
                     fv_coeffs=fv_coeffs_new if specifier == "" else fv_coeffs_old,
@@ -180,17 +179,16 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 iterate_index=0,
             )
 
-    def local_nonconformity_est(
-        self,
-        pressure_key: PRESSURE_KEY,
-    ) -> None:
-        r"""Calculate and store the local nonconformity estimator for each element.
+    def local_darcy_est(self, flux_name: Literal["total", "wetting"]) -> None:
+        r"""Calculate and store the local Darcy estimator for each element at the
+         current time.
 
 
         Note: The values stored are actually the squares of the elementwise norms, i.e.,
 
         .. math::
-            \|\mathbf{u}_\alpha - \theta_\alpha\|_K^2,
+            \|\mathbf{u}_\mathrm{t} - \kappa \lambda_\mathrm{t} \nabla \tilde{P}_{h,\tau}\|_K^2(t),
+            \|\mathbf{u}_\mathrm{w} - \kappa \left(\lambda_\mathrm{w} \nabla \tilde{P}_{h,\tau} + \nabla \tilde{Q}_{h,\tau}\right)\|_K^2(t).
 
         """
 
@@ -200,7 +198,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # The latter was stored at the previous time step and is not recalculated.
         perm: np.ndarray | dict[str, np.ndarray] = self.permeability(self.g)
         # Calculate a not upwinded total mobility.
-        if pressure_key == GLOBAL_PRESSURE:
+        if flux_name == "total":
             rel_perms: dict[str, np.ndarray] = {}
             for phase in self.phases.values():
                 rel_perms[phase.name] = self.rel_perm(self.wetting.s, phase).value(  # type: ignore
@@ -210,111 +208,123 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 rel_perms[self.wetting.name] / self.wetting.viscosity
                 + rel_perms[self.nonwetting.name] / self.nonwetting.viscosity
             )
+            pressure_keys = [GLOBAL_PRESSURE]
 
-        # Get postprocessed pressure coefficients and reconstructed pressure points
-        # values/coefficients from the current and previous time step.
-        # NOTE If ``self._permeability`` is a scalar, ``postprocessed_coeffs[...,1]``
-        # and ``reconstructed_coeffs[...,1]`` are zero.
-        postprocessed_coeffs: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_postprocessed_coeffs", self.g_data, iterate_index=0
-        )
-        reconstructed_coeffs: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_reconstructed_coeffs", self.g_data, iterate_index=0
-        )
+        else:
+            wetting_mobility: np.ndarray = self.rel_perm(  # type: ignore
+                self.wetting.s, self.wetting
+            ).value(self.equation_system)
+            pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
 
-        postprocessed_coeffs_old: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_postprocessed_coeffs", self.g_data, time_step_index=0
-        )
-        reconstructed_coeffs_old: np.ndarray = pp.get_solution_values(
-            f"{pressure_key}_reconstructed_coeffs", self.g_data, time_step_index=0
-        )
-
-        def integrand(
-            x: np.ndarray,
-            values: Literal["", "_inner_product_new_old"],
-        ) -> np.ndarray:
-            r"""
-
-            The integrand can take two different forms, exemplarily shown for
-            complementary pressure:
-            .. math::
-                (\kappa \nabla (\tilde{\mathfrac{q}^n} - \mathfrac{q}^n))^2, \\
-                \kappa \nabla (\tilde{\mathfrac{q}}^n - \mathfrac{q}^n) \cdot
-                \kappa \nabla (\tilde{\mathfrac{q}}^{n-1} - \mathfrac{q}^{n-1}).
-
-            """
-            nonlocal \
-                reconstructed_coeffs, \
-                reconstructed_coeffs_old, \
-                postprocessed_coeffs_old, \
-                total_mobility, \
-                perm
-            # Calculate the pressure potential at the current time step and at the
-            # previous time step (if needed).
-            fluxes: list[np.ndarray] = []
-            for i, (pp_coeffs, rc_coeffs) in enumerate(
-                [
-                    (postprocessed_coeffs, reconstructed_coeffs),
-                    (postprocessed_coeffs_old, reconstructed_coeffs_old),
-                ]
-            ):
-                # We do not need the previous time step values to evaluate the norm.
-                if values == "" and i == 1:
-                    break
-                # Calculate the potential directly from the coefficients.
-                pressure_potential_x: np.ndarray = (
-                    2 * x[..., 0] * (pp_coeffs[..., 0] - rc_coeffs[..., 0])[None, ...]
-                    + x[..., 1] * (pp_coeffs[..., 1] - rc_coeffs[..., 1])[None, ...]
-                    + (pp_coeffs[..., 2] - rc_coeffs[..., 2])[None, ...]
-                )
-                pressure_potential_y: np.ndarray = (
-                    2 * x[..., 1] * (pp_coeffs[..., 3] - rc_coeffs[..., 3])[None, ...]
-                    + x[..., 0] * (pp_coeffs[..., 1] - rc_coeffs[..., 1])[None, ...]
-                    + (pp_coeffs[..., 4] - rc_coeffs[..., 4])[None, ...]
-                )
-                pressure_potential: np.ndarray = np.stack(
-                    [pressure_potential_x, pressure_potential_y], axis=-1
-                )
-                # NOTE For now, perm is just a scalar, so we do not have to use
-                # matrix multiplication.
-                # Different treatment for scalar and tensor permeabilities.
-                if isinstance(perm, np.ndarray):
-                    fluxes.append(
-                        perm[None, :, None]
-                        * total_mobility[None, :, None]
-                        * pressure_potential
-                        if pressure_key == GLOBAL_PRESSURE
-                        else perm[None, :, None] * pressure_potential
-                    )
-                elif len(perm) == 1:
-                    fluxes.append(
-                        perm["kxx"][None, :, None]
-                        * total_mobility[None, :, None]
-                        * pressure_potential
-                        if pressure_key == GLOBAL_PRESSURE
-                        else perm["kxx"][None, :, None] * pressure_potential
-                    )
-                elif len(perm) == 2:
-                    # TODO Fix this for tensor permeabilities.
-                    # Perm has form ``{"kxx": np.ndarray, "kyy": np.ndarray, ...}``.
-                    # pressure_potential_times_mobility: np.ndarray = (
-                    #     total_mobility[None, :, None] * pressure_potential
-                    #     if pressure_key == GLOBAL_PRESSURE
-                    #     else pressure_potential
-                    # )
-                    # fluxes.append()
-                    ...
-                else:
-                    raise ValueError(
-                        "Permeability must be scalar or tensor with zero"
-                        + " values off the diagonal."
-                    )
-            if values == "":
-                fluxes.append(fluxes[0])
-            return (
-                fluxes[0][..., 0] * fluxes[1][..., 0]
-                + fluxes[0][..., 1] * fluxes[1][..., 1]
+        for pressure_key in pressure_keys:
+            # Get postprocessed pressure coefficients and reconstructed pressure points
+            # values/coefficients from the current and previous time step.
+            # NOTE If ``self._permeability`` is a scalar, ``postprocessed_coeffs[...,1]``
+            # and ``reconstructed_coeffs[...,1]`` are zero.
+            postprocessed_coeffs: np.ndarray = pp.get_solution_values(
+                f"{pressure_key}_postprocessed_coeffs", self.g_data, iterate_index=0
             )
+            reconstructed_coeffs: np.ndarray = pp.get_solution_values(
+                f"{pressure_key}_reconstructed_coeffs", self.g_data, iterate_index=0
+            )
+
+            postprocessed_coeffs_old: np.ndarray = pp.get_solution_values(
+                f"{pressure_key}_postprocessed_coeffs", self.g_data, time_step_index=0
+            )
+            reconstructed_coeffs_old: np.ndarray = pp.get_solution_values(
+                f"{pressure_key}_reconstructed_coeffs", self.g_data, time_step_index=0
+            )
+
+            def integrand(
+                x: np.ndarray,
+                values: Literal["", "_inner_product_new_old"],
+            ) -> np.ndarray:
+                r"""
+
+                The integrand can take two different forms, exemplarily shown for
+                complementary pressure:
+                .. math::
+                    (\kappa \nabla (\tilde{\mathfrac{q}^n} - \mathfrac{q}^n))^2, \\
+                    \kappa \nabla (\tilde{\mathfrac{q}}^n - \mathfrac{q}^n) \cdot
+                    \kappa \nabla (\tilde{\mathfrac{q}}^{n-1} - \mathfrac{q}^{n-1}).
+
+                """
+                nonlocal \
+                    reconstructed_coeffs, \
+                    reconstructed_coeffs_old, \
+                    postprocessed_coeffs_old, \
+                    total_mobility, \
+                    perm
+                # Calculate the pressure potential at the current time step and at the
+                # previous time step (if needed).
+                fluxes: list[np.ndarray] = []
+                for i, (pp_coeffs, rc_coeffs) in enumerate(
+                    [
+                        (postprocessed_coeffs, reconstructed_coeffs),
+                        (postprocessed_coeffs_old, reconstructed_coeffs_old),
+                    ]
+                ):
+                    # We do not need the previous time step values to evaluate the norm.
+                    if values == "" and i == 1:
+                        break
+                    # Calculate the potential directly from the coefficients.
+                    pressure_potential_x: np.ndarray = (
+                        2
+                        * x[..., 0]
+                        * (pp_coeffs[..., 0] - rc_coeffs[..., 0])[None, ...]
+                        + x[..., 1] * (pp_coeffs[..., 1] - rc_coeffs[..., 1])[None, ...]
+                        + (pp_coeffs[..., 2] - rc_coeffs[..., 2])[None, ...]
+                    )
+                    pressure_potential_y: np.ndarray = (
+                        2
+                        * x[..., 1]
+                        * (pp_coeffs[..., 3] - rc_coeffs[..., 3])[None, ...]
+                        + x[..., 0] * (pp_coeffs[..., 1] - rc_coeffs[..., 1])[None, ...]
+                        + (pp_coeffs[..., 4] - rc_coeffs[..., 4])[None, ...]
+                    )
+                    pressure_potential: np.ndarray = np.stack(
+                        [pressure_potential_x, pressure_potential_y], axis=-1
+                    )
+                    # NOTE For now, perm is just a scalar, so we do not have to use
+                    # matrix multiplication.
+                    # Different treatment for scalar and tensor permeabilities.
+                    if isinstance(perm, np.ndarray):
+                        fluxes.append(
+                            perm[None, :, None]
+                            * total_mobility[None, :, None]
+                            * pressure_potential
+                            if pressure_key == GLOBAL_PRESSURE
+                            else perm[None, :, None] * pressure_potential
+                        )
+                    elif len(perm) == 1:
+                        fluxes.append(
+                            perm["kxx"][None, :, None]
+                            * total_mobility[None, :, None]
+                            * pressure_potential
+                            if pressure_key == GLOBAL_PRESSURE
+                            else perm["kxx"][None, :, None] * pressure_potential
+                        )
+                    elif len(perm) == 2:
+                        # TODO Implement for tensor permeability.
+                        # Perm has form ``{"kxx": np.ndarray, "kyy": np.ndarray, ...}``.
+                        # pressure_potential_times_mobility: np.ndarray = (
+                        #     total_mobility[None, :, None] * pressure_potential
+                        #     if pressure_key == GLOBAL_PRESSURE
+                        #     else pressure_potential
+                        # )
+                        # fluxes.append()
+                        ...
+                    else:
+                        raise ValueError(
+                            "Permeability must be scalar or tensor with zero"
+                            + " values off the diagonal."
+                        )
+                if values == "":
+                    fluxes.append(fluxes[0])
+                return (
+                    fluxes[0][..., 0] * fluxes[1][..., 0]
+                    + fluxes[0][..., 1] * fluxes[1][..., 1]
+                )
 
         # Integrate
         # :math:`(\kappa \nabla (\tilde{\mathfrac{q}^n} - \mathfrac{q}^n))^2`
@@ -325,7 +335,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         for specifier in ["", "_inner_product_new_old"]:
             # Make mypy happy.
             specifier = typing.cast(Literal["", "_inner_product_new_old"], specifier)
-            integral: Integral = self.quadrature_estimate.integrate(
+            integral: Integral = self.quadrature_est.integrate(
                 functools.partial(integrand, values=specifier),
                 self.quadpy_elements,
                 recalc_points=False,
@@ -338,6 +348,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 iterate_index=0,
             )
 
+    def local_saturation_pressure_est(self) -> None:
+        pass
+
     def global_res_and_flux_est(self) -> float:
         r"""Sum local flux and residual estimators, integrate in time, and sum total and
          wetting estimators.
@@ -346,7 +359,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             \left\{
                 \sum_{\alpha \in \{w,t\}}
                     \sum_{n = 1}^N
-                        \int_{I_n}
+                        \int_{I^n}
                             \sum_{K \in \mathcal{T}_h}
                                 (\eta_{R,\alpha,K} + \eta_{F,\alpha,K}(t))^2
                         dt
@@ -365,9 +378,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         """
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting_from_ff"]:
+        for flux_name in ["total", "wetting"]:
             # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+            flux_name = typing.cast(Literal["total", "wetting"], flux_name)
 
             # Calculate local estimatorss.
             self.local_residual_est(flux_name)
@@ -401,13 +414,91 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         )
         return sum(estimators.values())
 
+    def global_darcy_est(self) -> tuple[float, float]:
+        r"""Compute the global Darcy estimator by summing local contributions and
+        integrating in time.
+
+        Mathematically, this corresponds to:
+
+        .. math::
+            \left\{
+                \int_{I^n}
+                    \sum_{K \in \mathcal{T}_h} (\eta_{\bullet,K}(t))^2
+                \, \mathrm{d} t
+            \right\}^{\frac{1}{2}}
+
+        We adopt the quadrature rule proposed by Vohralík and M. F. Wheeler
+        (“A posteriori error estimates, stopping criteria, and adaptivity for two-phase
+        flows,” 2013, doi:10.1007/s10596-013-9356-0). This rule is exact for local
+        estimators :math:`\eta_{\bullet,K}` that are linear in time:
+
+        .. math::
+            \frac{\tau^n}{3} \sum_{K \in \mathcal{T}_h}
+            \left[
+                (\eta_{\bullet,K}(t^n))^2
+                + (q(t^n), q(t^{n-1}))_K
+                + (\eta_{\bullet,K}(t^{n-1}))^2
+            \right],
+
+        where :math:`q` denotes the spatial integrand used to compute
+        :math:`\eta_{\bullet,K}`.
+
+        Returns:
+            estimator: The combined global Darcy estimator.
+
+        """
+        estimators: dict[str, float] = {}
+        for flux_name in ["total", "wetting"]:
+            # Satisfy mypy.
+            flux_name = typing.cast(Literal["total", "wetting"], flux_name)
+            # Calculate local estimatorss.
+            self.local_darcy_est(flux_name)
+            # Load spatial integrals from the three quadrature points.
+            local_integral_NC_new: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_Darcy_estimator", self.g_data, iterate_index=0
+            )
+            local_integral_NC_inner_product_new_old: np.ndarray = (
+                pp.get_solution_values(
+                    f"{flux_name}_Darcy_estimator_inner_product_new_old",
+                    self.g_data,
+                    iterate_index=0,
+                )
+            )
+            local_integral_NC_old: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_Darcy_estimator", self.g_data, time_step_index=0
+            )
+            # Calculate global values at quadrature points.
+            # NOTE The values stored were the squares of the elementwise norms, hence we
+            # do not need to square here.
+            global_integral_new: float = local_integral_NC_new.sum()
+            global_integral_inner_product_new_old: float = (
+                local_integral_NC_inner_product_new_old.sum()
+            )
+            global_integral_old: float = local_integral_NC_old.sum()
+            # Finally, estimate the time integral.
+            estimators[flux_name] = (
+                self.time_manager.dt
+                / 3
+                * (
+                    global_integral_new
+                    + global_integral_inner_product_new_old
+                    + global_integral_old
+                )
+            ) ** (1 / 2)
+            logger.info(
+                f"Global {flux_name} Darcy error estimator:"
+                + f" {estimators[flux_name]}"
+            )
+
+        return estimators["total"], estimators["wetting"]
+
     def global_nonconformity_est(self) -> tuple[float, float]:
         r"""Sum local nonconformity estimators and integrate in time.
 
         .. math::
             \left\{
                 \sum_{n = 1}^N
-                    \int_{I_n}
+                    \int_{I^n}
                         \sum_{K \in \mathcal{T}_h} (\eta_{NC,1,K}(t))^2
                     dt
             \right\}^{\frac{1}{2}}
@@ -415,7 +506,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         .. math::
             \left\{
                 \sum_{n = 1}^N
-                    \int_{I_n}
+                    \int_{I^n}
                         \sum_{K \in \mathcal{T}_h} (\eta_{NC,2,K}(t))^2
                     dt
             \right\}^{\frac{1}{2}}
@@ -491,7 +582,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         :meth:`global_energy_norm`.
 
         """
-        for flux_name in ["total", "wetting_from_ff"]:
+        for flux_name in ["total", "wetting"]:
             flux_coeffs: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
             )
@@ -514,7 +605,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 )
                 return integrand_x**2 + integrand_y**2
 
-            local_energy: Integral = self.quadrature_estimate.integrate(
+            local_energy: Integral = self.quadrature_est.integrate(
                 integrand,
                 self.quadpy_elements,
                 recalc_points=False,
@@ -535,14 +626,14 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         flux.
 
         .. math::
-            \mathcal{E}_{I_n,\Omega}(p_{n,h,\tau}, s_{w,h,\tau})
-                := \int_{I_n} \int_\Omega |\bm{u}_{\alpha,h,\tau}|^2 \, dx \, dt
+            \mathcal{E}_{I^n,\Omega}(p_{n,h,\tau}, s_{w,h,\tau})
+                := \int_{I^n} \int_\Omega |\bm{u}_{\alpha,h,\tau}|^2 \, dx \, dt
 
         """
         self.local_energy_norm()
 
         global_energies: list[float] = []
-        for flux_name in ["total", "wetting_from_ff"]:
+        for flux_name in ["total", "wetting"]:
             local_energy_new: np.ndarray = pp.get_solution_values(
                 f"energy_norm_{flux_name}_flux_part", self.g_data, iterate_index=0
             )
@@ -592,7 +683,7 @@ class SolutionStrategyEst(  # type: ignore
 
         """
         for flux_name, specifier in itertools.product(
-            ["total", "wetting_from_ff"],
+            ["total", "wetting"],
             ["R_estimator", "F_estimator", "F_estimator_old", "energy_norm_flux_part"],
         ):
             if specifier.endswith("estimator") or specifier == "F_estimator_old":
@@ -663,7 +754,7 @@ class SolutionStrategyEst(  # type: ignore
         # code in :meth:`_data_to_export`.
         # NOTE The RT0 coeffs are needed to calculate the local flux estimators.
         for flux_name, specifier in itertools.product(
-            ["total", "wetting_from_ff"],
+            ["total", "wetting"],
             ["R_estimator", "F_estimator", "energy_norm_flux_part", "flux_RT0_coeffs"],
         ):
             if specifier.startswith("energy"):
@@ -686,7 +777,7 @@ class DataSavingEst(DataSavingRec):
             iterate_index=iterate_index,
         )
         for flux_name, key in itertools.product(
-            ["total", "wetting_from_ff"],
+            ["total", "wetting"],
             ["R_estimator", "F_estimator", "energy_norm_flux_part"],
         ):
             # Before simulation, the estimators won't be set yet, due to the order of

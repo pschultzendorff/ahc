@@ -32,7 +32,6 @@ def save_params_and_run_model(model, params: dict[str, Any]) -> None:
                     "dt_init": value.dt_init,
                     "constant_dt": value.is_constant,
                 }
-            pass
     with open(os.path.join(folder_name, "model_params.json"), "w") as f:
         json.dump(params_json, f, indent=2)
     # Run model.

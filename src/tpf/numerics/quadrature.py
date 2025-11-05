@@ -935,6 +935,8 @@ class TriangleQuadrature(BaseScheme):
                     [0.816847572980459, 0.091576213509771],
                 ]
             )
+        else:
+            raise ValueError(f"Degree {self.degree} not implemented.")
 
     def _weights_setter(self, weights: np.ndarray | None = None) -> None:
         if self.degree == 1:
@@ -954,6 +956,8 @@ class TriangleQuadrature(BaseScheme):
                     0.054975871827661,
                 ]
             )
+        else:
+            raise ValueError(f"Degree {self.degree} not implemented.")
 
 
 class MonteCarloQuadrature(BaseScheme):

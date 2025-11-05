@@ -47,7 +47,6 @@ from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
-from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 # region SETUP
@@ -323,6 +322,7 @@ def run_simulation(config: SimulationConfig) -> None:
         with (config.folder_name / "failure.txt").open("w") as f:
             f.write(str(e))
         logger.error(f"Run failed with error: {e}.")
+        raise e
 
 
 # endregion

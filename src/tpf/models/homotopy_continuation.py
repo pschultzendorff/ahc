@@ -18,7 +18,7 @@ from tpf.models.error_estimate import (
     ErrorEstimateMixin,
     SolutionStrategyEst,
 )
-from tpf.models.flow_and_transport import DarcyFluxes, SolutionStrategyTPF, TwoPhaseFlow
+from tpf.models.flow_and_transport import SolutionStrategyTPF, TwoPhaseFlow
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import (
     EstimatesProtocol,
@@ -37,6 +37,8 @@ from tpf.utils.constants_and_typing import (
     COMPLEMENTARY_PRESSURE,
     GLOBAL_PRESSURE,
     PRESSURE_KEY,
+    TOTAL_FLUX,
+    WETTING_FLUX,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,64 +47,6 @@ logger = logging.getLogger(__name__)
 # computation will result in an underflow error. These errors should NOT be raised.
 # Treating the local estimators as zero is fine.
 np.seterr(under="ignore")
-
-
-# ``HCProtocol`` and ``TPFProtocol`` define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
-class HybridUpwindingHC(HCProtocol, DarcyFluxes):
-    r"""Mobility upwinded for viscous flux and averaged for capillary flux.
-
-    F. P. Hamon, B. T. Mallison, and H. A. Tchelepi, “Implicit Hybrid Upwinding for
-          two-phase flow in heterogeneous porous media with buoyancy and
-          capillarity,” Computer Methods in Applied Mechanics and Engineering, vol.
-          331, pp. 701–727, Apr. 2018, doi: 10.1016/j.cma.2017.10.008.
-
-    """
-
-    # def prepare_simulation(self) -> None:
-    #     super().prepare_simulation()
-    #     self.calc_capillary_diffusion_interpolants()
-
-    # def calc_capillary_diffusion_interpolants(self) -> None:
-    #     hybrid_upwind_constants: dict[str, Any] = self.params.get(
-    #         "hc_hybrid_upwind_constants", {}
-    #     )
-    #     self.s_interpol_vals: np.ndarray = np.linspace(
-    #         self.wetting.residual_saturation + self.wetting.saturation_epsilon,
-    #         1
-    #         - self.nonwetting.residual_saturation
-    #         - self.nonwetting.saturation_epsilon,
-    #         hybrid_upwind_constants.get("interpolation_degree", 100),
-    #     )
-
-    #     def capillary_diffusion(s_w: np.ndarray) -> np.ndarray:
-    #         return (
-    #             self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
-    #             * self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
-    #             / (
-    #                 self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
-    #                 * self.wetting.viscosity
-    #                 / self.nonwetting.viscosity
-    #                 * self.rel_perm_np(s_w, self.wetting, self._rel_perm_constants_1)
-    #             )
-    #             * self.cap_press_deriv_np(s_w, self._cap_press_constants_1)
-    #         )
-
-    #     self.capillary_diffusion_vals: np.ndarray = capillary_diffusion(
-    #         self.s_interpol_vals
-    #     )
-
-    # def capillary_flux(self, g: pp.Grid) -> pp.ad.Operator:
-    #     tpfa = pp.ad.TpfaAd(self.flux_key, [g])
-    #     diffusion_coeff = np.interp(
-    #         self.s_interpol_vals, self.capillary_diffusion_vals
-    #     )(self.wetting.s)
-    #     cap_flux = (
-    #         tpfa.flux() @ self.wetting.s
-    #         + tpfa.bound_flux() @ self.bc_dirichlet_saturation_values(g, self.wetting)
-    #     )
 
 
 # ``HCProtocol`` and ``TPFProtocol`` define different types for
@@ -279,7 +223,7 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
 class EstimatesHCMixin(
     HCProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
 ):  # type: ignore
-    def local_temp_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
+    def local_temp_est(self, flux_name: str) -> None:
         r"""Calculate the local-in-space temporal error estimators.
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -315,12 +259,12 @@ class EstimatesHCMixin(
         """
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
         fv_coeffs_new = pp.get_solution_values(
-            f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs",
+            f"{flux_name}_wrt_goal_rel_perm_RT0_coeffs",
             self.g_data,
             iterate_index=0,
         )
         fv_coeffs_old = pp.get_solution_values(
-            f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs",
+            f"{flux_name}_wrt_goal_rel_perm_RT0_coeffs",
             self.g_data,
             time_step_index=0,
         )
@@ -335,7 +279,7 @@ class EstimatesHCMixin(
             return integrand_x**2 + integrand_y**2
 
         # Integrate elementwise and store the result.
-        integral: Integral = self.quadrature_estimate.integrate(
+        integral: Integral = self.quadrature_est.integrate(
             integrand,
             self.quadpy_elements,
             recalc_points=False,
@@ -348,7 +292,7 @@ class EstimatesHCMixin(
             iterate_index=0,
         )
 
-    def local_hc_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
+    def local_hc_est(self, flux_name: str) -> None:
         """
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -362,10 +306,10 @@ class EstimatesHCMixin(
         """
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
         fv_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
+            f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
         )
         fv_goal_rel_perm_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs",
+            f"{flux_name}_wrt_goal_rel_perm_RT0_coeffs",
             self.g_data,
             iterate_index=0,
         )
@@ -380,7 +324,7 @@ class EstimatesHCMixin(
             return integrand_x**2 + integrand_y**2
 
         # Integrate elementwise and store the result.
-        integral: Integral = self.quadrature_estimate.integrate(
+        integral: Integral = self.quadrature_est.integrate(
             integrand,
             self.quadpy_elements,
             recalc_points=False,
@@ -393,9 +337,7 @@ class EstimatesHCMixin(
             iterate_index=0,
         )
 
-    def local_linearization_est(
-        self, flux_name: Literal["total", "wetting_from_ff"]
-    ) -> None:
+    def local_linearization_est(self, flux_name: str) -> None:
         """
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -407,27 +349,27 @@ class EstimatesHCMixin(
               linearization error estimator.
 
         """
-        # Retrieve flux w.r.t. goal rel. perm. and equilbirated flux coeffs.
+        # Retrieve flux w.r.t. goal rel. perm. and equilibrated flux coeffs.
         # TODO Could be made more efficient by just storing the Newton update times
         # derivative of the fluxes.
         fv_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
+            f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
         )
-        fv_equilibrated_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_equilibrated_RT0_coeffs", self.g_data, iterate_index=0
+        fv_equil_coeffs = pp.get_solution_values(
+            f"{flux_name}_equil_RT0_coeffs", self.g_data, iterate_index=0
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            integrand_x: np.ndarray = (
-                fv_coeffs[..., 0] - fv_equilibrated_coeffs[..., 0]
-            ) * x[..., 0] + (fv_coeffs[..., 1] - fv_equilibrated_coeffs[..., 1])
-            integrand_y: np.ndarray = (
-                fv_coeffs[..., 0] - fv_equilibrated_coeffs[..., 0]
-            ) * x[..., 1] + (fv_coeffs[..., 2] - fv_equilibrated_coeffs[..., 2])
+            integrand_x: np.ndarray = (fv_coeffs[..., 0] - fv_equil_coeffs[..., 0]) * x[
+                ..., 0
+            ] + (fv_coeffs[..., 1] - fv_equil_coeffs[..., 1])
+            integrand_y: np.ndarray = (fv_coeffs[..., 0] - fv_equil_coeffs[..., 0]) * x[
+                ..., 1
+            ] + (fv_coeffs[..., 2] - fv_equil_coeffs[..., 2])
             return integrand_x**2 + integrand_y**2
 
         # Integrate elementwise and store the result.
-        integral: Integral = self.quadrature_estimate.integrate(
+        integral: Integral = self.quadrature_est.integrate(
             integrand,
             self.quadpy_elements,
             recalc_points=False,
@@ -465,10 +407,7 @@ class EstimatesHCMixin(
             return 0.0
         else:
             estimators: dict[str, float] = {}
-            for flux_name in ["total", "wetting_from_ff"]:
-                # Satisfy mypy.
-                flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
-
+            for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
                 # Calculate local estimatorss.
                 self.local_residual_est(flux_name)
                 # Load spatial integrals from current nonlinear iteration.
@@ -497,10 +436,7 @@ class EstimatesHCMixin(
     def global_temp_est(self) -> float:
         """Evaluate the global temporal discretization error estimator."""
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting_from_ff"]:
-            # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
-
+        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
             # Calculate local estimators.
             self.local_temp_est(flux_name)
             # Load spatial integral from current nonlinear iteration.
@@ -540,10 +476,7 @@ class EstimatesHCMixin(
 
         """
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting_from_ff"]:
-            # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
-
+        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
             # Calculate local estimators.
             self.local_hc_est(flux_name)
             # Load spatial integral from current nonlinear iteration.
@@ -563,10 +496,7 @@ class EstimatesHCMixin(
 
     def global_linearization_est(self) -> float:
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting_from_ff"]:
-            # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
-
+        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
             # Calculate local estimators.
             self.local_linearization_est(flux_name)
             # Load spatial integral from current nonlinear iteration.
@@ -709,7 +639,7 @@ class SolutionStrategyAHC(
         # are not needed at any point. The initial iterate values are technically also
         # not needed, but by settimg them, they are exported at the zeroth time step.
         # Check :meth:`DataSavingHC._data_to_export`.
-        for flux_name in ["total", "wetting_from_ff"]:
+        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
             pp.set_solution_values(
                 f"{flux_name}_C_estimator",
                 np.zeros(self.g.num_cells),
@@ -787,18 +717,18 @@ class SolutionStrategyAHC(
         # only needed at the current iteration. We set the time step values for
         # completeness and to avoid extra code in :meth:`_data_to_export`.
         for flux_name, specifier in itertools.product(
-            ["total", "wetting_from_ff"],
+            [TOTAL_FLUX, WETTING_FLUX],
             [
                 "R_estimator",
                 "F_estimator",
                 "T_estimator",
                 "C_estimator",
                 "L_estimator",
-                "flux_wrt_goal_rel_perm_RT0_coeffs",
+                "_wrt_goal_rel_perm_RT0_coeffs",
             ],
         ):
             if specifier.startswith("energy"):
-                name: str = f"energy_norm_{flux_name}_flux_part"
+                name: str = f"energy_norm_{flux_name}_part"
             else:
                 name = f"{flux_name}_{specifier}"
             flux_values: np.ndarray = pp.get_solution_values(
@@ -997,13 +927,15 @@ class SolutionStrategyAHC(
         # solution from the previous HC iteration is already good enough. This way, we
         # would avoid one Newton iteration.
 
-    def eval_additional_vars(self, time_step_index: int | None = None) -> None:
+    def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
         """Calculate numerical fluxes w.r.t. the goal relative permeabilities.
 
         This is done for the fluxes used in pressure reconstruction as well as for
         the fluxes used in the continuation estimator.
 
         """
+        # Ignore Pylance complaining about the method not being implemented.
+        super().eval_postproc_qtys(time_step_index=time_step_index)  # type: ignore
 
         # Save FV P0 pressures.
         self.eval_glob_compl_pressure_on_domain(time_step_index=time_step_index)
@@ -1012,30 +944,18 @@ class SolutionStrategyAHC(
         self.hc_toggle_fl = 0.0
         self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
-        for flux_name, flux_eq in zip(
-            [
-                "total",
-                "wetting_from_ff",
-                "total_by_t_mobility",
-                "total_times_fractional_flow",
-            ],
-            [
-                self.total_flux_eq,
-                self.wetting_flux_from_ff_eq,
-                self.total_flux_by_total_mobility_eq,
-                self.total_flux_times_fractional_flow_eq,
-            ],
-        ):
-            # Take the negative of the values since ``equation_system.assemble`` returns
-            # the negative of the RHS.
-            flux: np.ndarray = -self.equation_system.assemble(
-                evaluate_jacobian=False, equations=[flux_eq]
-            )
+        for flux_name in [
+            TOTAL_FLUX,
+            WETTING_FLUX,
+            TOTAL_FLUX + "_by_t_mobility",
+            TOTAL_FLUX + "_times_fractional_flow",
+        ]:
+            flux = self.postproc_ad_ops[flux_name].value(self.equation_system)
             pp.set_solution_values(
-                f"{flux_name}_flux_wrt_goal_rel_perm",
-                flux,
+                f"{flux_name}_wrt_goal_rel_perm",
+                flux,  # type: ignore
                 self.g_data,
-                time_step_index=time_step_index,
+                time_step_index=time_step_index,  # TODO Is saving at time step needed?
                 iterate_index=0,
             )
 
@@ -1047,12 +967,9 @@ class SolutionStrategyAHC(
         self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
     ) -> None:
         """Extend and equilibrate fluxes, postprocess and reconstruct pressures."""
-        for flux_name in ["total", "wetting_from_ff"]:
-            # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
-
+        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
             # Extend both the nonequilibrated and equilibrated flux to compare in
-            # the flux estimator. The nonequilibrated wetting_from_ff flux is also used
+            # the flux estimator. The nonequilibrated wetting flux is also used
             # in the pressure reconstruction.
             self.extend_fv_fluxes(
                 flux_name,
@@ -1066,38 +983,27 @@ class SolutionStrategyAHC(
                 self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
 
                 self.extend_fv_fluxes(
-                    flux_name,
-                    flux_specifier="_equilibrated",
+                    flux_name + "_equil",
                 )
 
         # NOTE The fluxes w.r.t. goal rel. perm are only used to post-process the global
         # and complementary pressures and in the contination estimators and do not need
         # to be equilibrated.
         for flux_name in [
-            "total",
-            "wetting_from_ff",
-            "total_by_t_mobility",
-            "total_times_fractional_flow",
+            TOTAL_FLUX,
+            WETTING_FLUX,
+            TOTAL_FLUX + "_by_t_mobility",
+            TOTAL_FLUX + "_times_fractional_flow",
         ]:
-            # Satisfy mypy.
-            flux_name = typing.cast(
-                Literal[
-                    "total",
-                    "wetting_from_ff",
-                    "total_by_t_mobility",
-                    "total_times_fractional_flow",
-                ],
-                flux_name,
-            )
             self.extend_fv_fluxes(
-                flux_name,
-                flux_specifier="_wrt_goal_rel_perm",
+                flux_name + "_wrt_goal_rel_perm",
                 prepare_simulation=prepare_simulation,
             )
 
         for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
             # Satisfy mypy.
             pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
+
             self.postprocess_pressure_vohralik(
                 pressure_key,
                 flux_specifier="_wrt_goal_rel_perm",
@@ -1197,19 +1103,19 @@ class SolutionStrategyAHC(
                 f"{pressure_key}{specifier}", pressure_values, self.g_data, hc_index=0
             )
         for flux_name, specifier in itertools.product(
-            ["total", "wetting_from_ff"],
+            [TOTAL_FLUX, WETTING_FLUX],
             [
                 "R_estimator",
                 "F_estimator",
                 "T_estimator",
                 "C_estimator",
                 "L_estimator",
-                "energy_norm_flux_part",
-                "flux_wrt_goal_rel_perm_RT0_coeffs",
+                "energy_norm_part",
+                "wrt_goal_rel_perm_RT0_coeffs",
             ],
         ):
             if specifier.startswith("energy"):
-                name: str = f"energy_norm_{flux_name}_flux_part"
+                name: str = f"energy_norm_{flux_name}_part"
             else:
                 name = f"{flux_name}_{specifier}"
             flux_values: np.ndarray = pp.get_solution_values(
@@ -1258,7 +1164,7 @@ class DataSavingHC(DataSavingEst):
             iterate_index=iterate_index,
         )
         for flux_name, est_name in itertools.product(
-            ["total", "wetting_from_ff"], ["T_estimator", "C_estimator", "L_estimator"]
+            ["total", "wetting"], ["T_estimator", "C_estimator", "L_estimator"]
         ):
             try:
                 data.append(

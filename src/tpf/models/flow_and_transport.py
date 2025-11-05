@@ -87,7 +87,7 @@ Further possible issues:
     # Lastly, we add boundary flux at faces with Neumann bc.
     + upwind_t.bound_transport_neu() @ flux_t_bc_neu
 
-    from :meth:`wetting_flux_from_fractional_flow`
+    from :meth:`wetting_flux`
     upwind_w = pp.ad.UpwindAd(self.wetting.mobility_key, [g])
 
     # Compute cap pressure and relative permeabilities.
@@ -247,21 +247,6 @@ class DarcyFluxes(TPFProtocol):
             name="total mobility",
         ) + pp.ad.Scalar(1e-7)
 
-    def phase_flux(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
-        """Phase volume flux. Combines advective and buoyancy components.
-
-        SI Unit: By default [kg s^-1], but depends on the units of the other parameters.
-
-        """
-        # Get phase mobility and potential.
-        potential = self.phase_potential(g, phase)
-        mobility = self.phase_mobility(g, phase)
-
-        # Add together.
-        flux: pp.ad.Operator = mobility * potential
-        flux.set_name(f"{phase.name} volume flux")
-        return flux
-
     def phase_potential(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
         """Phase potential times permeability. Combines pressure and buoyancy potential.
 
@@ -342,7 +327,7 @@ class DarcyFluxes(TPFProtocol):
         total_flux.set_name("Total volume flux")
         return total_flux
 
-    def wetting_flux_from_fractional_flow(self, g: pp.Grid) -> pp.ad.Operator:
+    def wetting_flux(self, g: pp.Grid) -> pp.ad.Operator:
         """Calculate the wetting flux from the total flux and fractional flow.
 
         Note: This is different from obtaining the flux directly from phase pressures
@@ -479,20 +464,17 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
         porosity_ad = pp.ad.DenseArray(self.porosity(self.g))
 
         # Ad equations
-        if self.formulation == "fractional_flow":
-            flux_t = self.total_flux(self.g)
-            wetting_flux_from_fractional_flow: pp.ad.Operator = (
-                self.wetting_flux_from_fractional_flow(self.g)
-            )
+        flux_t = self.total_flux(self.g)
+        wetting_flux: pp.ad.Operator = self.wetting_flux(self.g)
 
-            flow_equation = pp.ad.Scalar(self.flow_equation_weight) * (
-                div @ flux_t - source_ad_t
-            )
-            transport_equation = pp.ad.Scalar(self.transport_equation_weight) * (
-                porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
-                + div @ wetting_flux_from_fractional_flow
-                - source_ad_w
-            )
+        flow_equation = pp.ad.Scalar(self.flow_equation_weight) * (
+            div @ flux_t - source_ad_t
+        )
+        transport_equation = pp.ad.Scalar(self.transport_equation_weight) * (
+            porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
+            + div @ wetting_flux
+            - source_ad_w
+        )
 
         self.flow_equation = "Flow equation"
         self.transport_equation = "Transport equation"
@@ -505,24 +487,19 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
         self.equation_system.set_equation(transport_equation, [self.g], {"cells": 1})
 
         # Secondary variables.
-        if self.formulation == "fractional_flow":
-            secondary_pressure: pp.ad.Operator = self.nonwetting.p - self.cap_press(
-                self.wetting.s
-            )
-            secondary_saturation: pp.ad.Operator = pp.ad.Scalar(1) - self.wetting.s
+        secondary_pressure: pp.ad.Operator = self.nonwetting.p - self.cap_press(
+            self.wetting.s
+        )
+        secondary_saturation: pp.ad.Operator = pp.ad.Scalar(1) - self.wetting.s
 
-            self.secondary_pressure_eq = "Secondary pressure equation"
-            self.secondary_saturation_eq = "Secondary saturation equation"
+        self.secondary_pressure_eq = "Secondary pressure equation"
+        self.secondary_saturation_eq = "Secondary saturation equation"
 
-            secondary_pressure.set_name(self.secondary_pressure_eq)
-            secondary_saturation.set_name(self.secondary_saturation_eq)
+        secondary_pressure.set_name(self.secondary_pressure_eq)
+        secondary_saturation.set_name(self.secondary_saturation_eq)
 
-            self.equation_system.set_equation(
-                secondary_pressure, [self.g], {"cells": 1}
-            )
-            self.equation_system.set_equation(
-                secondary_saturation, [self.g], {"cells": 1}
-            )
+        self.equation_system.set_equation(secondary_pressure, [self.g], {"cells": 1})
+        self.equation_system.set_equation(secondary_saturation, [self.g], {"cells": 1})
 
 
 class VariablesTPF(TPFProtocol, pp.VariableMixin):
@@ -546,11 +523,10 @@ class VariablesTPF(TPFProtocol, pp.VariableMixin):
 
         # NOTE The division into primary/secondary variables is internal to this model
         # only and not connected to ``pp.PRIMARY_VARIABLES``.
-        if self.formulation == "fractional_flow":
-            self.primary_pressure_var = f"{self.nonwetting.name} pressure"
-            self.primary_saturation_var = f"{self.wetting.name} saturation"
-            self.secondary_pressure_var = f"{self.wetting.name} pressure"
-            self.secondary_saturation_var = f"{self.nonwetting.name} saturation"
+        self.primary_pressure_var = f"{self.nonwetting.name} pressure"
+        self.primary_saturation_var = f"{self.wetting.name} saturation"
+        self.secondary_pressure_var = f"{self.wetting.name} pressure"
+        self.secondary_saturation_var = f"{self.nonwetting.name} saturation"
 
     def normalize_saturation(
         self,
@@ -816,17 +792,6 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
     def __init__(self, params: dict | None) -> None:
         super().__init__(params)
 
-        self.formulation: Literal["fractional_flow"] = self.params.get(
-            "formulation", "fractional_flow"
-        )
-        """Choose which formulation of two-phase flow shall be run. Note, that his has
-        (!!!) to be passed as a parameter. Changing it after initialization may result
-        in wrong results. "
-        
-        Valid values:
-            'fractional_flow':
-
-        """
         self.flow_equation_weight: float = self.params.get("flow_equation_weight", 1.0)
         """Weighting factor for the flow equation in the residual and Jacobian."""
         self.transport_equation_weight: float = self.params.get(
@@ -990,30 +955,24 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         """
         super().set_discretization_parameters()
 
-        # Boundary conditions and parameters.
-        perm = self.permeability(self.g)
-        # Different treatment for scalar and tensor permeability.
-        if isinstance(perm, np.ndarray):
-            diffusivity = pp.SecondOrderTensor(perm)
-        elif isinstance(perm, dict):
-            diffusivity = pp.SecondOrderTensor(**perm)
-        # all_bf, *_ = self._domain_boundary_sides(sd)
-        # Parameters that are not used for discretization.
-        pp.initialize_data(
-            self.g,
-            self.g_data,
-            self.flux_key,
-            {
-                "bc": self.bc_type(self.g),
-                "second_order_tensor": diffusivity,
-                "ambient_dimension": self.g.dim,
-                # We initialize the Darcy flux to one just s.t.
-                # ``Upwind.discretize()`` can be called. This does not need to be
-                # updated, as only ``Upwind.bound_transport_neu()`` is used, which
-                # does not depend on the Darcy flux.
-                "darcy_flux": np.ones(self.g.num_faces),
-            },
-        )
+        # Constant parameters for TPFA discretizations.
+        if self.nonlinear_solver_statistics.num_iteration == 0:
+            perm = self.permeability(self.g)
+            # Different treatment for scalar and tensor permeability.
+            if isinstance(perm, np.ndarray):
+                diffusivity = pp.SecondOrderTensor(perm)
+            elif isinstance(perm, dict):
+                diffusivity = pp.SecondOrderTensor(**perm)
+            pp.initialize_data(
+                self.g,
+                self.g_data,
+                self.flux_key,
+                {
+                    "bc": self.bc_type(self.g),
+                    "second_order_tensor": diffusivity,
+                    "ambient_dimension": self.g.dim,
+                },
+            )
 
         # Update both phase potentials for phase potential upwinding.
         # This happens every nonlinear iteration, because Newton starts with a bad guess
@@ -1029,7 +988,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                     self.equation_system
                 )
             else:
-                # Use unit values for the potential at the start of the simulation.
+                # Use unit values for the potential at the start of the time step.
                 phase_potential = np.ones(self.g.num_faces)
 
             pp.initialize_data(
@@ -1111,7 +1070,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             # Enforce physical saturation bounds.
 
             if is_increment:
-                # If ``is_increment``, compute actual saturation from previous saturation.
+                # Compute updated saturation from increment and previous value.
                 s_w_prev = self.equation_system.get_variable_values(
                     [self.wetting.s],
                     time_step_index=time_step_index,
@@ -1138,10 +1097,9 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         """Discretize all terms."""
         t_0 = time.time()
         self.equation_system.discretize()
-        if self.formulation == "fractional_flow":
-            for phase in self.phases.values():
-                phase_potential = self.phase_potential(self.g, phase)
-                phase_potential.discretize(self.mdg)
+        for phase in self.phases.values():
+            phase_potential = self.phase_potential(self.g, phase)
+            phase_potential.discretize(self.mdg)
         logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
     @typing.override
@@ -1149,16 +1107,14 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         # TODO Rediscretize only nonlinear terms.
         t_0 = time.time()
         self.equation_system.discretize()
-        if self.formulation == "fractional_flow":
-            # TODO Is it necessary to rediscretize phase_potential operators?
-            for phase in self.phases.values():
-                phase_potential = self.phase_potential(self.g, phase)
-                phase_potential.discretize(self.mdg)
+        for phase in self.phases.values():
+            # TODO Cache `phase_potential`.
+            phase_potential = self.phase_potential(self.g, phase)
+            phase_potential.discretize(self.mdg)
         logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
     @typing.override
     def set_nonlinear_discretizations(self) -> None:
-        """Discretize all terms."""
         # TODO Collect all nonlinear discretizations in one place. This way, linear
         # discretizations do not get called at each nonlinear iteration.
         ...
@@ -1196,11 +1152,9 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self.nonlinear_solver_statistics.reset()
         self.convergence_status = False
 
-        assembled_variables = self.equation_system.get_variable_values(
-            time_step_index=0
-        )
+        previous_values = self.equation_system.get_variable_values(time_step_index=0)
         self.equation_system.set_variable_values(
-            assembled_variables, iterate_index=0, additive=False
+            previous_values, iterate_index=0, additive=False
         )
 
     @typing.override
@@ -1221,13 +1175,12 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             )
 
         # Apply Appleyard chopping and/or enforce physical saturation bounds.
-        if self.formulation == "fractional_flow":
-            # Saturation comes first in the nonlinear increment.
-            nonlinear_increment[: self.g.num_cells] = self.bound_saturation(
-                nonlinear_increment[: self.g.num_cells],
-                is_increment=True,
-                iterate_index=0,
-            )
+        # Saturation comes first in the nonlinear increment.
+        nonlinear_increment[: self.g.num_cells] = self.bound_saturation(
+            nonlinear_increment[: self.g.num_cells],
+            is_increment=True,
+            iterate_index=0,
+        )
 
         # Update primary variables.
         self.equation_system.shift_iterate_values(max_index=len(self.iterate_indices))
@@ -1308,25 +1261,18 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             float: Update increment norm.
 
         """
-        if self.formulation == "fractional_flow":
-            # The saturation comes first in the nonlinear increment.
-            nonlinear_increment_sat = nonlinear_increment[: self.g.num_cells]
-            nonlinear_increment_press = nonlinear_increment[self.g.num_cells :]
-            nonlinear_increment_sat_norm = np.linalg.norm(nonlinear_increment_sat) / (
-                self.params.get("nl_sat_increment_norm_scaling", 1.0)
-            )
-            nonlinear_increment_press_norm = np.linalg.norm(
-                nonlinear_increment_press
-            ) / (self.params.get("nl_press_increment_norm_scaling", 1.0))
-            return np.sqrt(
-                nonlinear_increment_sat_norm**2 + nonlinear_increment_press_norm**2
-            ) / np.sqrt(nonlinear_increment.size)
-
-        # For other formulations, keep the PorePy default.
-        else:
-            return np.linalg.norm(nonlinear_increment) / np.sqrt(
-                nonlinear_increment.size
-            )
+        # The saturation comes first in the nonlinear increment.
+        nonlinear_increment_sat = nonlinear_increment[: self.g.num_cells]
+        nonlinear_increment_press = nonlinear_increment[self.g.num_cells :]
+        nonlinear_increment_sat_norm = np.linalg.norm(nonlinear_increment_sat) / (
+            self.params.get("nl_sat_increment_norm_scaling", 1.0)
+        )
+        nonlinear_increment_press_norm = np.linalg.norm(nonlinear_increment_press) / (
+            self.params.get("nl_press_increment_norm_scaling", 1.0)
+        )
+        return np.sqrt(
+            nonlinear_increment_sat_norm**2 + nonlinear_increment_press_norm**2
+        ) / np.sqrt(nonlinear_increment.size)
 
     # endregion
 

@@ -104,7 +104,7 @@ def plot_nl_iterations(
 ):
     """Create a heatmap showing nonlinear iterations for different solvers and parameter values.
 
-    Args:
+    Parameters:
         data: Dictionary mapping simulation configurations to simulation statistics.
         varying_param_name: Name of the parameter that varies between the configurations.
         title: Optional title for the plot.

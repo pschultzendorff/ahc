@@ -14,22 +14,25 @@ if not TYPE_CHECKING:
     # This branch is accessed in python runtime.
     # NOTE See Warning in module docstring before attempting anything here.
     class TPFProtocol:
-        """This is an empty placeholder of the protocol, used mainly for type hints."""
+        """This is an empty placeholder of the protocol, used for type hints."""
 
     class HCProtocol:
-        """This is an empty placeholder of the protocol, used mainly for type hints."""
+        """This is an empty placeholder of the protocol, used for type hints."""
 
     class ReconstructionProtocol:
-        """This is an empty placeholder of the protocol, used mainly for type hints."""
+        """This is an empty placeholder of the protocol, used for type hints."""
 
     class EstimatesProtocol:
-        """This is an empty placeholder of the protocol, used mainly for type hints."""
+        """This is an empty placeholder of the protocol, used for type hints."""
+
+    class AdaptiveNewtonProtocol:
+        """This is an empty placeholder of the protocol, used for type hints."""
 
     class SPE11Protocol:
-        """This is an empty placeholder of the protocol, used mainly for type hints."""
+        """This is an empty placeholder of the protocol, used for type hints."""
 
     class DataSavingMixinExtendedProtocol:
-        """This is an empty placeholder of the protocol, used mainly for type hints."""
+        """This is an empty placeholder of the protocol, used for type hints."""
 
 else:
     # This branch is accessed by mypy and linters.
@@ -284,10 +287,6 @@ else:
             """Formula for the total mobility."""
             ...
 
-        def phase_flux(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
-            """Formula for the phase volume flux."""
-            ...
-
         def phase_potential(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
             """Formula fo the phase potential."""
             ...
@@ -296,7 +295,7 @@ else:
             """Total volume flux."""
             ...
 
-        def wetting_flux_from_fractional_flow(self, g: pp.Grid) -> pp.ad.Operator:
+        def wetting_flux(self, g: pp.Grid) -> pp.ad.Operator:
             """Calculate the wetting flux from the total flux and fractional flow."""
             ...
 
@@ -458,24 +457,9 @@ else:
             ...
 
     class ReconstructionProtocol(Protocol):
-        total_flux_eq: str
-        """Total flux equation. Normally provided by a mixin of instance
-        :class:`SolutionStrategyReconstruction`.
-
-        """
-        wetting_flux_from_ff_eq: str
-        """Wetting flux equation. Normally provided by a mixin of instance
-        :class:`SolutionStrategyReconstruction`.
-
-        """
-        total_flux_by_total_mobility_eq: str
-        """Total flux by total mobility equation. Normally provided by a mixin of
-        instance :class:`SolutionStrategyReconstruction`.
-
-        """
-        total_flux_times_fractional_flow_eq: str
-        """Total flux times fractional flow equation. Normally provided by a mixin of
-        instance :class:`SolutionStrategyReconstruction`.
+        postproc_ad_ops: dict[str, pp.ad.Operator]
+        """Operators to be evaluated during post-processing. Normally provided by a
+        mixin of instance :class:`SolutionStrategyReconstruction`.
 
         """
 
@@ -567,7 +551,7 @@ else:
 
         def equilibrate_flux_during_Newton(
             self,
-            flux_name: Literal["total", "wetting_from_ff"],
+            flux_name: str,
             nonlinear_increment: np.ndarray | None = None,
         ) -> None:
             """Equilibrate an approximate flux solution at a given Newton iteration."""
@@ -575,13 +559,7 @@ else:
 
         def extend_fv_fluxes(
             self,
-            flux_name: Literal[
-                "total",
-                "wetting_from_ff",
-                "total_by_t_mobility",
-                "total_times_fractional_flow",
-            ],
-            flux_specifier: str = "",
+            flux_name: str,
             prepare_simulation: bool = False,
         ) -> None:
             """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions."""
@@ -595,15 +573,7 @@ else:
             ...
 
         # SolutionStrategyReconstructionsMixin attributes and methods:
-        def set_equations_for_additional_vars(self) -> None:
-            """Set equations for additional variables."""
-            ...
-
-        def eval_val_and_jac_fluxes(self) -> None:
-            """Evaluate residual and Jacobian of fluxes to be equilibrated."""
-            ...
-
-        def eval_additional_vars(self, prepare_simulation: bool = False) -> None:
+        def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
             """Evaluate additional pressure and flux variables and save in data dictionary
             after each iteration.
 
@@ -628,8 +598,8 @@ else:
 
     class EstimatesProtocol(Protocol):
         #  EstimatesMixin attributes and methods:
-        quadrature_estimate_degree: int
-        quadrature_estimate: TriangleQuadrature
+        quadrature_est_degree: int
+        quadrature_est: TriangleQuadrature
         nonlinear_solver_statistics: SolverStatisticsEst
 
         def setup_estimates(self) -> None:
@@ -640,15 +610,11 @@ else:
             """Compute the Poincare constant."""
             ...
 
-        def local_residual_est(
-            self, flux_name: Literal["total", "wetting_from_ff"]
-        ) -> None:
+        def local_residual_est(self, flux_name: str) -> None:
             """Calculate and store the local residual estimate for each element."""
             ...
 
-        def local_flux_est(
-            self, flux_name: Literal["total", "wetting_from_ff"]
-        ) -> None:
+        def local_flux_est(self, flux_name: str) -> None:
             """Calculate and store the local flux estimate for each element."""
             ...
 

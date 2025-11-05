@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 class ErrorEstimateANewtonMixin(
     AdaptiveNewtonProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
 ):
-    def local_temp_est(self, flux_name: Literal["total", "wetting_from_ff"]) -> None:
+    def local_temp_est(self, flux_name: Literal["total", "wetting"]) -> None:
         r"""Calculate the local-in-space temporal error estimators.
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -102,7 +102,7 @@ class ErrorEstimateANewtonMixin(
             return integrand_x**2 + integrand_y**2
 
         # Integrate elementwise and store the result.
-        integral: Integral = self.quadrature_estimate.integrate(
+        integral: Integral = self.quadrature_est.integrate(
             integrand,
             self.quadpy_elements,
             recalc_points=False,
@@ -115,9 +115,7 @@ class ErrorEstimateANewtonMixin(
             iterate_index=0,
         )
 
-    def local_linearization_est(
-        self, flux_name: Literal["total", "wetting_from_ff"]
-    ) -> None:
+    def local_linearization_est(self, flux_name: Literal["total", "wetting"]) -> None:
         """
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -147,7 +145,7 @@ class ErrorEstimateANewtonMixin(
             return integrand_x**2 + integrand_y**2
 
         # Integrate elementwise and store the result.
-        integral: Integral = self.quadrature_estimate.integrate(
+        integral: Integral = self.quadrature_est.integrate(
             integrand,
             self.quadpy_elements,
             recalc_points=False,
@@ -185,9 +183,9 @@ class ErrorEstimateANewtonMixin(
             return 0.0
         else:
             estimators: dict[str, float] = {}
-            for flux_name in ["total", "wetting_from_ff"]:
+            for flux_name in ["total", "wetting"]:
                 # Satisfy mypy.
-                flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+                flux_name = typing.cast(Literal["total", "wetting"], flux_name)
 
                 # Calculate local estimatorss.
                 self.local_residual_est(flux_name)
@@ -217,9 +215,9 @@ class ErrorEstimateANewtonMixin(
     def global_temp_est(self) -> float:
         """Evaluate the global temporal discretization error estimator."""
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting_from_ff"]:
+        for flux_name in ["total", "wetting"]:
             # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+            flux_name = typing.cast(Literal["total", "wetting"], flux_name)
 
             # Calculate local estimators.
             self.local_temp_est(flux_name)
@@ -258,9 +256,9 @@ class ErrorEstimateANewtonMixin(
         """
 
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting_from_ff"]:
+        for flux_name in ["total", "wetting"]:
             # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting_from_ff"], flux_name)
+            flux_name = typing.cast(Literal["total", "wetting"], flux_name)
 
             # Calculate local estimators.
             self.local_linearization_est(flux_name)
@@ -289,7 +287,7 @@ class SolutionStrategyANewtonMixin(
         # not implemented, which mypy complains about
         super().set_initial_estimators()  # type: ignore
         for flux_name, specifier in itertools.product(
-            ["total", "wetting_from_ff"],
+            ["total", "wetting"],
             ["T_estimator", "L_estimator"],
         ):
             pp.set_solution_values(
@@ -360,7 +358,7 @@ class SolutionStrategyANewtonMixin(
         """
         super().after_nonlinear_convergence()  # type: ignore
         for flux_name, specifier in itertools.product(
-            ["total", "wetting_from_ff"],
+            ["total", "wetting"],
             [
                 "T_estimator",
                 "L_estimator",

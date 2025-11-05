@@ -503,21 +503,6 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
         cap_press = np.maximum(cap_press, self.spe11_params["MAX_CAP_PRESS"])
         return cap_press
 
-    # TODO
-    # def cap_press_deriv(
-    #     self,
-    #     saturation_w: pp.ad.Operator,
-    #     cap_press_constants: CapPressConstants | None = None,
-    #     **kwargs,
-    # ) -> pp.ad.Operator:
-    #     cap_press: pp.ad.Operator = super().cap_press_deriv(
-    #         saturation_w, cap_press_constants, **kwargs
-    #     )
-    #     cap_press_deriv: pp.ad.Operator = super().cap_press_deriv(
-    #         saturation_w, cap_press_constants, **kwargs
-    #     )
-    #     cap_press_deriv =
-
     def cap_press_deriv_np(
         self,
         saturation_w: np.ndarray,
