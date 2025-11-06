@@ -25,6 +25,7 @@ from tpf.numerics.quadrature import (
 )
 from tpf.utils.constants_and_typing import (
     COMPLEMENTARY_PRESSURE,
+    FLUX_NAME,
     GLOBAL_PRESSURE,
     PRESSURE_KEY,
     TOTAL_FLUX,
@@ -81,7 +82,8 @@ class GlobalPressureMixin(TPFProtocol):
         pressure_key: PRESSURE_KEY,
         p_n: np.ndarray | None = None,
     ) -> np.ndarray:
-        """Interpolate and evaluate global or complementary pressure field.
+        """Calculate global/complementary pressure from saturation (and nnwetting
+        pressure).
 
         Parameters:
             s_w: Wetting phase saturation values.
@@ -90,7 +92,7 @@ class GlobalPressureMixin(TPFProtocol):
                 None.
 
         Returns:
-            pressure: Evaluated pressure field.
+            pressure: Global/complementary pressure.
 
         """
         # Limit saturation values to :math:`[0 + \epsilon, 1 - \epsilon]`
@@ -117,6 +119,22 @@ class GlobalPressureMixin(TPFProtocol):
             )
 
         raise ValueError(f"Invalid pressure key: {pressure_key}")
+
+    def eval_saturation(self, q: np.ndarray) -> np.ndarray:
+        """Calculate wetting saturation from global pressure.
+
+        Parameters:
+            q: Complementary pressure.
+
+        Returns:
+            saturation: Wetting pressure.
+
+        """
+        return np.interp(
+            q,
+            self.compl_pressure_interpol_vals,
+            self.s_interpol_vals,
+        )
 
     def eval_glob_compl_pressure_on_domain(
         self, time_step_index: int | None = None
@@ -348,7 +366,7 @@ class PressureReconstructionMixin(TPFProtocol):
 
         # Store post-processed pressure coeffs.
         pp.set_solution_values(
-            f"{pressure_key}_postprocessed_coeffs",
+            f"{pressure_key}_coeffs_postproc",
             coeffs,
             self.g_data,
             time_step_index=time_step_index,
@@ -383,7 +401,7 @@ class PressureReconstructionMixin(TPFProtocol):
             time_step_index = None
 
             coeffs_postproc: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}_postprocessed_coeffs",
+                f"{pressure_key}_coeffs_postproc",
                 self.g_data,
                 iterate_index=0,
             )
@@ -491,7 +509,7 @@ class PressureReconstructionMixin(TPFProtocol):
 
         # Store in data dictionary.
         pp.set_solution_values(
-            f"{pressure_key}_reconstructed_coeffs",
+            f"{pressure_key}_coeffs_rec",
             coeffs_rec,
             self.g_data,
             time_step_index=time_step_index,
@@ -552,7 +570,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
     def equilibrate_flux_during_Newton(
         self,
-        flux_name: Literal["total", "wetting"],
+        flux_name: FLUX_NAME,
         nonlinear_increment: np.ndarray | None = None,
     ) -> None:
         """Equilibrate an approximate flux solution at a given Newton iteration.
@@ -628,7 +646,8 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
     def extend_fv_fluxes(
         self,
-        flux_name: str,
+        flux_name: FLUX_NAME,
+        flux_specifier: str = "",
         prepare_simulation: bool = False,
     ) -> None:
         """Extend (eqilibrated or non-equilibrated) flux using RT0 basis functions.
@@ -667,6 +686,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
         Parameters:
             flux_name: Name of the flux field to be extended.
+            flux_specifier: Specify the name of the flux field.
             prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
                 Stores values additionally for the time step.
 
@@ -688,7 +708,9 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
         vol_cell = self.g.cell_volumes
 
         # Retrieve finite volume fluxes
-        flux = pp.get_solution_values(flux_name, self.g_data, iterate_index=0)
+        flux = pp.get_solution_values(
+            flux_name + flux_specifier, self.g_data, iterate_index=0
+        )
 
         # Perform actual reconstruction and obtain coefficients
         coeffs = np.empty([self.g.num_cells, self.g.dim + 1])
@@ -702,7 +724,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
         # Store coefficients in the data dictionary.
         pp.set_solution_values(
-            flux_name + "_RT0_coeffs",
+            flux_name + flux_specifier + "_RT0_coeffs",
             coeffs,
             self.g_data,
             time_step_index=time_step_index,
@@ -934,7 +956,7 @@ class SolutionStrategyRec(  # type: ignore
         # Save time step values for pressures, postprocessings, and reconstructions.
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
-            ["", "_postprocessed_coeffs", "_reconstructed_coeffs"],
+            ["", "_coeffs_postproc", "_coeffs_rec"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}{specifier}", self.g_data, iterate_index=0
@@ -1029,40 +1051,33 @@ class SolutionStrategyRec(  # type: ignore
         self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
     ) -> None:
         """Equilibrate fluxes and reconstruct pressures."""
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
-            # Extend both the nonequilibrated and equilibrated flux to compare in
-            # the flux estimator. The nonequilibrated wetting flux is also used
-            # in the pressure reconstruction.
-            self.extend_fv_fluxes(
-                flux_name,
-                prepare_simulation=prepare_simulation,
-            )
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+            # Extend nonequilibrated fluxes for estimators and pressure postprocessing.
+            self.extend_fv_fluxes(flux_name, prepare_simulation=prepare_simulation)
 
-            # Equilibration can only be run during Newton.
+            # Equilibrate only DURING Newton.
             if not prepare_simulation:
-                # In ``nonlinear_increment``, the saturation variable comes first, then
-                # the pressure variable, just as required by
+                # Saturation precedes pressure in nonlinear_increment as required by
                 # ``equilibrate_flux_during_Newton``.
                 self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
 
-                self.extend_fv_fluxes(
-                    flux_name + "_equil",
-                )
+                # Extend equilibrated fluxes.
+                self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
 
-        # Extend scaled fluxes needed for pressure reconstruction.
-        for scaled_flux_name in [
-            TOTAL_FLUX + "_by_t_mobility",
-            TOTAL_FLUX + "_times_fractional_flow",
-        ]:
+        # Extend scaled fluxes for pressure post-processing.
+        for flux_name, flux_specifier in (
+            (TOTAL_FLUX, "_by_t_mobility"),
+            (TOTAL_FLUX, "_times_fractional_flow"),
+        ):
+            flux_name = typing.cast(FLUX_NAME, flux_name)  # Satisfy mypy.
             self.extend_fv_fluxes(
-                scaled_flux_name, prepare_simulation=prepare_simulation
+                flux_name,
+                flux_specifier=flux_specifier,
+                prepare_simulation=prepare_simulation,
             )
 
         # Reconstruct pressures.
-        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
-            # Satisfy mypy.
-            pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
-
+        for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
             self.postprocess_pressure_vohralik(
                 pressure_key, prepare_simulation=prepare_simulation
             )

@@ -1,11 +1,11 @@
-from typing import Final, Literal
+from typing import Final, Literal, TypeAlias
 
 # Type aliases and type variables:
-type PHASENAME = Literal["wetting", "nonwetting", "oil", "water", "gas", "co2"]
-WETTING: PHASENAME = "wetting"
-NONWETTING: PHASENAME = "nonwetting"
+PHASENAME: TypeAlias = Literal["wetting", "nonwetting", "oil", "water", "gas", "co2"]
+WETTING: Final[PHASENAME] = "wetting"
+NONWETTING: Final[PHASENAME] = "nonwetting"
 
-REL_PERM_MODEL = Literal[
+REL_PERM_MODEL: TypeAlias = Literal[
     "Brooks-Corey",
     "Brooks-Corey-Burdine",
     "Brooks-Corey-Mualem",
@@ -15,20 +15,20 @@ REL_PERM_MODEL = Literal[
     "van Genuchten-Burdine",
     "van Genuchten-Mualem",
 ]
-CAP_PRESS_MODEL = Literal["Brooks-Corey", "linear", "van Genuchten", None]
+CAP_PRESS_MODEL: TypeAlias = Literal["Brooks-Corey", "linear", "van Genuchten", None]
 
 # region KEYWORDS
 # Keywords:
-PRESSURE_KEY = Literal["global_pressure", "complementary_pressure"]
-GLOBAL_PRESSURE: Final = "global_pressure"
-COMPLEMENTARY_PRESSURE: Final = "complementary_pressure"
+PRESSURE_KEY: TypeAlias = Literal["global_pressure", "complementary_pressure"]
+GLOBAL_PRESSURE: Final[PRESSURE_KEY] = "global_pressure"
+COMPLEMENTARY_PRESSURE: Final[PRESSURE_KEY] = "complementary_pressure"
 
-FLUX_NAME = Literal["total_flux", "wetting_flux"]
-TOTAL_FLUX: Final = "total_flux"
-WETTING_FLUX: Final = "wetting_flux"
+FLUX_NAME: TypeAlias = Literal["total_flux", "wetting_flux"]
+TOTAL_FLUX: Final[FLUX_NAME] = "total_flux"
+WETTING_FLUX: Final[FLUX_NAME] = "wetting_flux"
 
 # Homotopy continuation:
-CONTINUATION_SOLUTIONS: str = "continuation_solutions"
+CONTINUATION_SOLUTIONS: Final = "continuation_solutions"
 # endregion
 
 # region UNITS

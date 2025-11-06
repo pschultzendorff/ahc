@@ -35,6 +35,7 @@ from tpf.models.reconstruction import (
 from tpf.numerics.quadrature import Integral
 from tpf.utils.constants_and_typing import (
     COMPLEMENTARY_PRESSURE,
+    FLUX_NAME,
     GLOBAL_PRESSURE,
     PRESSURE_KEY,
     TOTAL_FLUX,
@@ -408,7 +409,7 @@ class EstimatesHCMixin(
         else:
             estimators: dict[str, float] = {}
             for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
-                # Calculate local estimatorss.
+                # Calculate local estimators.
                 self.local_residual_est(flux_name)
                 # Load spatial integrals from current nonlinear iteration.
                 local_integral_R: np.ndarray = pp.get_solution_values(
@@ -702,7 +703,7 @@ class SolutionStrategyAHC(
         # Set time step values for reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
-            ["", "_postprocessed_coeffs", "_reconstructed_coeffs", "_NC_estimator"],
+            ["", "_coeffs_postproc", "_coeffs_rec", "_NC_estimator"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}{specifier}", self.g_data, hc_index=0
@@ -967,43 +968,36 @@ class SolutionStrategyAHC(
         self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
     ) -> None:
         """Extend and equilibrate fluxes, postprocess and reconstruct pressures."""
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
-            # Extend both the nonequilibrated and equilibrated flux to compare in
-            # the flux estimator. The nonequilibrated wetting flux is also used
-            # in the pressure reconstruction.
-            self.extend_fv_fluxes(
-                flux_name,
-            )
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+            # Extend nonequilibrated fluxes for estimators and pressure postprocessing.
+            self.extend_fv_fluxes(flux_name, prepare_simulation=prepare_simulation)
 
-            # Equilibration can only be run during Newton.
+            # Equilibrate only DURING Newton.
             if not prepare_simulation:
-                # In ``nonlinear_increment``, the saturation variable comes first, then
-                # the pressure variable, just as required by
+                # Saturation precedes pressure in nonlinear_increment as required by
                 # ``equilibrate_flux_during_Newton``.
                 self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
 
-                self.extend_fv_fluxes(
-                    flux_name + "_equil",
-                )
+                # Extend equilibrated fluxes.
+                self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
 
         # NOTE The fluxes w.r.t. goal rel. perm are only used to post-process the global
         # and complementary pressures and in the contination estimators and do not need
         # to be equilibrated.
-        for flux_name in [
-            TOTAL_FLUX,
-            WETTING_FLUX,
-            TOTAL_FLUX + "_by_t_mobility",
-            TOTAL_FLUX + "_times_fractional_flow",
-        ]:
+        for flux_name, flux_specifier in (
+            (TOTAL_FLUX, "_wrt_goal_rel_perm"),
+            (WETTING_FLUX, "_wrt_goal_rel_perm"),
+            (TOTAL_FLUX, "_by_t_mobility" + "_wrt_goal_rel_perm"),
+            (TOTAL_FLUX, "_times_fractional_flow" + "_wrt_goal_rel_perm"),
+        ):
+            flux_name = typing.cast(FLUX_NAME, flux_name)  # Satisfy mypy.
             self.extend_fv_fluxes(
-                flux_name + "_wrt_goal_rel_perm",
+                flux_name,
+                flux_specifier=flux_specifier,
                 prepare_simulation=prepare_simulation,
             )
 
-        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
-            # Satisfy mypy.
-            pressure_key = typing.cast(PRESSURE_KEY, pressure_key)
-
+        for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
             self.postprocess_pressure_vohralik(
                 pressure_key,
                 flux_specifier="_wrt_goal_rel_perm",
@@ -1094,7 +1088,7 @@ class SolutionStrategyAHC(
         # Reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
             [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
-            ["", "_postprocessed_coeffs", "_reconstructed_coeffs", "_NC_estimator"],
+            ["", "_coeffs_postproc", "_coeffs_rec", "_NC_estimator"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}{specifier}", self.g_data, iterate_index=0

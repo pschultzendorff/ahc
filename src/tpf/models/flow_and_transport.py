@@ -884,23 +884,22 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
     @typing.override
     def set_materials(self) -> None:
         """Set solid constants from parameters."""
-        constants: dict[str, pp.MaterialConstants] = self.params.get(  # type: ignore
-            "material_constants", {}
-        )
+        constants = self.params.get("material_constants", {})
+        if not isinstance(constants, dict):
+            raise TypeError("material_constants must be a dict of MaterialConstants.")
 
-        # Use standard models for solid constants if not provided.
-        if "solid" not in constants:
-            constants["solid"] = pp.SolidConstants()
+        constants = typing.cast(dict[str, pp.MaterialConstants], constants)
+
+        if "solid" in constants:
+            if not isinstance(constants["solid"], pp.SolidConstants):
+                raise TypeError("solid must be of type SolidConstants.")
+            self.solid = constants["solid"]
+        else:
+            self.solid = pp.SolidConstants()
             logger.info("No solid constants provided in params. Using default values.")
-        assert isinstance(
-            constants["solid"],
-            pp.SolidConstants,
-        )
-        constants["solid"].set_units(self.units)
-        self.solid = typing.cast(pp.SolidConstants, constants["solid"])
-        # The 'fluid' attribute is not used in the two-phase flow model, in favor of the
-        # two fluid phases. To avoid typing errors, we initialize it with default
-        # parameters.
+
+        self.solid.set_units(self.units)
+        # 'fluid' is not used in two-phase flow, but initialized to avoid typing errors.
         self.fluid = pp.FluidConstants()
 
     @typing.override
@@ -918,8 +917,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         self.g, self.g_data = self.mdg.subdomains(return_data=True)[0]
 
-        # Exporter initialization must be done after grid creation,
-        # but prior to data initialization.
+        # Exporter initialization after grid creation, but prior to data initialization.
         self.set_solver_statistics()
         self.initialize_data_saving()
 
@@ -974,10 +972,8 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                 },
             )
 
-        # Update both phase potentials for phase potential upwinding.
-        # This happens every nonlinear iteration, because Newton starts with a bad guess
-        # (previous timestep) and improve towards the solution. The improved guess of
-        # the phase potentials is used for upwinding.
+        # Update phase potentials for upwinding each nonlinear iteration. Newton starts
+        # from the previous timestep, improving the guess each step.
         logger.info(
             "Recalculate Darcy flux for upwind discretization."
             + f" Iteration {self.nonlinear_solver_statistics.num_iteration}"

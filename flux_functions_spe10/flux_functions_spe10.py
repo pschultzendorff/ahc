@@ -686,7 +686,6 @@ def plot_F_capillary() -> None:
             def plot(
                 rp_model: str, cp_model: str, p_e: float, savepath: pathlib.Path | str
             ) -> None:
-                nonlocal axes, s_U_grid, s_D_grid, upwinding
                 fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
                 F_values = F_with_capillary(
                     s_U_grid,
@@ -783,7 +782,6 @@ def plot_dSU_F_capillary() -> None:
             )
 
             def plot(rp_model: str, cp_model: str, p_e: float, i: int, j: int) -> None:
-                nonlocal axes, s_U_grid, s_D_grid, upwinding
                 F_values = F_with_capillary(
                     s_U_grid,
                     s_D_grid,

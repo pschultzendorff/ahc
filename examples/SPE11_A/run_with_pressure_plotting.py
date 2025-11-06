@@ -342,11 +342,11 @@ def run_simulation(config: SimulationConfig) -> None:
             plot_pressure(pressure)
 
         global_pressure_diff_coeffs: np.ndarray = pp.get_solution_values(
-            "global_pressure_reconstructed_coeffs",
+            "global_pressure_coeffs_rec",
             model.mdg.subdomains(return_data=True)[0][1],
             iterate_index=0,
         ) - pp.get_solution_values(
-            "global_pressure_postprocessed_coeffs",
+            "global_pressure_coeffs_postproc",
             model.mdg.subdomains(return_data=True)[0][1],
             iterate_index=0,
         )
@@ -394,12 +394,12 @@ def run_simulation(config: SimulationConfig) -> None:
             model.g,
             model.domain.bounding_box,
             pp.get_solution_values(
-                "complementary_pressure_reconstructed_coeffs",
+                "complementary_pressure_coeffs_rec",
                 model.mdg.subdomains(return_data=True)[0][1],
                 iterate_index=0,
             )
             - pp.get_solution_values(
-                "complementary_pressure_postprocessed_coeffs",
+                "complementary_pressure_coeffs_postproc",
                 model.mdg.subdomains(return_data=True)[0][1],
                 iterate_index=0,
             ),

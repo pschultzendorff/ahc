@@ -40,6 +40,7 @@ from tpf.models.reconstruction import (
     PressureReconstructionMixin,
 )
 from tpf.numerics.quadrature import Integral
+from tpf.utils.constants_and_typing import FLUX_NAME, TOTAL_FLUX, WETTING_FLUX
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ logger = logging.getLogger(__name__)
 class ErrorEstimateANewtonMixin(
     AdaptiveNewtonProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
 ):
-    def local_temp_est(self, flux_name: Literal["total", "wetting"]) -> None:
+    def local_temp_est(self, flux_name: FLUX_NAME) -> None:
         r"""Calculate the local-in-space temporal error estimators.
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -115,7 +116,7 @@ class ErrorEstimateANewtonMixin(
             iterate_index=0,
         )
 
-    def local_linearization_est(self, flux_name: Literal["total", "wetting"]) -> None:
+    def local_linearization_est(self, flux_name: FLUX_NAME) -> None:
         """
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -183,11 +184,8 @@ class ErrorEstimateANewtonMixin(
             return 0.0
         else:
             estimators: dict[str, float] = {}
-            for flux_name in ["total", "wetting"]:
-                # Satisfy mypy.
-                flux_name = typing.cast(Literal["total", "wetting"], flux_name)
-
-                # Calculate local estimatorss.
+            for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+                # Calculate local estimators.
                 self.local_residual_est(flux_name)
                 # Load spatial integrals from current nonlinear iteration.
                 local_integral_R: np.ndarray = pp.get_solution_values(
@@ -215,10 +213,7 @@ class ErrorEstimateANewtonMixin(
     def global_temp_est(self) -> float:
         """Evaluate the global temporal discretization error estimator."""
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting"]:
-            # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting"], flux_name)
-
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_temp_est(flux_name)
             # Load spatial integral from current nonlinear iteration.
@@ -256,10 +251,7 @@ class ErrorEstimateANewtonMixin(
         """
 
         estimators: dict[str, float] = {}
-        for flux_name in ["total", "wetting"]:
-            # Satisfy mypy.
-            flux_name = typing.cast(Literal["total", "wetting"], flux_name)
-
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_linearization_est(flux_name)
             # Load spatial integral from current nonlinear iteration.

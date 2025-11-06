@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from numpy.typing import ArrayLike
 
 from tpf.numerics.quadrature import TriangleQuadrature
+from tpf.utils.constants_and_typing import FLUX_NAME
 from tpf.viz.solver_statistics import (
     SolverStatisticsANewton,
     SolverStatisticsEst,
@@ -488,6 +489,10 @@ else:
             """
             ...
 
+        def eval_saturation(self, q: np.ndarray) -> np.ndarray:
+            """Calculate wetting saturation from global pressure."""
+            ...
+
         def eval_glob_compl_pressure_on_domain(
             self,
             time_step_index: int | None = None,
@@ -543,6 +548,14 @@ else:
             interpolator."""
             ...
 
+        @staticmethod
+        def _evaluate_poly_at_points(
+            coeffs: np.ndarray, x: np.ndarray, y: np.ndarray
+        ) -> np.ndarray:
+            """Evaluate P2 polynomial defined by `coeffs` at given (x, y)
+            coordinates."""
+            ...
+
         # EquilibratedFluxMixin attributes and methods:
 
         def setup_flux_equilibration(self) -> None:
@@ -551,7 +564,7 @@ else:
 
         def equilibrate_flux_during_Newton(
             self,
-            flux_name: str,
+            flux_name: FLUX_NAME,
             nonlinear_increment: np.ndarray | None = None,
         ) -> None:
             """Equilibrate an approximate flux solution at a given Newton iteration."""
@@ -559,15 +572,16 @@ else:
 
         def extend_fv_fluxes(
             self,
-            flux_name: str,
+            flux_name: FLUX_NAME,
+            flux_specifier: str = "",
             prepare_simulation: bool = False,
         ) -> None:
             """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions."""
             ...
 
         def equilibrated_flux_mismatch(self) -> dict[str, float]:
-            r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)` and
-            being mass conservative.
+            r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)`
+            and being mass conservative.
 
             """
             ...
@@ -610,11 +624,11 @@ else:
             """Compute the Poincare constant."""
             ...
 
-        def local_residual_est(self, flux_name: str) -> None:
+        def local_residual_est(self, flux_name: FLUX_NAME) -> None:
             """Calculate and store the local residual estimate for each element."""
             ...
 
-        def local_flux_est(self, flux_name: str) -> None:
+        def local_flux_est(self, flux_name: FLUX_NAME) -> None:
             """Calculate and store the local flux estimate for each element."""
             ...
 

@@ -273,7 +273,6 @@ def fix_face_normals(
 
     # Function to calculate the normal of a triangle
     def calculate_normal(triangle: np.ndarray) -> np.ndarray:
-        nonlocal points
         p1, p2, p3 = points[triangle]
         normal: np.ndarray = np.cross(p2 - p1, p3 - p1)
         return normal / np.linalg.norm(normal)
