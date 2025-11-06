@@ -37,7 +37,6 @@ from tpf.utils.constants_and_typing import (
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
     GLOBAL_PRESSURE,
-    PRESSURE_KEY,
     TOTAL_FLUX,
     WETTING_FLUX,
 )
@@ -248,7 +247,7 @@ class EstimatesHCMixin(
         and integrated in time. The time integral is approximated with the trapezoidal
         rule.  As the difference is piecewise affine on the time integral and zero at
         :math:`t^n`, where both fluxes are equal, it suffices to evaluate the difference
-        at :math:`t^{n-1}`. The time integral is then approximate as
+        at :math:`t^{n-1}`. The time integral is then approximated as
 
         .. math::
             \frac{\Delta t}{2}
@@ -271,13 +270,9 @@ class EstimatesHCMixin(
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            integrand_x: np.ndarray = (
-                fv_coeffs_new[..., 0] - fv_coeffs_old[..., 0]
-            ) * x[..., 0] + (fv_coeffs_new[..., 1] - fv_coeffs_old[..., 1])
-            integrand_y: np.ndarray = (
-                fv_coeffs_new[..., 0] - fv_coeffs_old[..., 0]
-            ) * x[..., 1] + (fv_coeffs_new[..., 2] - fv_coeffs_old[..., 2])
-            return integrand_x**2 + integrand_y**2
+            diff_coeffs = fv_coeffs_new - fv_coeffs_old
+            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
+            return np.linalg.norm(diff_flux, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -316,13 +311,9 @@ class EstimatesHCMixin(
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            integrand_x: np.ndarray = (
-                fv_coeffs[..., 0] - fv_goal_rel_perm_coeffs[..., 0]
-            ) * x[..., 0] + (fv_coeffs[..., 1] - fv_goal_rel_perm_coeffs[..., 1])
-            integrand_y: np.ndarray = (
-                fv_coeffs[..., 0] - fv_goal_rel_perm_coeffs[..., 0]
-            ) * x[..., 1] + (fv_coeffs[..., 2] - fv_goal_rel_perm_coeffs[..., 2])
-            return integrand_x**2 + integrand_y**2
+            diff_coeffs = fv_coeffs - fv_goal_rel_perm_coeffs
+            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
+            return np.linalg.norm(diff_flux, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -361,13 +352,9 @@ class EstimatesHCMixin(
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            integrand_x: np.ndarray = (fv_coeffs[..., 0] - fv_equil_coeffs[..., 0]) * x[
-                ..., 0
-            ] + (fv_coeffs[..., 1] - fv_equil_coeffs[..., 1])
-            integrand_y: np.ndarray = (fv_coeffs[..., 0] - fv_equil_coeffs[..., 0]) * x[
-                ..., 1
-            ] + (fv_coeffs[..., 2] - fv_equil_coeffs[..., 2])
-            return integrand_x**2 + integrand_y**2
+            diff_coeffs = fv_coeffs - fv_equil_coeffs
+            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
+            return np.linalg.norm(diff_flux, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -407,63 +394,60 @@ class EstimatesHCMixin(
         if self.params.get("hc_fast_evaluation", True):
             return 0.0
         else:
-            estimators: dict[str, float] = {}
-            for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+            estimators: list[float] = []
+            for flux_name in (TOTAL_FLUX, WETTING_FLUX):
                 # Calculate local estimators.
                 self.local_residual_est(flux_name)
-                # Load spatial integrals from current nonlinear iteration.
                 local_integral_R: np.ndarray = pp.get_solution_values(
                     f"{flux_name}_R_estimator", self.g_data, iterate_index=0
                 )
-                # Calculate global values at current iteration.
-                # NOTE The values stored were the squares of the elementwise norms, hence we
-                # take the square root first
+
+                # NOTE The stored values are squared, hence we do not need to square
+                # here.
                 global_integral: float = local_integral_R.sum()
-                # Integrate in time by multiplying .
-                estimators[flux_name] = self.time_manager.dt * global_integral
+                # Integrate in time by multiplying constant value with time step size.
+                estimators.append(self.time_manager.dt * global_integral)
             # Sum estimators for both equations.
-            estimator: float = sum(estimators.values()) ** 1 / 2
-            logger.info(f"Global residual error estimator: {estimator}")
-            return estimator
+            est: float = sum(estimators) ** 1 / 2
+            logger.info(f"Global residual error estimator: {est}")
+            return est
 
     def global_spatial_est(self) -> float:
         """Evaluate the global spatial discretization error estimator."""
-        residual_estimator: float = self.global_res_est()
-        nc_estimators: tuple[float, float] = self.global_nonconformity_est()
-        estimator: float = residual_estimator + sum(nc_estimators)
-        logger.info(f"Global spatial discretization error estimator: {estimator}")
-        return estimator
+        residual_est = self.global_res_est()
+        darcy_and_sp_est = self.global_darcy_and_saturation_pressure_est()
+        est = residual_est + darcy_and_sp_est
+        logger.info(f"Global spatial discretization error estimator: {est}")
+        return est
 
     def global_temp_est(self) -> float:
         """Evaluate the global temporal discretization error estimator."""
-        estimators: dict[str, float] = {}
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+        estimators = []
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_temp_est(flux_name)
-            # Load spatial integral from current nonlinear iteration.
             local_integral: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_T_estimator", self.g_data, iterate_index=0
             )
-            # Calculate global values at current and previous time step.
-            # NOTE The values stored were the squares of the elementwise norms, hence we
-            # do not need to square here.
+
+            # NOTE The stored values are squared, hence we do not need to square here.
             global_integral: float = local_integral.sum()
             # Integrate in time by multiplying with time step size / 3. This comes from
             # writing the local estimator as an affine function of :math:`t` that is
             # zero at :math:`t^n` and calculating the integral exactly.
-            estimators[flux_name] = self.time_manager.dt / 3.0 * global_integral
-        # Sum estimators for both equations.
-        estimator: float = sum(estimators.values()) ** (1 / 2)
-        logger.info(f"Global temporal discretization error estimator: {estimator}")
-        return estimator
+            estimators.append(self.time_manager.dt / 3.0 * global_integral)
+        # Sum estimators for both fluxes.
+        est: float = sum(estimators) ** (1 / 2)
+        logger.info(f"Global temporal discretization error estimator: {est}")
+        return est
 
     def global_discretization_est(self) -> float:
         """Evaluate the global discretization error estimator."""
-        spatial_estimator: float = self.nonlinear_solver_statistics.spatial_est[-1][-1]
-        temp_estimator: float = self.nonlinear_solver_statistics.temp_est[-1][-1]
-        estimator: float = spatial_estimator + temp_estimator
-        logger.info(f"Global discretization error estimator: {estimator}")
-        return estimator
+        spatial_est = self.nonlinear_solver_statistics.spatial_est[-1][-1]
+        temp_est = self.nonlinear_solver_statistics.temp_est[-1][-1]
+        est = spatial_est + temp_est
+        logger.info(f"Global discretization error estimator: {est}")
+        return est
 
     def global_hc_est(self) -> float:
         """Calculate the global in space and semi-global (i.e, integrated over one time
@@ -476,56 +460,40 @@ class EstimatesHCMixin(
             est: Global homotopy continuation error estimator.
 
         """
-        estimators: dict[str, float] = {}
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+        estimators: list[float] = []
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_hc_est(flux_name)
-            # Load spatial integral from current nonlinear iteration.
             local_integral: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_C_estimator", self.g_data, iterate_index=0
             )
-            # Calculate global values at current and previous time step.
-            # NOTE The values stored were the squares of the elementwise norms, hence we
-            # do not need to square here.
+
+            # NOTE The stored values are squared, hence we do not need to square here.
             global_integral: float = local_integral.sum()
-            # Integrate in time by multiplying with time step size.
-            estimators[flux_name] = self.time_manager.dt * global_integral
+            # Integrate in time by multiplying constant value with time step size.
+            estimators.append(self.time_manager.dt * global_integral)
         # Sum estimators for both equations.
-        estimator: float = sum(estimators.values()) ** (1 / 2)
-        logger.info(f"Global continuation error estimator: {estimator}")
-        return estimator
+        est: float = sum(estimators) ** (1 / 2)
+        logger.info(f"Global continuation error estimator: {est}")
+        return est
 
     def global_linearization_est(self) -> float:
-        estimators: dict[str, float] = {}
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+        estimators: list[float] = []
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_linearization_est(flux_name)
-            # Load spatial integral from current nonlinear iteration.
             local_integral: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_L_estimator", self.g_data, iterate_index=0
             )
-            # Calculate global values at current and previous time step.
-            # NOTE The values stored were the squares of the elementwise norms, hence we
-            # do not need to square here.
+
+            # NOTE The stored values are squared, hence we do not need to square here.
             global_integral: float = local_integral.sum()
-            # Integrate in time by multiplying with time step size.
-            estimators[flux_name] = self.time_manager.dt * global_integral
+            # Integrate in time by multiplying constant value with time step size.
+            estimators.append(self.time_manager.dt * global_integral)
         # Sum estimators for both equations.
-        estimator: float = sum(estimators.values()) ** (1 / 2)
-        logger.info(f"Global linearization error estimator: {estimator}")
-        return estimator
-
-    def relative_global_discretization_est(self) -> float:
-        """Return relative global discretization error estimator."""
-        return self.global_discretization_est() / self.global_energy_norm()
-
-    def relative_global_hc_est(self) -> float:
-        """Return relative global homotopy continuation error estimator."""
-        return self.global_hc_est() / self.global_energy_norm()
-
-    def relative_global_linearization_est(self) -> float:
-        """Return relative global linearization error estimator."""
-        return self.global_linearization_est() / self.global_energy_norm()
+        est: float = sum(estimators) ** (1 / 2)
+        logger.info(f"Global linearization error estimator: {est}")
+        return est
 
     def total_est(self) -> float:
         """Return total error estimator, consisting of discretization, homotopy
@@ -640,17 +608,15 @@ class SolutionStrategyAHC(
         # are not needed at any point. The initial iterate values are technically also
         # not needed, but by settimg them, they are exported at the zeroth time step.
         # Check :meth:`DataSavingHC._data_to_export`.
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+        for flux_name, estimator_name in itertools.product(
+            (TOTAL_FLUX, WETTING_FLUX),
+            ["C_estimator", "L_estimator_new"],
+        ):
             pp.set_solution_values(
-                f"{flux_name}_C_estimator",
+                f"{flux_name}_{estimator_name}",
                 np.zeros(self.g.num_cells),
                 self.g_data,
-                iterate_index=0,
-            )
-            pp.set_solution_values(
-                f"{flux_name}_L_estimator",
-                np.zeros(self.g.num_cells),
-                self.g_data,
+                time_step_index=0,
                 iterate_index=0,
             )
 
@@ -702,40 +668,47 @@ class SolutionStrategyAHC(
 
         # Set time step values for reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
-            [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
-            ["", "_coeffs_postproc", "_coeffs_rec", "_NC_estimator"],
+            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
+            ["", "_coeffs_postproc", "_coeffs_rec"],
         ):
-            pressure_values: np.ndarray = pp.get_solution_values(
+            time_step_values: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}{specifier}", self.g_data, hc_index=0
             )
             pp.set_solution_values(
                 f"{pressure_key}{specifier}",
-                pressure_values,
+                time_step_values,
                 self.g_data,
                 time_step_index=0,
             )
-        # NOTE The local residual, continuation, and linearization error estimators are
-        # only needed at the current iteration. We set the time step values for
-        # completeness and to avoid extra code in :meth:`_data_to_export`.
+        # NOTE The local residual, flux, continuation, and linearization error
+        # estimators are only needed at the current iteration. We set the time step
+        # values for completeness and to avoid extra code in :meth:`_data_to_export`.
         for flux_name, specifier in itertools.product(
-            [TOTAL_FLUX, WETTING_FLUX],
+            (TOTAL_FLUX, WETTING_FLUX),
             [
                 "R_estimator",
-                "F_estimator",
+                "F_estimator_new",
+                "F_estimator_old",
+                "D_estimator_norm",
                 "T_estimator",
                 "C_estimator",
                 "L_estimator",
-                "_wrt_goal_rel_perm_RT0_coeffs",
+                "energy_norm",
+                "wrt_goal_rel_perm_RT0_coeffs",
             ],
         ):
-            if specifier.startswith("energy"):
-                name: str = f"energy_norm_{flux_name}_part"
-            else:
-                name = f"{flux_name}_{specifier}"
-            flux_values: np.ndarray = pp.get_solution_values(
-                name, self.g_data, hc_index=0
+            key = f"{flux_name}_{specifier}"
+            time_step_values = pp.get_solution_values(key, self.g_data, hc_index=0)
+            pp.set_solution_values(
+                key, time_step_values, self.g_data, time_step_index=0
             )
-            pp.set_solution_values(name, flux_values, self.g_data, time_step_index=0)
+
+        time_step_values = pp.get_solution_values(
+            "SP_estimator_norm", self.g_data, hc_index=0
+        )
+        pp.set_solution_values(
+            "SP_estimator_norm", time_step_values, self.g_data, time_step_index=0
+        )
 
         # Save only after the time step values are updated..
         self.save_data_time_step()
@@ -1023,7 +996,8 @@ class SolutionStrategyAHC(
             self, nonlinear_increment, residual, reference_residual, nl_params
         )
 
-        # Switch rel. perm. to goal rel. perm. to evaluate the nonconformity estimators.
+        # Switch to goal rel. perm. to evaluate the spatial discretization
+        # estimators.
         self.hc_toggle_fl = 0.0
         self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
@@ -1087,35 +1061,39 @@ class SolutionStrategyAHC(
 
         # Reconstructions and estimators.
         for pressure_key, specifier in itertools.product(
-            [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
-            ["", "_coeffs_postproc", "_coeffs_rec", "_NC_estimator"],
+            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
+            ["", "_coeffs_postproc", "_coeffs_rec"],
         ):
-            pressure_values: np.ndarray = pp.get_solution_values(
+            hc_step_values: np.ndarray = pp.get_solution_values(
                 f"{pressure_key}{specifier}", self.g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{pressure_key}{specifier}", pressure_values, self.g_data, hc_index=0
+                f"{pressure_key}{specifier}", hc_step_values, self.g_data, hc_index=0
             )
         for flux_name, specifier in itertools.product(
-            [TOTAL_FLUX, WETTING_FLUX],
+            (TOTAL_FLUX, WETTING_FLUX),
             [
                 "R_estimator",
-                "F_estimator",
+                "F_estimator_new",
+                "F_estimator_old",
+                "D_estimator_norm",
                 "T_estimator",
                 "C_estimator",
                 "L_estimator",
-                "energy_norm_part",
+                "energy_norm",
                 "wrt_goal_rel_perm_RT0_coeffs",
             ],
         ):
-            if specifier.startswith("energy"):
-                name: str = f"energy_norm_{flux_name}_part"
-            else:
-                name = f"{flux_name}_{specifier}"
-            flux_values: np.ndarray = pp.get_solution_values(
-                name, self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(name, flux_values, self.g_data, hc_index=0)
+            key = f"{flux_name}_{specifier}"
+            hc_step_values = pp.get_solution_values(key, self.g_data, iterate_index=0)
+            pp.set_solution_values(key, hc_step_values, self.g_data, hc_index=0)
+
+        hc_step_values = pp.get_solution_values(
+            "SP_estimator_norm", self.g_data, iterate_index=0
+        )
+        pp.set_solution_values(
+            "SP_estimator_norm", hc_step_values, self.g_data, hc_index=0
+        )
 
         # Adapt decay rate based on number of nonlinear iterations. Do this only AFTER
         # at least one succesfull decay.
@@ -1140,7 +1118,6 @@ class SolutionStrategyAHC(
             self.compute_hc_decay(recompute_decay=True)
             # No need to reset the initial guess for the nonlinear solver, as this is
             # done by :meth:`before_nonlinear_loop`. anyways.
-            # TODO Possible failure to do this?
 
     # endregion
 
@@ -1157,16 +1134,16 @@ class DataSavingHC(DataSavingEst):
             time_step_index=time_step_index,
             iterate_index=iterate_index,
         )
-        for flux_name, est_name in itertools.product(
-            ["total", "wetting"], ["T_estimator", "C_estimator", "L_estimator"]
+        for flux_name, estimator_name in itertools.product(
+            (TOTAL_FLUX, WETTING_FLUX), ["T_estimator", "C_estimator", "L_estimator"]
         ):
             try:
                 data.append(
                     (
                         self.g,
-                        f"{flux_name}_{est_name}",
+                        f"{flux_name}_{estimator_name}",
                         pp.get_solution_values(
-                            f"{flux_name}_{est_name}",
+                            f"{flux_name}_{estimator_name}",
                             self.g_data,
                             iterate_index=iterate_index,
                             time_step_index=time_step_index,

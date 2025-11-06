@@ -405,6 +405,8 @@ def generate_configs() -> list[SimulationConfig]:
             ):
                 if solver_name.startswith("Newton") and adaptive_error_ratio <= 0.005:
                     continue
+                if solver_name.startswith("AHC"):
+                    continue
                 file_name = f"ref_fac_{refinement_factor:.2f}"
                 folder_name = (
                     dirname

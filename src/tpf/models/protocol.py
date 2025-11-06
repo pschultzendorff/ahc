@@ -632,30 +632,39 @@ else:
             """Calculate and store the local flux estimate for each element."""
             ...
 
-        def local_nonconformity_est(
-            self,
-            pressure_key: PRESSURE_KEY,
-        ) -> None:
-            """Calculate and store the local nonconformity estimate for each element."""
+        def local_darcy_est(self, flux_name: FLUX_NAME) -> None:
+            """Calculate and store the local Darcy estimate for each element."""
             ...
 
-        def global_res_and_flux_est(self) -> float:
-            """Sum local flux and residual estimators, integrate in time, and sum total and
-            wetting estimators.
+        @staticmethod
+        def _evaluate_flux_at_points(
+            coeffs: np.ndarray,
+            x: np.ndarray,
+            y: np.ndarray,
+        ) -> np.ndarray:
+            r"""Helper function to evaluate the RT0 flux defined by the given coefficients
+            at the specified points.
 
             """
             ...
 
-        def global_nonconformity_est(self) -> tuple[float, float]:
-            """Sum local nonconformity estimators and integrate in time."""
+        def global_res_and_flux_est(self) -> float:
+            """Sum local flux and residual error estimators, integrate in time, and sum
+            total and wetting estimators.
+
+            """
             ...
 
-        def global_discretization_est(self) -> float:
-            """Estimate for global discretization error."""
+        def global_darcy_est(self) -> tuple[float, float]:
+            """Sum local Darcy error estimators and integrate in time."""
             ...
 
-        def global_linearization_est(self) -> float:
-            """Estimate for global linearization error."""
+        def global_saturation_pressure_est(self) -> tuple[float, float]:
+            """Sum local saturation-pressure error estimators and integrate in time."""
+            ...
+
+        def global_darcy_and_saturation_pressure_est(self) -> float:
+            """Sum global Darcy and saturation-pressure error estimators."""
             ...
 
         # SolutionStrategyEstimatesMixin attributes and methods:
@@ -672,6 +681,14 @@ else:
 
         def global_temp_est(self) -> float:
             """Estimate for global temporal discretization error."""
+            ...
+
+        def global_discretization_est(self) -> float:
+            """Estimate for global discretization error."""
+            ...
+
+        def global_linearization_est(self) -> float:
+            """Estimate for global linearization error."""
             ...
 
     class SPE11Protocol(Protocol):

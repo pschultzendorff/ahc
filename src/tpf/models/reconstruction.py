@@ -239,7 +239,7 @@ class GlobalPressureMixin(TPFProtocol):
         # this next construction.
         bg, bg_data = self.mdg.boundaries(return_data=True)[0]
         for pressure_key, values in zip(
-            [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
+            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
             [glob_bc_dir, compl_bc_dir],
         ):
             # Constant in time values are stored at `time_step_index` and
@@ -608,8 +608,9 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
             )
         # The operators returned by ``DarcyFluxes.total_flux`` and
         # ``DarcyFluxes.wetting_flux`` include bc values, hence
-        # ``f"{flux_name}_flux"`` includes bc values when set by ``eval_jac_and_val_fluxes``, and hence we do not need to care
-        # about bc values here.
+        # ``f"{flux_name}_flux"`` includes bc values when set by
+        # ``eval_jac_and_val_fluxes``, and hence we do not need to care about bc values
+        # here.
         logger.info(f"Equilibrating {flux_name} flux.")
 
         val: np.ndarray = pp.get_solution_values(
@@ -735,10 +736,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
         r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)` and
         being mass conservative.
 
-        Check :meth:`tpf.models.two_phase_flow.EquationsTPF.set_equations` for
-        details.
-
-        TODO Calculate the elementwise mismatch.
+        Check :meth:`tpf.models.two_phase_flow.EquationsTPF.set_equations` for details.
 
         """
         # Calculate mismatches. The equilibrated flux values are stored in the data
@@ -955,7 +953,7 @@ class SolutionStrategyRec(  # type: ignore
         super().after_nonlinear_convergence()
         # Save time step values for pressures, postprocessings, and reconstructions.
         for pressure_key, specifier in itertools.product(
-            [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE],
+            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
             ["", "_coeffs_postproc", "_coeffs_rec"],
         ):
             pressure_values: np.ndarray = pp.get_solution_values(
@@ -994,13 +992,13 @@ class SolutionStrategyRec(  # type: ignore
         self.eval_glob_compl_pressure_on_domain(time_step_index=time_step_index)
 
         # Evaluate face fluxes and their Jacobians.
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             flux = self.postproc_ad_ops[flux_name].value_and_jacobian(
                 self.equation_system
             )
             val = flux.val
             jac = flux.jac[  # type: ignore
-                :, : self.g.num_cells * 2
+                :, self.g.num_cells : self.g.num_cells * 3
             ]  # Only primary variables.
 
             # Flux equilibration requires values from the previous iteration, hence
@@ -1258,7 +1256,7 @@ class DataSavingRec(DataSavingTPF):
             time_step_index=time_step_index,
             iterate_index=iterate_index,
         )
-        for pressure_key in [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]:
+        for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
             # Before simulation, the estimates won't be set yet, due to the order of
             # calls in :meth:`prepare_simulation`. However, after the first time step,
             # :attr:`time_manager.time_step_index` won't be updated yet. Checking for

@@ -19,7 +19,6 @@ from tpf.utils.constants_and_typing import (
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
     GLOBAL_PRESSURE,
-    PRESSURE_KEY,
     TOTAL_FLUX,
     WETTING_FLUX,
 )
@@ -90,7 +89,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # NOTE The saturation term, source term, and divergence of the flux
         # reconstruction are all elementwise constant. Therefore, we can integrate
         # explicitely by multiplying with the element volume.
-        if flux_name == "total":
+        if flux_name == TOTAL_FLUX:
             integral = Integral(
                 (
                     self.g.cell_volumes
@@ -220,7 +219,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             pressure_keys = [GLOBAL_PRESSURE]
             phases = [self.wetting, self.nonwetting]
         elif flux_name == WETTING_FLUX:
-            pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
+            pressure_keys = (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE)
             phases = [self.wetting]
         else:
             raise ValueError(f"Unknown flux name: {flux_name}")
@@ -356,7 +355,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 recalc_volumes=False,
             )
             pp.set_solution_values(
-                f"{flux_name}_Darcy_estimator{specifier}",
+                f"{flux_name}_D_estimator{specifier}",
                 integral.elementwise.squeeze(),
                 self.g_data,
                 iterate_index=0,
@@ -413,7 +412,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         coeffs_old: np.ndarray = pp.get_solution_values(
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, time_step_index=0
         )
-        s_p0: np.ndarray = self.wetting.s.evaluate(self.equation_system)
+        s_p0: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
 
         def integrand(
             x: np.ndarray,
@@ -430,8 +429,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 q_p2 = self._evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
                 s_p2 = self.eval_saturation(q_p2)
 
-                assert s_p0.shape == s_p2.shape, "Saturation shapes do not match."
-                differences.append(s_p0 - s_p2)
+                # ``s_p2`` has shape (num_quad_points_per_element, num_cells), while
+                # ``s_p0`` has shape (num_cells,). Since the latter is cellwise
+                # constant, we can broadcast.
+                differences.append(s_p0[None, ...] - s_p2)
 
             # Some trickery to either return the norm or the inner product.
             if specifier == "_norm":
@@ -484,7 +485,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             estimator: The combined global residual and flux error estimator
 
         """
-        estimators: dict[str, float] = {}
+        estimators: list[float] = []
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             self.local_residual_est(flux_name)
             self.local_flux_est(flux_name)
@@ -515,11 +516,11 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             global_integral_old: float = ((residual + flux_old) ** 2).sum()
 
             # Integrate in time by trapezoidal rule.
-            estimators[flux_name] = (
+            estimators.append(
                 self.time_manager.dt / 2 * (global_integral_new + global_integral_old)
             )
 
-        est = sum(estimators.values()) ** 0.5
+        est = sum(estimators) ** 0.5
         logger.info(f"Global residual and flux error estimator: {est}")
         return est
 
@@ -590,11 +591,12 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         """
 
-        self.local_saturation_pressure_est
+        self.local_saturation_pressure_est()
 
         # Load local spatial integrals from current and previous time step and
         # combined inner-product.
         base_key = "SP_estimator"
+
         new = pp.get_solution_values(base_key + "_norm", self.g_data, iterate_index=0)
         inner = pp.get_solution_values(
             base_key + "_inner_product", self.g_data, iterate_index=0
@@ -628,7 +630,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         :meth:`global_energy_norm`.
 
         """
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             fv_flux_coeffs: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
             )
@@ -672,7 +674,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         self.local_energy_norm()
 
         global_energies: list[float] = []
-        for flux_name in [TOTAL_FLUX, WETTING_FLUX]:
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             local_energy_new: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_energy_norm", self.g_data, iterate_index=0
             )
@@ -723,20 +725,26 @@ class SolutionStrategyEst(  # type: ignore
         """
         initial_values: np.ndarray = np.zeros(self.g.num_cells)
         for flux_name, estimator_name in itertools.product(
-            [TOTAL_FLUX, WETTING_FLUX],
+            (TOTAL_FLUX, WETTING_FLUX),
             [
                 "R_estimator",
                 "F_estimator_new",
                 "F_estimator_old",
-                "D_estimator",
+                "D_estimator_norm",
                 "energy_norm",
             ],
         ):
             key = f"{flux_name}_{estimator_name}"
-            pp.set_solution_values(key, initial_values, self.g_data, time_step_index=0)
+            pp.set_solution_values(
+                key, initial_values, self.g_data, time_step_index=0, iterate_index=0
+            )
 
         pp.set_solution_values(
-            "SP_estimator", initial_values, self.g_data, time_step_index=0
+            "SP_estimator_norm",
+            initial_values,
+            self.g_data,
+            time_step_index=0,
+            iterate_index=0,
         )
 
     def check_convergence(
@@ -749,19 +757,20 @@ class SolutionStrategyEst(  # type: ignore
         converged, diverged = super().check_convergence(
             nonlinear_increment, residual, reference_residual, nl_params
         )
-        residual_and_flux_est: float = self.global_res_and_flux_est()
-        global_pressure_nc_est, complementary_pressure_nc_est = (
-            self.global_nonconformity_est()
-        )
+        residual_and_flux_est = self.global_res_and_flux_est()
+        total_darcy_est, wetting_darcy_est = self.global_darcy_est()
+        saturation_pressure_est = self.global_saturation_pressure_est()
+
         global_energy_norm: float = self.global_energy_norm()
         self.nonlinear_solver_statistics.log_error(
             nonlinear_increment_norm=None,
             residual_norm=None,
             residual_and_flux_est=residual_and_flux_est,
-            nonconformity_est={
-                GLOBAL_PRESSURE: global_pressure_nc_est,
-                COMPLEMENTARY_PRESSURE: complementary_pressure_nc_est,
+            darcy_est={
+                TOTAL_FLUX: total_darcy_est,
+                WETTING_FLUX: wetting_darcy_est,
             },
+            saturation_pressure_est=saturation_pressure_est,
             global_energy_norm=global_energy_norm,
         )
         return converged, diverged
@@ -777,12 +786,13 @@ class SolutionStrategyEst(  # type: ignore
         # NOTE Old
         # NOTE The RT0 coeffs are needed to calculate the local flux estimators.
         for flux_name, specifier in itertools.product(
-            [TOTAL_FLUX, WETTING_FLUX],
+            (TOTAL_FLUX, WETTING_FLUX),
             [
                 "R_estimator",
                 "F_estimator_new",
-                "F_estimator_oldD_estimator",
-                "_RT0_coeffs",
+                "F_estimator_old",
+                "D_estimator_norm",
+                "RT0_coeffs",
             ],
         ):
             key = f"{flux_name}_{specifier}"
@@ -793,11 +803,11 @@ class SolutionStrategyEst(  # type: ignore
                 key, time_step_values, self.g_data, time_step_index=0
             )
 
-        SP_estimator_values: np.ndarray = pp.get_solution_values(
-            "SP_estimator", self.g_data, iterate_index=0
+        time_step_values = pp.get_solution_values(
+            "SP_estimator_norm", self.g_data, iterate_index=0
         )
         pp.set_solution_values(
-            "SP_estimator", SP_estimator_values, self.g_data, time_step_index=0
+            "SP_estimator_norm", time_step_values, self.g_data, time_step_index=0
         )
 
 
@@ -811,12 +821,13 @@ class DataSavingEst(DataSavingRec):
             iterate_index=iterate_index,
         )
         for flux_name, estimator_name in itertools.product(
-            [TOTAL_FLUX, WETTING_FLUX],
+            (TOTAL_FLUX, WETTING_FLUX),
             [
                 "R_estimator",
                 "F_estimator_new",
                 "F_estimator_old",
-                "D_estimator",
+                "D_estimator_norm",
+                "D_estimator_inner_product",
                 "energy_norm",
             ],
         ):

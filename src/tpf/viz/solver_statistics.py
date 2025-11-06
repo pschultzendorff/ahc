@@ -138,8 +138,10 @@ class SolverStatisticsEst(SolverStatisticsRec):
 
     residual_and_flux_est: list[float] = field(default_factory=list)
     """List of residual and flux error estimates for each non-linear iteration."""
-    nonconformity_est: list[dict[str, float]] = field(default_factory=list)
-    """List of nonconformity error estimates for each non-linear iteration."""
+    darcy_est: list[dict[str, float]] = field(default_factory=list)
+    """List of Darcy error estimates for each non-linear iteration."""
+    saturation_pressure_est: list[float] = field(default_factory=list)
+    """List of saturation-pressure error estimates for each non-linear iteration."""
     global_energy_norm: list[float] = field(default_factory=list)
     """List of global energy norms for each non-linear iteration."""
 
@@ -152,13 +154,13 @@ class SolverStatisticsEst(SolverStatisticsRec):
     ) -> None:
         if (
             "residual_and_flux_est" in kwargs
-            and "nonconformity_est" in kwargs
+            and "darcy_est" in kwargs
+            and "saturation_pressure_est" in kwargs
             and "global_energy_norm" in kwargs
         ):
             self.residual_and_flux_est.append(kwargs["residual_and_flux_est"])
-            self.nonconformity_est.append(
-                kwargs["nonconformity_est"],
-            )
+            self.darcy_est.append(kwargs["darcy_est"])
+            self.saturation_pressure_est.append(kwargs["saturation_pressure_est"])
             self.global_energy_norm.append(kwargs["global_energy_norm"])
         else:
             super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
@@ -168,7 +170,8 @@ class SolverStatisticsEst(SolverStatisticsRec):
         """Reset the estimator lists."""
         super().reset()
         self.residual_and_flux_est.clear()
-        self.nonconformity_est.clear()
+        self.darcy_est.clear()
+        self.saturation_pressure_est.clear()
         self.global_energy_norm.clear()
 
     @typing.override
@@ -192,7 +195,8 @@ class SolverStatisticsEst(SolverStatisticsRec):
             data[str(ind)].update(
                 {
                     "residual_and_flux_est": self.residual_and_flux_est,
-                    "nonconformity_est": self.nonconformity_est,
+                    "darcy_est": self.darcy_est,
+                    "saturation_pressure_est": self.saturation_pressure_est,
                     "global_energy_norm": self.global_energy_norm,
                 }
             )

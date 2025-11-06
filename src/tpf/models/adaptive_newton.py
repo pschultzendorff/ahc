@@ -83,24 +83,20 @@ class ErrorEstimateANewtonMixin(
         """
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
         fv_coeffs_new = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs",
+            f"{flux_name}_RT0_coeffs",
             self.g_data,
             iterate_index=0,
         )
         fv_coeffs_old = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs",
+            f"{flux_name}_RT0_coeffs",
             self.g_data,
             time_step_index=0,
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            integrand_x: np.ndarray = (
-                fv_coeffs_new[..., 0] - fv_coeffs_old[..., 0]
-            ) * x[..., 0] + (fv_coeffs_new[..., 1] - fv_coeffs_old[..., 1])
-            integrand_y: np.ndarray = (
-                fv_coeffs_new[..., 0] - fv_coeffs_old[..., 0]
-            ) * x[..., 1] + (fv_coeffs_new[..., 2] - fv_coeffs_old[..., 2])
-            return integrand_x**2 + integrand_y**2
+            diff_coeffs = fv_coeffs_new - fv_coeffs_old
+            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
+            return np.linalg.norm(diff_flux, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -130,20 +126,16 @@ class ErrorEstimateANewtonMixin(
         """
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
         fv_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_RT0_coeffs", self.g_data, iterate_index=0
+            f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
         )
-        fv_equilibrated_coeffs = pp.get_solution_values(
-            f"{flux_name}_flux_equilibrated_RT0_coeffs", self.g_data, iterate_index=0
+        fv_equil_coeffs = pp.get_solution_values(
+            f"{flux_name}_equil_RT0_coeffs", self.g_data, iterate_index=0
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            integrand_x: np.ndarray = (
-                fv_coeffs[..., 0] - fv_equilibrated_coeffs[..., 0]
-            ) * x[..., 0] + (fv_coeffs[..., 1] - fv_equilibrated_coeffs[..., 1])
-            integrand_y: np.ndarray = (
-                fv_coeffs[..., 0] - fv_equilibrated_coeffs[..., 0]
-            ) * x[..., 1] + (fv_coeffs[..., 2] - fv_equilibrated_coeffs[..., 2])
-            return integrand_x**2 + integrand_y**2
+            diff_coeffs = fv_coeffs - fv_equil_coeffs
+            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
+            return np.linalg.norm(diff_flux, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -183,63 +175,61 @@ class ErrorEstimateANewtonMixin(
         if self.params.get("anewton_fast_evaluation", True):
             return 0.0
         else:
-            estimators: dict[str, float] = {}
+            estimators: list[float] = []
             for flux_name in (TOTAL_FLUX, WETTING_FLUX):
                 # Calculate local estimators.
                 self.local_residual_est(flux_name)
-                # Load spatial integrals from current nonlinear iteration.
                 local_integral_R: np.ndarray = pp.get_solution_values(
                     f"{flux_name}_R_estimator", self.g_data, iterate_index=0
                 )
-                # Calculate global values at current iteration.
-                # NOTE The values stored were the squares of the elementwise norms, hence we
-                # take the square root first
+
+                # NOTE The stored values are squared, hence we do not need to square
+                # here.
                 global_integral: float = local_integral_R.sum()
                 # Integrate in time by multiplying .
-                estimators[flux_name] = self.time_manager.dt * global_integral
+                estimators.append(self.time_manager.dt * global_integral)
             # Sum estimators for both equations.
-            estimator: float = sum(estimators.values()) ** 1 / 2
-            logger.info(f"Global residual error estimator: {estimator}")
-            return estimator
+            est: float = sum(estimators) ** 1 / 2
+            logger.info(f"Global residual error estimator: {est}")
+            return est
 
     def global_spatial_est(self) -> float:
         """Evaluate the global spatial discretization error estimator."""
-        residual_estimator: float = self.global_res_est()
-        nc_estimators: tuple[float, float] = self.global_nonconformity_est()
-        estimator: float = residual_estimator + sum(nc_estimators)
-        logger.info(f"Global spatial discretization error estimator: {estimator}")
-        return estimator
+        residual_est = self.global_res_est()
+        darcy_and_sp_est = self.global_darcy_and_saturation_pressure_est()
+        est = residual_est + darcy_and_sp_est
+        logger.info(f"Global spatial discretization error estimator: {est}")
+        return est
 
     def global_temp_est(self) -> float:
         """Evaluate the global temporal discretization error estimator."""
-        estimators: dict[str, float] = {}
+        estimators: list[float] = []
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_temp_est(flux_name)
-            # Load spatial integral from current nonlinear iteration.
             local_integral: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_T_estimator", self.g_data, iterate_index=0
             )
-            # Calculate global values at current and previous time step.
+
             # NOTE The values stored were the squares of the elementwise norms, hence we
             # do not need to square here.
             global_integral: float = local_integral.sum()
             # Integrate in time by multiplying with time step size / 3. This comes from
             # writing the local estimator as an affine function of :math:`t` that is
             # zero at :math:`t^n` and calculating the integral exactly.
-            estimators[flux_name] = self.time_manager.dt / 3.0 * global_integral
+            estimators.append(self.time_manager.dt / 3.0 * global_integral)
         # Sum estimators for both equations.
-        estimator: float = sum(estimators.values()) ** (1 / 2)
-        logger.info(f"Global temporal discretization error estimator: {estimator}")
-        return estimator
+        est: float = sum(estimators) ** (1 / 2)
+        logger.info(f"Global temporal discretization error estimator: {est}")
+        return est
 
     def global_discretization_est(self) -> float:
         """Evaluate the global discretization error estimator."""
-        spatial_estimator: float = self.nonlinear_solver_statistics.spatial_est[-1]
-        temp_estimator: float = self.nonlinear_solver_statistics.temp_est[-1]
-        estimator: float = spatial_estimator + temp_estimator
-        logger.info(f"Global discretization error estimator: {estimator}")
-        return estimator
+        spatial_est = self.nonlinear_solver_statistics.spatial_est[-1]
+        temp_est = self.nonlinear_solver_statistics.temp_est[-1]
+        est = spatial_est + temp_est
+        logger.info(f"Global discretization error estimator: {est}")
+        return est
 
     def global_linearization_est(self) -> float:
         r"""Compute the global linearization error estimate.
@@ -250,24 +240,23 @@ class ErrorEstimateANewtonMixin(
 
         """
 
-        estimators: dict[str, float] = {}
+        estimators: list[float] = []
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_linearization_est(flux_name)
-            # Load spatial integral from current nonlinear iteration.
             local_integral: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_L_estimator", self.g_data, iterate_index=0
             )
-            # Calculate global values at current and previous time step.
-            # NOTE The values stored were the squares of the elementwise norms, hence we
-            # do not need to square here.
+
+            # NOTE The stored values are squared, hence we do not need to square here.
+
             global_integral: float = local_integral.sum()
-            # Integrate in time by multiplying with time step size.
-            estimators[flux_name] = self.time_manager.dt * global_integral
+            # Integrate in time by multiplying constant value with time step size.
+            estimators.append(self.time_manager.dt * global_integral)
         # Sum estimators for both equations.
-        estimator: float = sum(estimators.values()) ** (1 / 2)
-        logger.info(f"Global linearization error estimator: {estimator}")
-        return estimator
+        est: float = sum(estimators) ** (1 / 2)
+        logger.info(f"Global linearization error estimator: {est}")
+        return est
 
 
 class SolutionStrategyANewtonMixin(
@@ -278,12 +267,12 @@ class SolutionStrategyANewtonMixin(
         # In ``EstimatesProtocol``, this method is abstract and
         # not implemented, which mypy complains about
         super().set_initial_estimators()  # type: ignore
-        for flux_name, specifier in itertools.product(
-            ["total", "wetting"],
+        for flux_name, estimator_name in itertools.product(
+            (TOTAL_FLUX, WETTING_FLUX),
             ["T_estimator", "L_estimator"],
         ):
             pp.set_solution_values(
-                f"{flux_name}_{specifier}",
+                f"{flux_name}_{estimator_name}",
                 np.zeros(self.g.num_cells),
                 self.g_data,
                 time_step_index=0,
@@ -349,18 +338,15 @@ class SolutionStrategyANewtonMixin(
 
         """
         super().after_nonlinear_convergence()  # type: ignore
-        for flux_name, specifier in itertools.product(
-            ["total", "wetting"],
-            [
-                "T_estimator",
-                "L_estimator",
-            ],
+        for flux_name, estimator_name in itertools.product(
+            (TOTAL_FLUX, WETTING_FLUX),
+            ["T_estimator", "L_estimator"],
         ):
             flux_values: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_{specifier}", self.g_data, iterate_index=0
+                f"{flux_name}_{estimator_name}", self.g_data, iterate_index=0
             )
             pp.set_solution_values(
-                f"{flux_name}_{specifier}", flux_values, self.g_data, hc_index=0
+                f"{flux_name}_{estimator_name}", flux_values, self.g_data, hc_index=0
             )
 
 
