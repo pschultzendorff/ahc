@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import itertools
 import logging
+import pathlib
 import typing
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import porepy as pp
@@ -31,6 +32,7 @@ from tpf.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
+from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 
 logger = logging.getLogger(__name__)
 
@@ -928,6 +930,54 @@ class SolutionStrategyRec(  # type: ignore
                 + " Skipping postprocessing this iteration."
             )
             logger.warning(e)
+
+        global_pressure_coeffs = pp.get_solution_values(
+            GLOBAL_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
+        )
+        save_path = (
+            pathlib.Path(__file__).parent
+            / ".."
+            / ".."
+            / f"g_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        )
+        plot_quadratic_pressures(
+            self.g,
+            self._domain.bounding_box,
+            global_pressure_coeffs,
+            save_path=save_path,
+        )
+
+        complementary_pressure_coeffs = pp.get_solution_values(
+            COMPLEMENTARY_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
+        )
+        save_path = (
+            pathlib.Path(__file__).parent
+            / ".."
+            / ".."
+            / f"c_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        )
+        plot_quadratic_pressures(
+            self.g,
+            self._domain.bounding_box,
+            complementary_pressure_coeffs,
+            save_path=save_path,
+        )
+
+        complementary_pressure_coeffs = pp.get_solution_values(
+            COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
+        )
+        save_path = (
+            pathlib.Path(__file__).parent
+            / ".."
+            / ".."
+            / f"c_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        )
+        plot_quadratic_pressures(
+            self.g,
+            self._domain.bounding_box,
+            complementary_pressure_coeffs,
+            save_path=save_path,
+        )
 
     @typing.override
     def check_convergence(

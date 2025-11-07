@@ -412,7 +412,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         coeffs_old: np.ndarray = pp.get_solution_values(
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, time_step_index=0
         )
-        s_p0: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
+        s_p0_new: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
+        s_p0_old: np.ndarray = self.wetting.s.previous_timestep().value(
+            self.equation_system
+        )  # type: ignore
 
         def integrand(
             x: np.ndarray,
@@ -420,7 +423,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         ) -> np.ndarray:
             differences: list[np.ndarray] = []
 
-            for i, coeffs in enumerate([coeffs_new, coeffs_old]):
+            for i, (coeffs, s_p0) in enumerate(
+                [(coeffs_new, s_p0_new), (coeffs_old, s_p0_old)]
+            ):
                 # The norm of the previous difference was already computed during the
                 # last time step.
                 if specifier == "_norm" and i == 1:
