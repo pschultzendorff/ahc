@@ -220,20 +220,11 @@ class DarcyFluxes(TPFProtocol):
 
         """
         # Get data and discretization.
-        saturation_w = self.wetting.s
-        saturation_w_bc = pp.ad.DenseArray(
-            self.bc_dirichlet_saturation_values(g, self.wetting),
-            name=f"{self.wetting.name}_s_bc",
-        )
         viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
         upwind = pp.ad.UpwindAd(phase.mobility_key, [g])
 
         # NOTE Neumann bc are no-flow, hence no need to determine mobilities there.
-        mobility = upwind.upwind() @ (
-            self.rel_perm(saturation_w, phase) / viscosity
-        ) + upwind.bound_transport_dir() @ (
-            self.rel_perm(saturation_w_bc, phase) / viscosity
-        )
+        mobility = (upwind.upwind() @ self.rel_perm(self.wetting.s, phase)) / viscosity
         return mobility
 
     def total_mobility(self, g: pp.Grid) -> pp.ad.Operator:
@@ -308,6 +299,7 @@ class DarcyFluxes(TPFProtocol):
         # NOTE As capillary flux over boundaries is assumed to be zero, it does not
         # matter which flux key is used for TPFA.
         tpfa = pp.ad.TpfaAd(self.flux_key, [g])
+        tpfa_cap_press = pp.ad.TpfaAd(self.cap_potential_key, [g])
 
         # Capillary pressure and phase mobilities.
         pressure_c = self.cap_press(self.wetting.s)
@@ -315,22 +307,9 @@ class DarcyFluxes(TPFProtocol):
         mobility_n = self.phase_mobility(g, self.nonwetting)
         mobility_t = self.total_mobility(g)
 
-        # FIXME Use an additional flux key with only Neumann bc for cap. press.
-        # s.t. the cap pressure potential across ALL boundaries is zero.
-        is_neu: np.ndarray = self.bc_type(g).is_neu
-        # Certain derived models, e.g., SPE11, require the flag ``faces`` to be set.
-        pressure_c_bc_values: np.ndarray = self.cap_press_np(
-            (self.bc_dirichlet_saturation_values(g, self.wetting)), faces=True
-        )
-        # The capillary flux over Neumann boundaries is assumed to be zero.
-        pressure_c_bc_values[is_neu] = 0.0
-        pressure_c_bc = pp.ad.DenseArray(pressure_c_bc_values)
-
         # Compute nonwetting & capillary pressure potential.
         viscous_potential_n = self.phase_potential(g, self.nonwetting)
-        capillary_potential = (
-            tpfa.flux() @ pressure_c + tpfa.bound_flux() @ pressure_c_bc
-        )
+        capillary_potential = tpfa_cap_press.flux() @ pressure_c
 
         # Gravity terms.
         buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
@@ -359,6 +338,7 @@ class DarcyFluxes(TPFProtocol):
         """
         # Get data and spatial discretization.
         tpfa = pp.ad.TpfaAd(self.flux_key, [g])
+        tpfa_cap_press = pp.ad.TpfaAd(self.cap_potential_key, [g])
         vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
         vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
 
@@ -368,20 +348,8 @@ class DarcyFluxes(TPFProtocol):
         mobility_n = self.phase_mobility(g, self.nonwetting)
         mobility_t = self.total_mobility(g)
 
-        # FIXME Use an additional flux key with only Neumann bc for cap. press.
-        # s.t. the cap pressure potential across ALL boundaries is zero.
-        is_neu: np.ndarray = self.bc_type(g).is_neu
-        pressure_c_bc_values: np.ndarray = self.cap_press_np(
-            (self.bc_dirichlet_saturation_values(g, self.wetting))
-        )
-        # The capillary flux over Neumann boundaries is assumed to be zero.
-        pressure_c_bc_values[is_neu] = 0.0
-        pressure_c_bc = pp.ad.DenseArray(pressure_c_bc_values)
-
         # Compute capillary and buoyancy potential.
-        capillary_potential = (
-            tpfa.flux() @ pressure_c + tpfa.bound_flux() @ pressure_c_bc
-        )
+        capillary_potential = tpfa_cap_press.flux() @ pressure_c
         buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
         buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
 
@@ -787,37 +755,6 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
         """
         return np.zeros(g.num_faces)
 
-    # Ignore Pylance complaining. Function will always return a value.
-    @typing.final
-    def bc_dirichlet_saturation_values(
-        self, g: pp.Grid, phase: FluidPhase
-    ) -> np.ndarray:  # type: ignore
-        """Phase dependent saturation bc values on Dirichlet boundaries.
-
-        Returns:
-            s_bc: ``shape=(g.num_faces,)`` Phase saturation boundary values.
-
-        """
-        s_bc: np.ndarray = self._bc_dirichlet_saturation_values(g, phase)
-        return s_bc
-
-    def _bc_dirichlet_saturation_values(
-        self, g: pp.Grid, phase: FluidPhase
-    ) -> np.ndarray:
-        """
-
-        Returns:
-            s_bc: ``shape=(g.num_faces,)`` Phase saturation boundary values.
-
-        """
-        if phase.name == self.wetting.name:
-            s_bc: np.ndarray = np.full(g.num_faces, 0.5)
-        elif phase.name == self.nonwetting.name:
-            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
-                g, self.wetting
-            )
-        return s_bc
-
     @typing.override
     def update_all_boundary_conditions(self) -> None:
         """Set values for the saturation, flux, and  and the darcy flux on
@@ -868,7 +805,12 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         """Keyword to define define parameters and discretizations for the total flux.
 
         The corresponding ``tpfa`` and ``tpfa`` discretizations are used to calculate
-        **all** pressure potentials, i.e., wetting, nonwetting, and capillary.
+        phase pressure potentials, i.e., wetting and nonwetting.
+
+        """
+        self.cap_potential_key: str = "cap_potential"
+        """Keyword to define define parameters and discretizations for the capillary
+        pressure potential flux.
 
         """
 
@@ -1029,6 +971,20 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                     "second_order_tensor": diffusivity,
                     "ambient_dimension": self.g.dim,
                     "darcy_flux": np.ones(self.g.num_faces),
+                },
+            )
+            # All Neumann bc to evaluate cap. press. potential.
+            all_neu_bc = pp.BoundaryCondition(
+                self.g,
+            )
+            pp.initialize_data(
+                self.g,
+                self.g_data,
+                self.cap_potential_key,
+                {
+                    "bc": all_neu_bc,
+                    "second_order_tensor": diffusivity,
+                    "ambient_dimension": self.g.dim,
                 },
             )
 

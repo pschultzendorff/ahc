@@ -577,27 +577,6 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
                 "Dirichlet pressure values not implemented for the wetting phase."
             )
 
-    def _bc_dirichlet_saturation_values(
-        self, g: pp.Grid, phase: FluidPhase
-    ) -> np.ndarray:
-        """
-
-        Returns:
-            s_bc: ``shape=(g.num_faces,)`` Phase saturation boundary values.
-
-        """
-        if phase.name == self.wetting.name:
-            domain_sides = self.domain_boundary_sides(g)
-            bc_values: np.ndarray = np.zeros(g.num_faces)
-            bc_values[np.logical_or(domain_sides.west, domain_sides.east)] = (
-                self.spe11_params["INITIAL_SATURATION"]
-            )
-        elif phase.name == self.nonwetting.name:
-            bc_values = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
-                g, self.wetting
-            )
-        return bc_values
-
 
 class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):
     def set_domain(self) -> None:
