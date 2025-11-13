@@ -611,7 +611,7 @@ class CapillaryPressure(TPFProtocol):
                 where=s_normalized != 0,
             )
         elif cap_press_constants.model == "linear":
-            p_c = cap_press_constants.linear_param * entry_pressure * (1 - s_normalized)
+            p_c = entry_pressure + cap_press_constants.linear_param * (1 - s_normalized)
         elif cap_press_constants.model == "van Genuchten":
             p_c = (
                 (
@@ -671,7 +671,7 @@ class CapillaryPressure(TPFProtocol):
             Limited capillary pressure.
 
         """
-        p_c = p_c / (+((p_c / cap_press_constants.max) ** 2)) ** 0.5
+        p_c = p_c / (1 + ((p_c / cap_press_constants.max) ** 2)) ** 0.5
         return p_c
 
     def cap_press_deriv_np(

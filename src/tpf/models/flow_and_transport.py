@@ -220,14 +220,20 @@ class DarcyFluxes(TPFProtocol):
 
         """
         # Get data and discretization.
+        saturation_w = self.wetting.s
+        saturation_w_bc = pp.ad.DenseArray(
+            self.bc_dirichlet_saturation_values(g, self.wetting),
+            name=f"{self.wetting.name}_s_bc",
+        )
         viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
         upwind = pp.ad.UpwindAd(phase.mobility_key, [g])
 
-        # NOTE The model supports only no-flow Neumann and outflow Dirichlet boundaries.
-        # Neither requires upwinded mobilities.
-        mobility = upwind.upwind() @ self.rel_perm(self.wetting.s, phase) / viscosity
-        mobility.set_name(f"{phase.name} mobility")
-
+        # NOTE Neumann bc are no-flow, hence no need to determine mobilities there.
+        mobility = upwind.upwind() @ (
+            self.rel_perm(saturation_w, phase) / viscosity
+        ) + upwind.bound_transport_dir() @ (
+            self.rel_perm(saturation_w_bc, phase) / viscosity
+        )
         return mobility
 
     def total_mobility(self, g: pp.Grid) -> pp.ad.Operator:
@@ -258,18 +264,20 @@ class DarcyFluxes(TPFProtocol):
 
         """
         # Get phase data & discretization.
-        p_phase_bc_dir = pp.ad.DenseArray(self.bc_dirichlet_pressure_values(g, phase))
+        pressure_phase_bc_dir = pp.ad.DenseArray(
+            self.bc_dirichlet_pressure_values(g, phase)
+        )
         phase_vector_source = pp.ad.DenseArray(self.vector_source(g, phase))
         tpfa = pp.ad.TpfaAd(self.flux_key, [g])
 
         # Phase flux terms.
-        pressure_potential: pp.ad.Operator = (
-            tpfa.flux() @ phase.p + tpfa.bound_flux() @ p_phase_bc_dir
+        pressure_potential = (
+            tpfa.flux() @ phase.p + tpfa.bound_flux() @ pressure_phase_bc_dir
         )
-        buyoancy_potential: pp.ad.Operator = -tpfa.vector_source() @ phase_vector_source
+        buyoancy_potential = -tpfa.vector_source() @ phase_vector_source
 
         # Add together:
-        potential: pp.ad.Operator = pressure_potential + buyoancy_potential
+        potential = pressure_potential + buyoancy_potential
         potential.set_name(f"{phase.name} potential")
         return potential
 
@@ -307,14 +315,26 @@ class DarcyFluxes(TPFProtocol):
         mobility_n = self.phase_mobility(g, self.nonwetting)
         mobility_t = self.total_mobility(g)
 
+        # FIXME Use an additional flux key with only Neumann bc for cap. press.
+        # s.t. the cap pressure potential across ALL boundaries is zero.
+        is_neu: np.ndarray = self.bc_type(g).is_neu
+        # Certain derived models, e.g., SPE11, require the flag ``faces`` to be set.
+        pressure_c_bc_values: np.ndarray = self.cap_press_np(
+            (self.bc_dirichlet_saturation_values(g, self.wetting)), faces=True
+        )
+        # The capillary flux over Neumann boundaries is assumed to be zero.
+        pressure_c_bc_values[is_neu] = 0.0
+        pressure_c_bc = pp.ad.DenseArray(pressure_c_bc_values)
+
         # Compute nonwetting & capillary pressure potential.
-        viscous_potential_n: pp.ad.Operator = self.phase_potential(g, self.nonwetting)
-        # The capillary flux over boundaries is assumed to be zero. See above.
-        capillary_potential: pp.ad.Operator = tpfa.flux() @ pressure_c
+        viscous_potential_n = self.phase_potential(g, self.nonwetting)
+        capillary_potential = (
+            tpfa.flux() @ pressure_c + tpfa.bound_flux() @ pressure_c_bc
+        )
 
         # Gravity terms.
-        buoyancy_potential_w: pp.ad.Operator = tpfa.vector_source() @ vector_source_w
-        buoyancy_potential_n: pp.ad.Operator = tpfa.vector_source() @ vector_source_n
+        buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
+        buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
 
         # Finally, we can combine all viscous and buoyancy fluxes multiplied with phase
         # mobilities to the total flux.
@@ -344,24 +364,32 @@ class DarcyFluxes(TPFProtocol):
 
         # Compute cap pressure and mobilities.
         pressure_c = self.cap_press(self.wetting.s)
-        mobility_w: pp.ad.Operator = self.phase_mobility(g, self.wetting)
-        mobility_n: pp.ad.Operator = self.phase_mobility(g, self.nonwetting)
-        mobility_t: pp.ad.Operator = self.total_mobility(g)
+        mobility_w = self.phase_mobility(g, self.wetting)
+        mobility_n = self.phase_mobility(g, self.nonwetting)
+        mobility_t = self.total_mobility(g)
+
+        # FIXME Use an additional flux key with only Neumann bc for cap. press.
+        # s.t. the cap pressure potential across ALL boundaries is zero.
+        is_neu: np.ndarray = self.bc_type(g).is_neu
+        pressure_c_bc_values: np.ndarray = self.cap_press_np(
+            (self.bc_dirichlet_saturation_values(g, self.wetting))
+        )
+        # The capillary flux over Neumann boundaries is assumed to be zero.
+        pressure_c_bc_values[is_neu] = 0.0
+        pressure_c_bc = pp.ad.DenseArray(pressure_c_bc_values)
 
         # Compute capillary and buoyancy potential.
-        # The capillary flux over boundaries is assumed to be zero. See above.
-        capillary_potential: pp.ad.Operator = tpfa.flux() @ pressure_c
-        buoyancy_potential_w: pp.ad.Operator = tpfa.vector_source() @ vector_source_w
-        buoyancy_potential_n: pp.ad.Operator = tpfa.vector_source() @ vector_source_n
+        capillary_potential = (
+            tpfa.flux() @ pressure_c + tpfa.bound_flux() @ pressure_c_bc
+        )
+        buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
+        buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
 
         flux_t = self.total_flux(g)
-        fractional_flow: pp.ad.Operator = mobility_w / mobility_t
+        fractional_flow = mobility_w / mobility_t
 
-        wetting_flux: pp.ad.Operator = (
-            fractional_flow * flux_t
-            + fractional_flow
-            * mobility_n
-            * (capillary_potential + buoyancy_potential_w - buoyancy_potential_n)
+        wetting_flux = fractional_flow * flux_t + fractional_flow * mobility_n * (
+            capillary_potential + buoyancy_potential_w - buoyancy_potential_n
         )
         wetting_flux.set_name(("Wetting flux from fractional flow"))
         return wetting_flux
@@ -465,14 +493,14 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
 
         # Ad equations
         flux_t = self.total_flux(self.g)
-        wetting_flux: pp.ad.Operator = self.wetting_flux(self.g)
+        flux_w = self.wetting_flux(self.g)
 
         flow_equation = pp.ad.Scalar(self.flow_equation_weight) * (
             div @ flux_t - source_ad_t
         )
         transport_equation = pp.ad.Scalar(self.transport_equation_weight) * (
             porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
-            + div @ wetting_flux
+            + div @ flux_w
             - source_ad_w
         )
 
@@ -608,14 +636,14 @@ class VariablesTPF(TPFProtocol, pp.VariableMixin):
             s_normalized: np.ndarray = (
                 saturation - self.wetting.residual_saturation
             ) / (
-                1
+                1.0
                 - self.nonwetting.residual_saturation
                 - self.wetting.residual_saturation
             )
 
         elif getattr(phase, "name", "") == self.nonwetting.name:
-            s_normalized = 1 - self.normalize_saturation_np(
-                1 - saturation,
+            s_normalized = 1.0 - self.normalize_saturation_np(
+                1.0 - saturation,
                 phase=self.wetting,
             )
         else:
@@ -758,6 +786,37 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
 
         """
         return np.zeros(g.num_faces)
+
+    # Ignore Pylance complaining. Function will always return a value.
+    @typing.final
+    def bc_dirichlet_saturation_values(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> np.ndarray:  # type: ignore
+        """Phase dependent saturation bc values on Dirichlet boundaries.
+
+        Returns:
+            s_bc: ``shape=(g.num_faces,)`` Phase saturation boundary values.
+
+        """
+        s_bc: np.ndarray = self._bc_dirichlet_saturation_values(g, phase)
+        return s_bc
+
+    def _bc_dirichlet_saturation_values(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> np.ndarray:
+        """
+
+        Returns:
+            s_bc: ``shape=(g.num_faces,)`` Phase saturation boundary values.
+
+        """
+        if phase.name == self.wetting.name:
+            s_bc: np.ndarray = np.full(g.num_faces, 0.5)
+        elif phase.name == self.nonwetting.name:
+            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
+                g, self.wetting
+            )
+        return s_bc
 
     @typing.override
     def update_all_boundary_conditions(self) -> None:
@@ -969,6 +1028,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                     "bc": self.bc_type(self.g),
                     "second_order_tensor": diffusivity,
                     "ambient_dimension": self.g.dim,
+                    "darcy_flux": np.ones(self.g.num_faces),
                 },
             )
 
@@ -1148,9 +1208,9 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self.nonlinear_solver_statistics.reset()
         self.convergence_status = False
 
-        previous_values = self.equation_system.get_variable_values(time_step_index=0)
+        time_step_values = self.equation_system.get_variable_values(time_step_index=0)
         self.equation_system.set_variable_values(
-            previous_values, iterate_index=0, additive=False
+            time_step_values, iterate_index=0, additive=False
         )
 
     @typing.override

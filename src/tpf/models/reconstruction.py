@@ -228,32 +228,6 @@ class GlobalPressureMixin(TPFProtocol):
         """
         return -self._compute_cap_press_integral(s_0, s_1, lambda w, n, t: w * n / t)
 
-    def set_boundary_pressures(self) -> None:
-        """Set boundary pressures for the global and complementary pressure fields."""
-        # We assume that boundaries are either no-flow Neumann or outflow Dirichlet. In
-        # both cases no capillary pressure distribution from the boundaries goes into
-        # the global and complementary pressures. At the boundary, the global pressure
-        # equals the non-wetting pressure, while the complementary pressure is zero .
-        glob_bc_dir = self.bc_dirichlet_pressure_values(self.g, self.nonwetting)
-        compl_bc_dir = np.zeros_like(glob_bc_dir)
-
-        # TODO See change below. If we loop over boundaries, we do not need to do
-        # this next construction.
-        bg, bg_data = self.mdg.boundaries(return_data=True)[0]
-        for pressure_key, values in zip(
-            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
-            [glob_bc_dir, compl_bc_dir],
-        ):
-            # Constant in time values are stored at `time_step_index` and
-            # `iterate_index` 0.
-            pp.set_solution_values(
-                name=pressure_key,
-                values=bg.projection() @ values,
-                data=bg_data,
-                time_step_index=0,
-                iterate_index=0,
-            )
-
 
 class PressureReconstructionMixin(TPFProtocol):
     """Code and method are copied from Valera et al. (2024)."""
@@ -313,10 +287,6 @@ class PressureReconstructionMixin(TPFProtocol):
         else:
             time_step_index = None
 
-            # Retrieve CCFVM pressures.
-            p_cc = pp.get_solution_values(pressure_key, self.g_data, iterate_index=0)
-            assert p_cc.size == self.g.num_cells
-
             # Retrieve RT0 flux coefficients depending on pressure type.
             if pressure_key == GLOBAL_PRESSURE:
                 coeffs_flux: np.ndarray = pp.get_solution_values(
@@ -348,13 +318,24 @@ class PressureReconstructionMixin(TPFProtocol):
                 self.g.num_cells, self.g.dim, perm, coeffs_flux
             )
 
-            # To obtain the constant c_5, we solve
-            # :math:`c_5 = p_h - 1/|K| (gamma(x, y), 1)_K`,
-            # where :math:`s(x, y) = gamma(x, y) + c_5`.
+            # To obtain the constant c_5, we evaluate the polynomial at the cell
+            # centers.
+            # cc_x = self.g.cell_centers[0, ...]
+            # cc_y = self.g.cell_centers[1, ...]
+            # # Retrieve CCFVM pressures.
+            actual_p_cc = pp.get_solution_values(
+                pressure_key, self.g_data, iterate_index=0
+            )
+            # current_p_cc = self._evaluate_poly_at_points(coeffs, cc_x, cc_y)
+            # coeffs[:, 5] = actual_p_cc - current_p_cc
 
-            def integrand(x: np.ndarray) -> np.ndarray:
-                # `coeffs` was initiated with a zero c_5 term.
-                return self._evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
+            def integrand(x):
+                int_0 = coeffs[:, 0][None, ...] * x[..., 0] ** 2
+                int_1 = coeffs[:, 1][None, ...] * x[..., 0] * x[..., 1]
+                int_2 = coeffs[:, 2][None, ...] * x[..., 0]
+                int_3 = coeffs[:, 3][None, ...] * x[..., 1] ** 2
+                int_4 = coeffs[:, 4][None, ...] * x[..., 1]
+                return int_0 + int_1 + int_2 + int_3 + int_4
 
             integral: Integral = self.quadrature_rec.integrate(
                 integrand,
@@ -363,8 +344,10 @@ class PressureReconstructionMixin(TPFProtocol):
                 recalc_volumes=False,
             )
 
-            # Now, we can compute the constant c_5, one per cell.
-            coeffs[:, 5] = p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
+            # Now, we can compute the constant C, one per cell.
+            coeffs[:, 5] = (
+                actual_p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
+            )
 
         # Store post-processed pressure coeffs.
         pp.set_solution_values(
@@ -456,34 +439,39 @@ class PressureReconstructionMixin(TPFProtocol):
                 faces_p, self.cell_faces_map, self.faces_of_cell, nf
             )
 
+            # We assume that all boundaries are no-flow Neumann or Dirichlet with
+            # outflow for both phases. In the latter case, the phase distribution on the
+            # boundary is unknown and we can neither infer global nor complementary
+            # pressure. Instead, we average internal values.
+
             # Treatment of the boundary points:
-            bg, bg_data = self.mdg.boundaries(return_data=True)[0]
-            bc: pp.BoundaryCondition = self.g_data[pp.PARAMETERS][self.flux_key]["bc"]
+            # bg, bg_data = self.mdg.boundaries(return_data=True)[0]
+            # bc: pp.BoundaryCondition = self.g_data[pp.PARAMETERS][self.flux_key]["bc"]
 
-            dir_faces = bc.is_dir
-            bc_pressure = bg_data[pp.ITERATE_SOLUTIONS][pressure_key][0]
-            bg_dir_filter: np.ndarray = (bg.projection() @ bc.is_dir) == 1
+            # dir_faces = bc.is_dir
+            # bc_pressure = bg_data[pp.ITERATE_SOLUTIONS][pressure_key][0]
+            # bg_dir_filter: np.ndarray = (bg.projection() @ bc.is_dir) == 1
 
-            # Set boundary face pressures.
-            face_pressure[dir_faces] = bc_pressure[bg_dir_filter]
+            # # Set boundary face pressures.
+            # face_pressure[dir_faces] = bc_pressure[bg_dir_filter]
 
-            # Average Dirichlet node pressures
-            # Boundary values at the nodes.
-            face_indicator = np.zeros_like(face_pressure)
-            face_indicator[dir_faces] = 1
+            # # Average Dirichlet node pressures
+            # # Boundary values at the nodes.
+            # face_indicator = np.zeros_like(face_pressure)
+            # face_indicator[dir_faces] = 1
 
-            face_vec = np.zeros(nf)
-            face_vec[dir_faces] = 1
-            num_dir_face_of_node = self.g.face_nodes * face_vec
-            is_dir_node = num_dir_face_of_node > 0
+            # face_vec = np.zeros(nf)
+            # face_vec[dir_faces] = 1
+            # num_dir_face_of_node = self.g.face_nodes * face_vec
+            # is_dir_node = num_dir_face_of_node > 0
 
-            face_vec[:] = 0
-            face_vec[dir_faces] = bc_pressure[bg_dir_filter]
-            node_val_dir = self.g.face_nodes * face_vec
-            node_val_dir[is_dir_node] /= np.maximum(
-                num_dir_face_of_node[is_dir_node], 1
-            )
-            node_pressure[is_dir_node] = node_val_dir[is_dir_node]
+            # face_vec[:] = 0
+            # face_vec[dir_faces] = bc_pressure[bg_dir_filter]
+            # node_val_dir = self.g.face_nodes * face_vec
+            # node_val_dir[is_dir_node] /= np.maximum(
+            #     num_dir_face_of_node[is_dir_node], 1
+            # )
+            # node_pressure[is_dir_node] = node_val_dir[is_dir_node]
 
             # Prepare for exporting.
             point_val = np.column_stack(
@@ -508,6 +496,23 @@ class PressureReconstructionMixin(TPFProtocol):
                 -1,
             )
             coeffs_rec = linalg_solve_batch(A_elements, point_val)
+
+            dirname = (
+                pathlib.Path(__file__).parent
+                / ".."
+                / ".."
+                / ".."
+                / "pressure_plots"
+                / (
+                    f"{pressure_key}_{self.time_manager.time_index}"
+                    + f"_{self.nonlinear_solver_statistics.num_iteration}"
+                )
+            )
+            dirname.mkdir(parents=True, exist_ok=True)
+
+            np.save(dirname / "coo", np.column_stack([nx, ny]))
+            np.save(dirname / "pp", coeffs_postproc)
+            np.save(dirname / "rec", coeffs_rec)
 
         # Store in data dictionary.
         pp.set_solution_values(
@@ -615,6 +620,9 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
         # here.
         logger.info(f"Equilibrating {flux_name} flux.")
 
+        # NOTE This requires the variables to be shifted at each nonlinear iteration. By
+        # default, this happens in
+        # :meth:`SolutionStrategyTPF.after_nonlinear_iteration`.
         val: np.ndarray = pp.get_solution_values(
             flux_name, self.g_data, iterate_index=1
         )
@@ -625,9 +633,6 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
         if nonlinear_increment is None:
             # NOTE The variables are retrieved in the same order as in the Jacobian
             # construction.
-            # NOTE This requires the variables to be shifted at each nonlinear
-            # iteration. By default, this happens in
-            # :meth:`SolutionStrategyTPF.after_nonlinear_iteration`.
             var_val: np.ndarray = self.equation_system.get_variable_values(
                 [self.primary_saturation_var, self.primary_pressure_var],
                 iterate_index=1,
@@ -788,9 +793,23 @@ class EquationsRecMixin(TPFProtocol):
         flux_t: pp.ad.Operator = self.total_flux(self.g)
         flux_w: pp.ad.Operator = self.wetting_flux(self.g)
 
-        flux_t_by_lambda_t: pp.ad.Operator = flux_t / self.total_mobility(self.g)
-        flux_t_times_f_w: pp.ad.Operator = flux_t_by_lambda_t * self.phase_mobility(
-            self.g, self.wetting
+        # FIXME Use non-upwinded mobilities here?
+        # We construct non-uwpinded mobilities.
+        phase_mobilities = {}
+        cells_to_faces = pp.ad.SparseArray(self.g.cell_faces)
+        for phase in [self.wetting, self.nonwetting]:
+            viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
+            cell_mobility = self.rel_perm(self.wetting.s, phase) / viscosity
+            # Project from cells to faces.
+            face_mobility = cells_to_faces @ cell_mobility
+            phase_mobilities[phase.name] = face_mobility
+        total_mobility = pp.ad.sum_operator_list(
+            list(phase_mobilities.values())
+        ) + pp.ad.Scalar(1e-14)
+
+        flux_t_by_lambda_t: pp.ad.Operator = flux_t / total_mobility
+        flux_t_times_f_w: pp.ad.Operator = (
+            flux_t_by_lambda_t * phase_mobilities[self.wetting.name]
         )
 
         # Equilibrated fluxes and mismatches.
@@ -868,16 +887,14 @@ class SolutionStrategyRec(  # type: ignore
         self.setup_pressure_reconstruction()
         self.setup_flux_equilibration()
 
-        # Initalize P0 pressures and scaled fluxes to construct piecewise P2 pressures
-        # at `iterate_index` 0 and `time_step_index` 0.
+        # Initalize P0 pressures and scaled fluxes for piecewise P2 reconstruction at
+        # `iterate_index` 0 and `time_step_index` 0.
         self.eval_postproc_qtys(time_step_index=0)
-        # Flux equilibration requires values from two iterates, hence we
-        # initialize both the current and previous iterate with the same value. Values
-        # from `iterate_index` 0 in the data dictionary are shifted to 'iterate_index' 1
-        # in the second call.
+        # Flux equilibration needs two iterates. Initialize both the current and
+        # previous iterate with the same data. Calling ``eval_postproc_qtys`` twice
+        # shifts value from `iterate_index` 0 to 'iterate_index' 1 .
         self.eval_postproc_qtys()
 
-        self.set_boundary_pressures()
         self.postprocess_solution(
             np.zeros(self.g.num_cells * 2), prepare_simulation=True
         )
@@ -931,15 +948,17 @@ class SolutionStrategyRec(  # type: ignore
             )
             logger.warning(e)
 
+        dirname = pathlib.Path(__file__).parent / ".." / ".." / ".." / "pressure_plots"
+        dirname.mkdir(exist_ok=True)
+
         global_pressure_coeffs = pp.get_solution_values(
             GLOBAL_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
         save_path = (
-            pathlib.Path(__file__).parent
-            / ".."
-            / ".."
+            dirname
             / f"g_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
         )
+
         plot_quadratic_pressures(
             self.g,
             self._domain.bounding_box,
@@ -951,9 +970,7 @@ class SolutionStrategyRec(  # type: ignore
             COMPLEMENTARY_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
         )
         save_path = (
-            pathlib.Path(__file__).parent
-            / ".."
-            / ".."
+            dirname
             / f"c_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
         )
         plot_quadratic_pressures(
@@ -962,14 +979,11 @@ class SolutionStrategyRec(  # type: ignore
             complementary_pressure_coeffs,
             save_path=save_path,
         )
-
         complementary_pressure_coeffs = pp.get_solution_values(
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
         save_path = (
-            pathlib.Path(__file__).parent
-            / ".."
-            / ".."
+            dirname
             / f"c_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
         )
         plot_quadratic_pressures(
@@ -1230,7 +1244,7 @@ def get_sign_normals(g: pp.Grid) -> np.ndarray:
 # The loop could be parallelized with njit(parallel=True) and prange. However, on a
 # small grids (<16000 cells) the overhead made :meth:`postprocess_pressure_vohralik`
 # slower.
-@njit
+# @njit
 def compute_pressure_coeffs(
     num_cells: int, dim: int, perm: np.ndarray, flux_coeffs: np.ndarray
 ) -> np.ndarray:
@@ -1254,6 +1268,8 @@ def compute_pressure_coeffs(
 
     # Loop through all cells and compute the nonconstant coefficients.
     for ci in prange(num_cells):
+        if ci == 1668:
+            pass
         # Local permeability tensor.
         K = perm[:dim, :dim, ci]
         Kxx, Kxy, Kyy = K[0, 0], K[0, 1], K[1, 1]
@@ -1262,8 +1278,8 @@ def compute_pressure_coeffs(
         a, b, c = flux_coeffs[ci]
 
         denom = Kxy**2 - Kxx * Kyy
-        if abs(denom) < 1e-14:
-            denom = np.sign(denom) * 1e-14  # numerical safety
+        # if abs(denom) < 1e-14:
+        #     denom = np.sign(denom) * 1e-14  # numerical safety
 
         # Compute components of vector post-processed pressure.
         coeffs[ci, 0] = (a * Kyy) / (2 * denom)  # x^2

@@ -367,6 +367,8 @@ def generate_configs() -> list[SimulationConfig]:
             for solver_name, adaptive_error_ratio in itertools.product(
                 solvers, adaptive_error_ratios
             ):
+                if solver_name == "AHC":
+                    continue
                 if solver_name.startswith("Newton") and adaptive_error_ratio <= 0.005:
                     continue
                 folder_name = (
@@ -393,6 +395,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
+        continue
         for refinement_factor in refinement_factors:
             # Highest resolution at init_s = 0.9 takes too long, mostly due to the fact
             # that adaptive Newton only makes sense for small-sized updates to produce

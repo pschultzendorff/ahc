@@ -14,7 +14,6 @@ for the model.
 
 import logging
 import pathlib
-from functools import partial
 from typing import Any
 
 import gmsh
@@ -45,7 +44,6 @@ GEO_FILE_CASE_B: str = "spe11b.geo"
 
 # region MODEL_PARAMETERS
 ATM: float = 0.0  # [Pa], atmospheric pressure
-# ATM: float = 0.0  # [Pa], atmospheric pressure
 
 # region case A
 case_A: dict[str, Any] = {
@@ -348,21 +346,6 @@ def load_spe11_data(
         download_spe11_data(data_dir)
         i += 1
 
-    # while True:
-    #     for filename in data_dir.iterdir():
-    #         if filename.suffix == ".geo":
-    #             geo_file = data_dir / filename
-    #     if geo_file is None:
-    #         if i >= 1:
-    #             raise FileNotFoundError(
-    #                 "Could not locate the .geo file. Perhaps, the download failed"
-    #             )
-    #         logger.info(".geo file not found. Downloading again ...")
-    #         download_spe11_data(data_dir)
-    #     else:
-    #         break
-    #     i += 1
-
     if read_refinement_factor(geo_file) != refinement_factor:
         logger.info(
             "Refinement factor in the .geo file is wrong. Adjusting and"
@@ -401,6 +384,12 @@ def LeverettJfunction(permeability: ArrayLike, porosity: ArrayLike) -> np.ndarra
 class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
     """Spatially heterogeneous capillary pressure and upper limit on capillary pressure."""
 
+    def set_cap_press_constants(self) -> None:
+        constants = self.params.get("cap_press_constants", {})
+        constants["max"] = self.spe11_params["MAX_CAP_PRESS"]
+        constants["limit"] = True
+        self._cap_press_constants = CapPressConstants(**constants)
+
     def entry_pressure(
         self,
         g: pp.Grid | pp.BoundaryGrid,
@@ -422,7 +411,7 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
 
         """
         if self.params.get("spe11_heterogeneous_cap_pressure", True):
-            # We know that the entry pressure is a np.ndarray.
+            # We know that the entry pressure is an np.ndarray.
             return pp.ad.DenseArray(
                 self.entry_pressure_np(g, cap_press_constants, **kwargs)  # type: ignore
             )
@@ -467,58 +456,6 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
             return entry_pressure
         else:
             return self.params["spe11_entry_pressure"]
-
-    def cap_press(
-        self,
-        saturation_w: pp.ad.Operator,
-        cap_press_constants: CapPressConstants | None = None,
-        **kwargs,
-    ) -> pp.ad.Operator:
-        cap_press: pp.ad.Operator = super().cap_press(
-            saturation_w, cap_press_constants, **kwargs
-        )
-        # Limit the capillary pressure to a maximum value.
-        maximum_func = pp.ad.Function(
-            partial(
-                pp.ad.maximum,
-                var_1=self.spe11_params["MAX_CAP_PRESS"],
-            ),
-            "max",
-        )
-
-        cap_press = maximum_func(cap_press)  # type: ignore
-        return cap_press
-
-    def cap_press_np(
-        self,
-        saturation_w: np.ndarray,
-        cap_press_constants: CapPressConstants | None = None,
-        **kwargs,
-    ) -> np.ndarray:
-        cap_press: np.ndarray = super().cap_press_np(
-            saturation_w, cap_press_constants, **kwargs
-        )
-        # Limit the capillary pressure to a maximum value.
-        cap_press = np.maximum(cap_press, self.spe11_params["MAX_CAP_PRESS"])
-        return cap_press
-
-    def cap_press_deriv_np(
-        self,
-        saturation_w: np.ndarray,
-        cap_press_constants: CapPressConstants | None = None,
-        **kwargs,
-    ) -> float | np.ndarray:
-        cap_press: np.ndarray = super().cap_press_np(
-            saturation_w, cap_press_constants, **kwargs
-        )
-        cap_press_deriv: np.ndarray = super().cap_press_deriv_np(
-            saturation_w, cap_press_constants, **kwargs
-        )
-        # Limit the capillary pressure to a maximum value.
-        cap_press_deriv = np.where(
-            cap_press > self.spe11_params["MAX_CAP_PRESS"], 0.0, cap_press_deriv
-        )
-        return cap_press_deriv
 
 
 class EquationsSPE11(SPE11Protocol, TPFProtocol):
@@ -630,11 +567,11 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
         """Dirichle pressure values."""
         if phase == self.nonwetting:
             domain_sides = self.domain_boundary_sides(g)
-            bc: np.ndarray = np.zeros(g.num_faces)
-            bc[np.logical_or(domain_sides.west, domain_sides.east)] = (
+            bc_values: np.ndarray = np.zeros(g.num_faces)
+            bc_values[np.logical_or(domain_sides.west, domain_sides.east)] = (
                 phase.convert_units(ATM, "kg*m^-1*s^-2")
             )
-            return bc
+            return bc_values
         else:
             raise NotImplementedError(
                 "Dirichlet pressure values not implemented for the wetting phase."
@@ -643,15 +580,23 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
     def _bc_dirichlet_saturation_values(
         self, g: pp.Grid, phase: FluidPhase
     ) -> np.ndarray:
+        """
+
+        Returns:
+            s_bc: ``shape=(g.num_faces,)`` Phase saturation boundary values.
+
+        """
         if phase.name == self.wetting.name:
-            s_bc: np.ndarray = np.full(
-                g.num_faces, self.spe11_params["INITIAL_SATURATION"]
+            domain_sides = self.domain_boundary_sides(g)
+            bc_values: np.ndarray = np.zeros(g.num_faces)
+            bc_values[np.logical_or(domain_sides.west, domain_sides.east)] = (
+                self.spe11_params["INITIAL_SATURATION"]
             )
         elif phase.name == self.nonwetting.name:
-            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
+            bc_values = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
                 g, self.wetting
             )
-        return s_bc
+        return bc_values
 
 
 class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):
