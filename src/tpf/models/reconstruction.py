@@ -289,14 +289,26 @@ class PressureReconstructionMixin(TPFProtocol):
 
             # Retrieve RT0 flux coefficients depending on pressure type.
             if pressure_key == GLOBAL_PRESSURE:
-                coeffs_flux: np.ndarray = pp.get_solution_values(
-                    f"{TOTAL_FLUX}_by_t_mobility{flux_specifier}_RT0_coeffs",
-                    self.g_data,
-                    iterate_index=0,
+                total_mobility: np.ndarray = pp.get_solution_values(
+                    "total_mobility", self.g_data, iterate_index=0
                 )
+                coeffs_flux: np.ndarray = (
+                    pp.get_solution_values(
+                        f"{TOTAL_FLUX}{flux_specifier}_RT0_coeffs",
+                        self.g_data,
+                        iterate_index=0,
+                    )
+                    / total_mobility[..., None]
+                )
+
             elif pressure_key == COMPLEMENTARY_PRESSURE:
-                coeffs_flux: np.ndarray = pp.get_solution_values(
-                    f"{TOTAL_FLUX}_times_fractional_flow{flux_specifier}_RT0_coeffs",
+                fractional_flow: np.ndarray = pp.get_solution_values(
+                    "fractional_flow", self.g_data, iterate_index=0
+                )
+                coeffs_flux: np.ndarray = fractional_flow[
+                    ..., None
+                ] * pp.get_solution_values(
+                    f"{TOTAL_FLUX}{flux_specifier}_RT0_coeffs",
                     self.g_data,
                     iterate_index=0,
                 ) - pp.get_solution_values(
@@ -320,14 +332,14 @@ class PressureReconstructionMixin(TPFProtocol):
 
             # To obtain the constant c_5, we evaluate the polynomial at the cell
             # centers.
-            # cc_x = self.g.cell_centers[0, ...]
-            # cc_y = self.g.cell_centers[1, ...]
+            cc_x = self.g.cell_centers[0, ...]
+            cc_y = self.g.cell_centers[1, ...]
             # # Retrieve CCFVM pressures.
             actual_p_cc = pp.get_solution_values(
                 pressure_key, self.g_data, iterate_index=0
             )
-            # current_p_cc = self._evaluate_poly_at_points(coeffs, cc_x, cc_y)
-            # coeffs[:, 5] = actual_p_cc - current_p_cc
+            current_p_cc = self._evaluate_poly_at_points(coeffs, cc_x, cc_y)
+            coeffs[:, 5] = actual_p_cc - current_p_cc
 
             def integrand(x):
                 int_0 = coeffs[:, 0][None, ...] * x[..., 0] ** 2
@@ -510,10 +522,6 @@ class PressureReconstructionMixin(TPFProtocol):
             )
             dirname.mkdir(parents=True, exist_ok=True)
 
-            np.save(dirname / "coo", np.column_stack([nx, ny]))
-            np.save(dirname / "pp", coeffs_postproc)
-            np.save(dirname / "rec", coeffs_rec)
-
         # Store in data dictionary.
         pp.set_solution_values(
             f"{pressure_key}_coeffs_rec",
@@ -608,10 +616,13 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
             None
 
         """
-        if self._nl_appleyard_chopping and nonlinear_increment is None:
+        if (
+            self._nl_appleyard_chopping or self._nl_enforce_physical_saturation
+        ) and nonlinear_increment is None:
             raise ValueError(
                 "The non-chopped nonlinear increment vector has to be provided when"
-                + " Newton is run with Appleyard chopping."
+                + " Newton is run with Appleyard chopping or enforced physical"
+                + " saturations."
             )
         # The operators returned by ``DarcyFluxes.total_flux`` and
         # ``DarcyFluxes.wetting_flux`` include bc values, hence
@@ -793,24 +804,16 @@ class EquationsRecMixin(TPFProtocol):
         flux_t: pp.ad.Operator = self.total_flux(self.g)
         flux_w: pp.ad.Operator = self.wetting_flux(self.g)
 
-        # FIXME Use non-upwinded mobilities here?
-        # We construct non-uwpinded mobilities.
+        # We construct non-uwpinded mobilities on cells.
         phase_mobilities = {}
-        cells_to_faces = pp.ad.SparseArray(self.g.cell_faces)
+
         for phase in [self.wetting, self.nonwetting]:
             viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
-            cell_mobility = self.rel_perm(self.wetting.s, phase) / viscosity
-            # Project from cells to faces.
-            face_mobility = cells_to_faces @ cell_mobility
-            phase_mobilities[phase.name] = face_mobility
-        total_mobility = pp.ad.sum_operator_list(
-            list(phase_mobilities.values())
-        ) + pp.ad.Scalar(1e-14)
-
-        flux_t_by_lambda_t: pp.ad.Operator = flux_t / total_mobility
-        flux_t_times_f_w: pp.ad.Operator = (
-            flux_t_by_lambda_t * phase_mobilities[self.wetting.name]
-        )
+            phase_mobilities[phase.name] = (
+                self.rel_perm(self.wetting.s, phase) / viscosity
+            )
+        total_mobility = pp.ad.sum_operator_list(list(phase_mobilities.values()))
+        fractional_flow = phase_mobilities[self.wetting.name] / total_mobility
 
         # Equilibrated fluxes and mismatches.
         # TODO This copies 90% of the code from ``set_equations``. Make
@@ -819,8 +822,7 @@ class EquationsRecMixin(TPFProtocol):
 
         # Discretization operators.
         div = pp.ad.Divergence([self.g])
-        dt = pp.ad.Scalar(self.time_manager.dt)
-        dt_s: pp.ad.Operator = pp.ad.time_derivatives.dt(self.wetting.s, dt)
+        dt_s = pp.ad.time_derivatives.dt(self.wetting.s, self.ad_time_step)
 
         # Ad source.
         source_ad_w = pp.ad.DenseArray(self.phase_fluid_source(self.g, self.wetting))
@@ -850,8 +852,8 @@ class EquationsRecMixin(TPFProtocol):
         for name, op in [
             (TOTAL_FLUX, flux_t),
             (WETTING_FLUX, flux_w),
-            (TOTAL_FLUX + "_by_t_mobility", flux_t_by_lambda_t),
-            (TOTAL_FLUX + "_times_fractional_flow", flux_t_times_f_w),
+            ("total_mobility", total_mobility),
+            ("fractional_flow", fractional_flow),
             (TOTAL_FLUX + "_equil", flux_t_equil),
             (WETTING_FLUX + "_equil", flux_w_equil),
             (TOTAL_FLUX + "_equil_mismatch", flux_t_equil_mismatch),
@@ -952,11 +954,26 @@ class SolutionStrategyRec(  # type: ignore
         dirname.mkdir(exist_ok=True)
 
         global_pressure_coeffs = pp.get_solution_values(
+            GLOBAL_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
+        )
+        save_path = (
+            dirname
+            / f"g_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        )
+
+        plot_quadratic_pressures(
+            self.g,
+            self._domain.bounding_box,
+            global_pressure_coeffs,
+            save_path=save_path,
+        )
+
+        global_pressure_coeffs = pp.get_solution_values(
             GLOBAL_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
         save_path = (
             dirname
-            / f"g_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+            / f"g_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
         )
 
         plot_quadratic_pressures(
@@ -1042,9 +1059,9 @@ class SolutionStrategyRec(  # type: ignore
         Populates the current `iterate_index` (and the given `time_step_index`) in the
         data dictionary with:
         - 'global_pressure': Global pressure value.
-        - 'complementary_pressure': complementary pressure value.
-        - 'total_by_t_mobility_flux': Total flux divided by total mobility.
-        - 'total_times_fractional_flow_flux': Total flux times fractional flow.
+        - 'complementary_pressure': Complementary pressure value.
+        - 'total_mobility': Cellwise total mobility.
+        - 'fractional_flow': Cellwise fractional flow.
 
         Parameters:
             time_step_index: Save values at this 'time_step_index' in the data
@@ -1094,18 +1111,15 @@ class SolutionStrategyRec(  # type: ignore
             )
 
         # Evaluate scaled fluxes required for pressure post-processing.
-        for scaled_flux_name in [
-            TOTAL_FLUX + "_by_t_mobility",
-            TOTAL_FLUX + "_times_fractional_flow",
+        for scalar_name in [
+            "total_mobility",
+            "fractional_flow",
         ]:
-            scaled_flux = self.postproc_ad_ops[scaled_flux_name].value(
-                self.equation_system
-            )
+            scalar_value = self.postproc_ad_ops[scalar_name].value(self.equation_system)
             pp.set_solution_values(
-                scaled_flux_name,
-                scaled_flux,  # type: ignore
+                scalar_name,
+                scalar_value,  # type: ignore
                 self.g_data,
-                time_step_index=time_step_index,
                 iterate_index=0,
             )
 
@@ -1125,18 +1139,6 @@ class SolutionStrategyRec(  # type: ignore
 
                 # Extend equilibrated fluxes.
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
-
-        # Extend scaled fluxes for pressure post-processing.
-        for flux_name, flux_specifier in (
-            (TOTAL_FLUX, "_by_t_mobility"),
-            (TOTAL_FLUX, "_times_fractional_flow"),
-        ):
-            flux_name = typing.cast(FLUX_NAME, flux_name)  # Satisfy mypy.
-            self.extend_fv_fluxes(
-                flux_name,
-                flux_specifier=flux_specifier,
-                prepare_simulation=prepare_simulation,
-            )
 
         # Reconstruct pressures.
         for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
@@ -1268,8 +1270,6 @@ def compute_pressure_coeffs(
 
     # Loop through all cells and compute the nonconstant coefficients.
     for ci in prange(num_cells):
-        if ci == 1668:
-            pass
         # Local permeability tensor.
         K = perm[:dim, :dim, ci]
         Kxx, Kxy, Kyy = K[0, 0], K[0, 1], K[1, 1]
@@ -1278,14 +1278,12 @@ def compute_pressure_coeffs(
         a, b, c = flux_coeffs[ci]
 
         denom = Kxy**2 - Kxx * Kyy
-        # if abs(denom) < 1e-14:
-        #     denom = np.sign(denom) * 1e-14  # numerical safety
 
         # Compute components of vector post-processed pressure.
         coeffs[ci, 0] = (a * Kyy) / (2 * denom)  # x^2
         # NOTE If K is a scalar, the following term will vanish.
         coeffs[ci, 1] = (a * Kxy) / (Kxx * Kyy - Kxy**2)  # xy
-        coeffs[ci, 2] = (Kxy * c - Kyy * b) / (Kxx * Kyy - Kxy**2)  # x
+        coeffs[ci, 2] = (Kyy * b - Kxy * c) / denom  # x
         coeffs[ci, 3] = (a * Kxx) / (2 * denom)  # y^2
         coeffs[ci, 4] = (Kxx * c - Kxy * b) / denom  # y
     return coeffs

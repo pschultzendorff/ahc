@@ -19,6 +19,7 @@ from tpf.utils.constants_and_typing import (
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
     GLOBAL_PRESSURE,
+    PRESSURE_KEY,
     TOTAL_FLUX,
     WETTING_FLUX,
 )
@@ -176,6 +177,80 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 iterate_index=0,
             )
 
+    def local_pressure_potential(self, pressure_key: PRESSURE_KEY) -> None:
+        def evaluate_potential_from_coeffs(
+            x: np.ndarray,
+            pressure_coeffs: np.ndarray,
+        ) -> np.ndarray:
+            """Calculate the total flux from reconstructed pressures and P0
+            mobilities."""
+            return self._evaluate_pressure_potential_at_points(
+                pressure_coeffs,
+                x[..., 0],
+                x[..., 1],
+            )
+
+        pressure_coeffs_postproc = pp.get_solution_values(
+            f"{pressure_key}_coeffs_postproc", self.g_data, iterate_index=0
+        )
+        pressure_coeffs_rec = pp.get_solution_values(
+            f"{pressure_key}_coeffs_rec", self.g_data, iterate_index=0
+        )
+
+        def integrand(
+            x: np.ndarray,
+            pressure_coeffs: np.ndarray,
+        ) -> np.ndarray:
+            pressure_potential = evaluate_potential_from_coeffs(x, pressure_coeffs)
+            return np.sqrt((pressure_potential**2).sum(axis=-1))
+
+        # 5: Finally, integrate in space. Store norm at current time step and inner
+        # product of previous and current time step.
+        for specifier in ["_postproc", "_rec"]:
+            pressure_coeffs = (
+                pressure_coeffs_postproc
+                if specifier == "_postproc"
+                else pressure_coeffs_rec
+            )
+            integral: Integral = self.quadrature_est.integrate(
+                functools.partial(integrand, pressure_coeffs=pressure_coeffs),
+                self.quadpy_elements,
+                recalc_points=False,
+                recalc_volumes=False,
+            )
+            pp.set_solution_values(
+                f"{pressure_key}{specifier}_potential",
+                integral.elementwise.squeeze(),
+                self.g_data,
+                iterate_index=0,
+            )
+
+    def local_flux(self, flux_name: FLUX_NAME) -> None:
+        def integrand(
+            x: np.ndarray,
+        ) -> np.ndarray:
+            fv_flux = self._evaluate_flux_at_points(
+                pp.get_solution_values(
+                    f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
+                ),
+                x[..., 0],
+                x[..., 1],
+            )
+            return np.sqrt((fv_flux**2).sum(axis=-1))
+
+        integral: Integral = self.quadrature_est.integrate(
+            integrand,
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+        pp.set_solution_values(
+            f"{flux_name}_norm",
+            integral.elementwise.squeeze(),
+            self.g_data,
+            iterate_index=0,
+        )
+
     def local_darcy_est(self, flux_name: FLUX_NAME) -> None:
         r"""Calculate and store the local Darcy estimator for each element at the
          current time and the inner product between current and previous time step.
@@ -211,7 +286,6 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         elif len(perm) == 1:
             perm_arr = perm["kxx"]
         else:
-            # TODO Implement for tensor permeability.
             raise ValueError("Not implemented for tensor permeability.")
 
         # 2: Get reconstructed pressure coefficients and mobilities
@@ -238,9 +312,11 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             )
 
         for phase in phases:
+            # Non-upwinded mobilities.
             phase_mobilities_new[phase.name] = (
                 self.rel_perm(  # type: ignore
-                    self.wetting.s, phase
+                    self.wetting.s,
+                    phase,
                 ).value(self.equation_system)
                 / phase.viscosity
             )
@@ -265,9 +341,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 mobilities."""
                 global_pressure_pot: np.ndarray = (
                     self._evaluate_pressure_potential_at_points(
-                        pressure_coeffs[GLOBAL_PRESSURE],
-                        x[..., 0],
-                        x[..., 1],
+                        pressure_coeffs[GLOBAL_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
                 total_mobility = (
@@ -275,7 +349,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                     + phase_mobilities[self.nonwetting.name]
                 )
                 return (
-                    perm_arr[None, :, None]
+                    -perm_arr[None, :, None]
                     * total_mobility[None, :, None]
                     * global_pressure_pot
                 )
@@ -294,14 +368,12 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 )
                 complementary_pressure_pot = (
                     self._evaluate_pressure_potential_at_points(
-                        pressure_coeffs[COMPLEMENTARY_PRESSURE],
-                        x[..., 0],
-                        x[..., 1],
+                        pressure_coeffs[COMPLEMENTARY_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
                 wetting_mobility = phase_mobilities[self.wetting.name]
 
-                return perm_arr[None, :, None] * (
+                return -perm_arr[None, :, None] * (
                     wetting_mobility[None, :, None] * global_pressure_pot
                     + complementary_pressure_pot
                 )
@@ -323,6 +395,8 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 x, pressure_coeffs_new, phase_mobilities_new
             )
 
+            # FIXME The diff is almost equal to rec_flux_new. This doesn't seem quite
+            # right.
             flux_diff_new = fv_flux_new - rec_flux_new
 
             if specifier == "_norm":
@@ -361,6 +435,190 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 iterate_index=0,
             )
 
+    def local_darcy_est_from_postproc(self, flux_name: FLUX_NAME) -> None:
+        r"""Calculate and store the local Darcy estimator for each element at the
+         current time and the inner product between current and previous time step.
+
+        Note: The values stored are the squares of the elementwise estimators, i.e.,
+
+        .. math::
+            \|\mathbf{u}_\mathrm{t} 
+                - \kappa \lambda_\mathrm{t} \nabla \tilde{P}_{h,\tau}\|_K^2(t^n), \\
+            \|\mathbf{u}_\mathrm{w} 
+                - \kappa \left(\lambda_\mathrm{w} \nabla \tilde{P}_{h,\tau}
+                + \nabla \tilde{Q}_{h,\tau}\right)\|_K^2(t^n).
+
+        and 
+
+        .. math::
+            \left(
+                (\mathbf{u}_\mathrm{t} - \kappa \lambda_\mathrm{t} \nabla \tilde{P}_{h,\tau})(t^n),
+                (\mathbf{u}_\mathrm{t} - \kappa \lambda_\mathrm{t} \nabla \tilde{P}_{h,\tau})(t^{n-1})
+            \right), \\
+            \left(
+                (\mathbf{u}_\mathrm{w} - \kappa (\lambda_\mathrm{w} \nabla \tilde{P}_{h,\tau}
+                + \nabla \tilde{Q}_{h,\tau}))(t^n),
+                (\mathbf{u}_\mathrm{w} - \kappa (\lambda_\mathrm{w} \nabla \tilde{P}_{h,\tau}
+                + \nabla \tilde{Q}_{h,\tau}))(t^{n-1})
+            \right).
+
+        """
+        # 1. Get a scalar permeability array.
+        perm: np.ndarray | dict[str, np.ndarray] = self.permeability(self.g)
+        if isinstance(perm, np.ndarray):
+            perm_arr = perm
+        elif len(perm) == 1:
+            perm_arr = perm["kxx"]
+        else:
+            raise ValueError("Not implemented for tensor permeability.")
+
+        # 2: Get reconstructed pressure coefficients and mobilities
+        if flux_name == TOTAL_FLUX:
+            pressure_keys = (GLOBAL_PRESSURE,)
+            phases = (self.wetting, self.nonwetting)
+        elif flux_name == WETTING_FLUX:
+            pressure_keys = (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE)
+            phases = (self.wetting,)
+        else:
+            raise ValueError(f"Unknown flux name: {flux_name}")
+
+        pressure_coeffs_new = {}
+        pressure_coeffs_old = {}
+        phase_mobilities_new = {}
+        phase_mobilities_old = {}
+
+        for pressure_key in pressure_keys:
+            pressure_coeffs_new[pressure_key] = pp.get_solution_values(
+                f"{pressure_key}_coeffs_postproc", self.g_data, iterate_index=0
+            )
+            pressure_coeffs_old[pressure_key] = pp.get_solution_values(
+                f"{pressure_key}_coeffs_postproc", self.g_data, time_step_index=0
+            )
+
+        for phase in phases:
+            # Non-upwinded mobilities.
+            # TODO These are saved in reconstruction, just use those.
+            phase_mobilities_new[phase.name] = (
+                self.rel_perm(  # type: ignore
+                    self.wetting.s,
+                    phase,
+                ).value(self.equation_system)
+                / phase.viscosity
+            )
+            phase_mobilities_old[phase.name] = (
+                self.rel_perm(  # type: ignore
+                    self.wetting.s.previous_timestep(),
+                    phase,
+                ).value(self.equation_system)
+                / phase.viscosity
+            )
+
+        # 3: Define helper functions to evaluate fluxes from reconstructed pressures and
+        # P0 mobilities.
+        if flux_name == TOTAL_FLUX:
+
+            def evaluate_flux_from_reconstructions(
+                x: np.ndarray,
+                pressure_coeffs: dict[str, np.ndarray],
+                phase_mobilities: dict[str, np.ndarray],
+            ) -> np.ndarray:
+                """Calculate the total flux from reconstructed pressures and P0
+                mobilities."""
+                global_pressure_pot: np.ndarray = (
+                    self._evaluate_pressure_potential_at_points(
+                        pressure_coeffs[GLOBAL_PRESSURE], x[..., 0], x[..., 1]
+                    )
+                )
+                total_mobility = (
+                    phase_mobilities[self.wetting.name]
+                    + phase_mobilities[self.nonwetting.name]
+                )
+                return (
+                    -perm_arr[None, :, None]
+                    * total_mobility[None, :, None]
+                    * global_pressure_pot
+                )
+
+        elif flux_name == WETTING_FLUX:
+
+            def evaluate_flux_from_reconstructions(
+                x: np.ndarray,
+                pressure_coeffs: dict[str, np.ndarray],
+                phase_mobilities: dict[str, np.ndarray],
+            ) -> np.ndarray:
+                """Calculate the total flux from reconstructed pressures and P0
+                mobilities."""
+                global_pressure_pot = self._evaluate_pressure_potential_at_points(
+                    pressure_coeffs[GLOBAL_PRESSURE], x[..., 0], x[..., 1]
+                )
+                complementary_pressure_pot = (
+                    self._evaluate_pressure_potential_at_points(
+                        pressure_coeffs[COMPLEMENTARY_PRESSURE], x[..., 0], x[..., 1]
+                    )
+                )
+                wetting_mobility = phase_mobilities[self.wetting.name]
+
+                return -perm_arr[None, :, None] * (
+                    wetting_mobility[None, :, None] * global_pressure_pot
+                    + complementary_pressure_pot
+                )
+
+        # 4: Define integrand that computes either the norm or the inner product of the
+        # flux differences.
+        def integrand(
+            x: np.ndarray,
+            specifier: Literal["_norm", "_inner_product"],
+        ) -> np.ndarray:
+            fv_flux_new = self._evaluate_flux_at_points(
+                pp.get_solution_values(
+                    f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
+                ),
+                x[..., 0],
+                x[..., 1],
+            )
+            rec_flux_new = evaluate_flux_from_reconstructions(
+                x, pressure_coeffs_new, phase_mobilities_new
+            )
+
+            # FIXME Not zero for wetting flux.
+            flux_diff_new = fv_flux_new - rec_flux_new
+
+            if specifier == "_norm":
+                return (flux_diff_new**2).sum(axis=-1)
+
+            elif specifier == "_inner_product":
+                fv_flux_old = self._evaluate_flux_at_points(
+                    pp.get_solution_values(
+                        f"{flux_name}_RT0_coeffs", self.g_data, time_step_index=0
+                    ),
+                    x[..., 0],
+                    x[..., 1],
+                )
+                rec_flux_old = evaluate_flux_from_reconstructions(
+                    x, pressure_coeffs_old, phase_mobilities_old
+                )
+                flux_diff_old = fv_flux_old - rec_flux_old
+
+                return (flux_diff_new * flux_diff_old).sum(axis=-1)
+
+        # 5: Finally, integrate in space. Store norm at current time step and inner
+        # product of previous and current time step.
+        for specifier in ["_norm", "_inner_product"]:
+            # Make mypy happy.
+            specifier = typing.cast(Literal["_norm", "_inner_product"], specifier)
+            integral: Integral = self.quadrature_est.integrate(
+                functools.partial(integrand, specifier=specifier),
+                self.quadpy_elements,
+                recalc_points=False,
+                recalc_volumes=False,
+            )
+            pp.set_solution_values(
+                f"{flux_name}_D_estimator_from_postproc{specifier}",
+                integral.elementwise.squeeze(),
+                self.g_data,
+                iterate_index=0,
+            )
+
     @staticmethod
     def _evaluate_pressure_potential_at_points(
         coeffs: np.ndarray,
@@ -377,8 +635,8 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             + (coeffs[..., 2])[None, ...]
         )
         pressure_potential_y: np.ndarray = (
-            2 * x * (coeffs[..., 3])[None, ...]
-            + y * (coeffs[..., 1])[None, ...]
+            2 * y * (coeffs[..., 3])[None, ...]
+            + x * (coeffs[..., 1])[None, ...]
             + (coeffs[..., 4])[None, ...]
         )
         return np.stack([pressure_potential_x, pressure_potential_y], axis=-1)
@@ -765,8 +1023,11 @@ class SolutionStrategyEst(  # type: ignore
         residual_and_flux_est = self.global_res_and_flux_est()
         total_darcy_est, wetting_darcy_est = self.global_darcy_est()
         saturation_pressure_est = self.global_saturation_pressure_est()
-
+        darcy_and_saturation_pressure_est = (
+            self.global_darcy_and_saturation_pressure_est()
+        )
         global_energy_norm: float = self.global_energy_norm()
+
         self.nonlinear_solver_statistics.log_error(
             nonlinear_increment_norm=None,
             residual_norm=None,
@@ -780,6 +1041,16 @@ class SolutionStrategyEst(  # type: ignore
         )
         return converged, diverged
 
+    def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
+        super().after_nonlinear_iteration(nonlinear_increment)
+        # TODO Remove this again.
+        self.local_pressure_potential(GLOBAL_PRESSURE)
+        self.local_pressure_potential(COMPLEMENTARY_PRESSURE)
+        self.local_flux(TOTAL_FLUX)
+        self.local_flux(WETTING_FLUX)
+        self.local_darcy_est_from_postproc(TOTAL_FLUX)
+        self.local_darcy_est_from_postproc(WETTING_FLUX)
+
     def after_nonlinear_convergence(self) -> None:
         super().after_nonlinear_convergence()
 
@@ -788,7 +1059,6 @@ class SolutionStrategyEst(  # type: ignore
         # NOTE The local residual and flux error estimators are only needed at the
         # current iteration. We set the time step values for completeness and to avoid
         # extra code in :meth:`_data_to_export`.
-        # NOTE Old
         # NOTE The RT0 coeffs are needed to calculate the local flux estimators.
         for flux_name, specifier in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
@@ -797,7 +1067,9 @@ class SolutionStrategyEst(  # type: ignore
                 "F_estimator_new",
                 "F_estimator_old",
                 "D_estimator_norm",
+                "D_estimator_from_postproc_norm",
                 "RT0_coeffs",
+                "energy_norm",
             ],
         ):
             key = f"{flux_name}_{specifier}"
@@ -814,6 +1086,29 @@ class SolutionStrategyEst(  # type: ignore
         pp.set_solution_values(
             "SP_estimator_norm", time_step_values, self.g_data, time_step_index=0
         )
+
+        for pressure_key, specifier in itertools.product(
+            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
+        ):
+            time_step_values = pp.get_solution_values(
+                f"{pressure_key}{specifier}_potential", self.g_data, iterate_index=0
+            )
+            pp.set_solution_values(
+                f"{pressure_key}{specifier}_potential",
+                time_step_values,
+                self.g_data,
+                time_step_index=0,
+            )
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+            time_step_values = pp.get_solution_values(
+                f"{flux_name}_norm", self.g_data, iterate_index=0
+            )
+            pp.set_solution_values(
+                f"{flux_name}_norm",
+                time_step_values,
+                self.g_data,
+                time_step_index=0,
+            )
 
 
 class DataSavingEst(DataSavingRec):
@@ -832,7 +1127,7 @@ class DataSavingEst(DataSavingRec):
                 "F_estimator_new",
                 "F_estimator_old",
                 "D_estimator_norm",
-                "D_estimator_inner_product",
+                "D_estimator_from_postproc_norm",
                 "energy_norm",
             ],
         ):
@@ -862,9 +1157,9 @@ class DataSavingEst(DataSavingRec):
                 data.append(
                     (
                         self.g,
-                        "SP_estimator",
+                        "SP_estimator_norm",
                         pp.get_solution_values(
-                            "SP_estimator",
+                            "SP_estimator_norm",
                             self.g_data,
                             time_step_index=time_step_index,
                             iterate_index=iterate_index,
@@ -873,6 +1168,41 @@ class DataSavingEst(DataSavingRec):
                 )
             except KeyError:
                 pass
+        for pressure_key, specifier in itertools.product(
+            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
+        ):
+            try:
+                data.append(
+                    (
+                        self.g,
+                        f"{pressure_key}{specifier}_potential",
+                        pp.get_solution_values(
+                            f"{pressure_key}{specifier}_potential",
+                            self.g_data,
+                            time_step_index=time_step_index,
+                            iterate_index=iterate_index,
+                        ),
+                    )
+                )
+            except KeyError:
+                pass
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+            try:
+                data.append(
+                    (
+                        self.g,
+                        f"{flux_name}_norm",
+                        pp.get_solution_values(
+                            f"{flux_name}_norm",
+                            self.g_data,
+                            time_step_index=time_step_index,
+                            iterate_index=iterate_index,
+                        ),
+                    )
+                )
+            except KeyError:
+                pass
+
         return data
 
 

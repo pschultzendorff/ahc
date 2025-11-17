@@ -124,6 +124,12 @@ else:
         provided by a mixin of instance :class:`SolutionStrategyTPF`.
 
         """
+        cap_potential_key: str
+        """Keyword to define parameters and discretizations for the capillary pressure
+        potential flux. Normally provided by a mixin of instance
+        :class:`SolutionStrategyTPF`.
+
+        """
         params_key: str
         """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
 
