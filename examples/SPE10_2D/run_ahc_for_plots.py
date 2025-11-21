@@ -316,7 +316,7 @@ def read_data(config: SimulationConfig) -> SimulationStatistics:
             num_nl_iterations = time_step["num_iteration"]
             spat_estimator = time_step["spatial_est"]
             temp_estimator = time_step["temp_est"]
-            lin_estimator = time_step["linearization_est"]
+            lin_estimator = time_step["lin_est"]
 
         # Append data to the statistics object.
         statistics.time_steps.append(time_step["current time"])
@@ -461,7 +461,7 @@ def plot_estimators(
                 "rv-",
                 markersize=4,
                 fillstyle="none",
-                label=r"$\eta_{temp}$" if i == 0 else "",
+                label=r"$\eta_{\mathrm{temp}}$" if i == 0 else "",
             )
 
         # Update number of nl iterations.

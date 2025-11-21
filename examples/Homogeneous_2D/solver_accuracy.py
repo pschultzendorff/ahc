@@ -221,7 +221,7 @@ class SolverStatisticsHCAcc(SolverStatisticsHC):
                         self.spatial_est,
                         self.temp_est,
                         self.hc_est,
-                        self.linearization_est,
+                        self.lin_est,
                         self.global_energy_norm,
                         self.equilibrated_flux_mismatch,
                         self.accuracies,
@@ -670,7 +670,12 @@ for i, (
         # Plot estimators.
         for est, est_name in zip(
             [spatial_est, temp_est, hc_est, lin_est],
-            [r"$\eta_{spat}$", r"$\eta_{temp}$", r"$\eta_{cont}$", r"$\eta_{lin}$"],
+            [
+                r"$\eta_{\mathrm{spat}}$",
+                r"$\eta_{\mathrm{temp}}$",
+                r"$\eta_{\mathrm{HC}}$",
+                r"$\eta_{\mathrm{lin}}$",
+            ],
         ):
             ax3.plot(est, label=est_name)
 

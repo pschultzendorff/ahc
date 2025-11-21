@@ -155,9 +155,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         )
 
         def integrand(x: np.ndarray, fv_coeffs: np.ndarray) -> np.ndarray:
-            diff_coeffs = fv_coeffs - equil_coeffs
-            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
-            return np.linalg.norm(diff_flux, axis=-1)
+            coeffs_diff = fv_coeffs - equil_coeffs
+            flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
+            return np.linalg.norm(flux_diff, axis=-1)
 
         # Integrate in space at current and previous time step and store the result.
         for time_step in ["_new", "_old"]:
@@ -251,7 +251,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             iterate_index=0,
         )
 
-    def local_darcy_est(self, flux_name: FLUX_NAME) -> None:
+    def local_darcy_est(self, flux_name: FLUX_NAME, flux_specifier: str = "") -> None:
         r"""Calculate and store the local Darcy estimator for each element at the
          current time and the inner product between current and previous time step.
 
@@ -313,6 +313,8 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         for phase in phases:
             # Non-upwinded mobilities.
+            # TODO These are saved in reconstruction, just use those. Then HC can also
+            # be changed.
             phase_mobilities_new[phase.name] = (
                 self.rel_perm(  # type: ignore
                     self.wetting.s,
@@ -386,7 +388,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         ) -> np.ndarray:
             fv_flux_new = self._evaluate_flux_at_points(
                 pp.get_solution_values(
-                    f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
+                    f"{flux_name}{flux_specifier}_RT0_coeffs",
+                    self.g_data,
+                    iterate_index=0,
                 ),
                 x[..., 0],
                 x[..., 1],
@@ -395,8 +399,6 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 x, pressure_coeffs_new, phase_mobilities_new
             )
 
-            # FIXME The diff is almost equal to rec_flux_new. This doesn't seem quite
-            # right.
             flux_diff_new = fv_flux_new - rec_flux_new
 
             if specifier == "_norm":
@@ -497,7 +499,6 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         for phase in phases:
             # Non-upwinded mobilities.
-            # TODO These are saved in reconstruction, just use those.
             phase_mobilities_new[phase.name] = (
                 self.rel_perm(  # type: ignore
                     self.wetting.s,
@@ -663,7 +664,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         flux_y: np.ndarray = coeffs[..., 0] * y + coeffs[..., 2]
         return np.stack([flux_x, flux_y], axis=-1)
 
-    def local_saturation_pressure_est(self) -> None:
+    def local_sp_est(self) -> None:
         coeffs_new: np.ndarray = pp.get_solution_values(
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
@@ -831,8 +832,8 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             inner = pp.get_solution_values(inner_key, self.g_data, iterate_index=0)
             old = pp.get_solution_values(norm_key, self.g_data, time_step_index=0)
 
-            # Estimate time integral with quadrature rule for linear functions. NOTE The
-            # stored values are already squared.
+            # Estimate time integral with quadrature rule for linear functions.
+            # NOTE The stored values are already squared.
             estimators[flux_name] = self.time_manager.dt / 3 * (new + inner + old).sum()
 
             logger.info(
@@ -842,7 +843,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         return estimators[TOTAL_FLUX], estimators[WETTING_FLUX]
 
-    def global_saturation_pressure_est(self) -> float:
+    def global_sp_est(self) -> float:
         r"""Compute the global saturation-pressure estimator by summing local
          contributions and integrating in time.
 
@@ -854,7 +855,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         """
 
-        self.local_saturation_pressure_est()
+        self.local_sp_est()
 
         # Load local spatial integrals from current and previous time step and
         # combined inner-product.
@@ -874,10 +875,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         return est
 
-    def global_darcy_and_saturation_pressure_est(self) -> float:
+    def global_darcy_and_sp_est(self) -> float:
         r"""Compute the combined global Darcy and saturation-pressure error estimator."""
         est_total, est_wetting = self.global_darcy_est()
-        est_saturation_pressure = self.global_saturation_pressure_est()
+        est_saturation_pressure = self.global_sp_est()
         combined_est = (est_total + est_wetting + est_saturation_pressure) ** 0.5
         logger.info(
             "Combined global Darcy and saturation-pressure error estimator:"
@@ -956,10 +957,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
 # This could also be a mixin, but by subclassing ``SolutionStrategyReconstruction``, we
 # avoid having to pay attention to the order of the different solution strategy classes.
-# EstimatesProtocol and SolutionStrategyReconstruction define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+#
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class SolutionStrategyEst(  # type: ignore
     EstimatesProtocol,
     SolutionStrategyRec,
@@ -1022,10 +1023,7 @@ class SolutionStrategyEst(  # type: ignore
         )
         residual_and_flux_est = self.global_res_and_flux_est()
         total_darcy_est, wetting_darcy_est = self.global_darcy_est()
-        saturation_pressure_est = self.global_saturation_pressure_est()
-        darcy_and_saturation_pressure_est = (
-            self.global_darcy_and_saturation_pressure_est()
-        )
+        sp_est = self.global_sp_est()
         global_energy_norm: float = self.global_energy_norm()
 
         self.nonlinear_solver_statistics.log_error(
@@ -1036,7 +1034,7 @@ class SolutionStrategyEst(  # type: ignore
                 TOTAL_FLUX: total_darcy_est,
                 WETTING_FLUX: wetting_darcy_est,
             },
-            saturation_pressure_est=saturation_pressure_est,
+            sp_est=sp_est,
             global_energy_norm=global_energy_norm,
         )
         return converged, diverged
@@ -1206,10 +1204,9 @@ class DataSavingEst(DataSavingRec):
         return data
 
 
-# EstimatesProtocol and SolutionStrategyReconstruction define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class TwoPhaseFlowErrorEstimate(  # type: ignore
     ErrorEstimateMixin,
     SolutionStrategyEst,

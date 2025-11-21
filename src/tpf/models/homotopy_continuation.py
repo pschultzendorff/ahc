@@ -1,3 +1,4 @@
+import functools
 import itertools
 import logging
 import typing
@@ -49,16 +50,15 @@ logger = logging.getLogger(__name__)
 np.seterr(under="ignore")
 
 
-# ``HCProtocol`` and ``TPFProtocol`` define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
     """
 
 
     Note: As an alternate construction, the phase and total fluxes could be calculated
-    both in terms of the target and starting relative permeabilities, and then added
+    both in terms of the goal and starting relative permeabilities, and then added
     together, weighted by the homotopy parameter. If evaluation of operators in PorePy
     would be more efficient (i.e., reusing already evaluated expressions), this could
     save time. Currently, this would require double evaluation of the pressure
@@ -83,10 +83,10 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         # Ignore mypy complaining about incompatible signature with supertype.
     ) -> pp.ad.Operator:  # type: ignore[override]
         # Return homotopy continuation relative permeability.
-        # Mypy gives an error here, because it thinks the empty ``HCProtocol.rel_perm``
-        # is called. During runtime, ``HCProtocol`` does not have this method, hence we
-        # can ignore the error. Additionally, we ignore complaints about the wrong
-        # number of arguments and wrong arguemnt types.
+        #
+        # mypy incorrectly assumes ``HCProtocol.rel_perm`` exists and is called. At
+        # runtime, ``HCProtocol`` lacks this method, so we ignore type errors, including
+        # wrong argument count and types.
         rel_perm_1: pp.ad.Operator = super().rel_perm(  # type: ignore
             saturation_w,  # type: ignore
             phase,  # type: ignore
@@ -130,10 +130,9 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         return self.hc_toggle_fl * hc_rel_perm + (1 - self.hc_toggle_fl) * rel_perm_2
 
 
-# ``HCProtocol`` and ``TPFProtocol`` define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
     @typing.override
     def set_cap_press_constants(self) -> None:
@@ -155,10 +154,10 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
         # Ignore mypy complaining about incompatible signature with supertype.
     ) -> pp.ad.Operator:  # type: ignore[override]
         # Return homotopy continuation capillary pressure.
-        # Mypy gives an error here, because it thinks the empty ``HCProtocol.cap_press``
-        # is called. During runtime, ``HCProtocol`` does not have this method, hence we
-        # can ignore the error. Additionally, we ignore complaints about the wrong
-        # number of arguments and wrong arguemnt types.
+        #
+        # # mypy incorrectly assumes ``HCProtocol.cap_press`` exists and is called. At
+        # runtime, ``HCProtocol`` lacks this method, so we ignore type errors, including
+        # wrong argument count and types.
         cap_press_1: pp.ad.Operator = super().cap_press(  # type: ignore
             saturation_w,  # type: ignore
             cap_press_constants=self._cap_press_constants_1,  # type: ignore
@@ -202,8 +201,8 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
         )
         return self.hc_toggle_fl * hc_cap_press + (1 - self.hc_toggle_fl) * cap_press_2
 
-    # Ensure that global and complementary pressure tables are calculated with the
-    # target capillary pressure function.
+    # Ensure that global/complementary interpolation values are calculated with the
+    # goal capillary pressure function.
     @typing.override
     def cap_press_deriv_np(
         self,
@@ -216,14 +215,40 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
         )
 
 
-# The various protocols define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class EstimatesHCMixin(
     HCProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
 ):  # type: ignore
-    def local_temp_est(self, flux_name: str) -> None:
+    def local_nc_est(self, flux_name: FLUX_NAME) -> None:
+        """Calculate the local-in-space nonconformity error estimators.
+
+        Note:
+            Since the scaled post-processed pressure potentials are equal to the fluxes
+            w.r.t. goal constitutive laws, this is just the Darcy estimator with
+            - reconstructed fluxes w.r.t. goal const. laws;
+            - mobilities w.r.t. goal rel. perms. for scaling the pressure gradient.
+            Both can be achieved without changing :meth:`local_darcy_est`.
+
+        We assume the following sub-dictionaries to be present in the data dictionary:
+            ``iterate_dictionary``, storing all parameters.
+                Stored in ``data[pp.ITERATE_SOLUTIONS]``.
+
+        The following entries in ``iterate_dictionary`` will be updated:
+            - ``{flux_name}_D_estimator``, storing the local time error estimator.
+
+        """
+        # Since :meth:`local_darcy_est` evaluates mobilities, switch to goal rel. perms.
+        self.hc_toggle_fl = 0.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
+
+        self.local_darcy_est(flux_name, flux_specifier="_wrt_goal_const_laws")
+
+        self.hc_toggle_fl = 1.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
+
+    def local_temp_est(self, flux_name: FLUX_NAME) -> None:
         r"""Calculate the local-in-space temporal error estimators.
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -231,7 +256,7 @@ class EstimatesHCMixin(
                 Stored in ``data[pp.ITERATE_SOLUTIONS]``.
 
         The following entries in ``iterate_dictionary`` will be updated:
-            - ``{flux_name}_T_estimator``, storing the local time error estimator.
+            - ``{flux_name}_T_estimator``, storing the local temporal error estimator.
 
         Note: The local estimators read
 
@@ -257,22 +282,22 @@ class EstimatesHCMixin(
             flux_name: Name of the flux to calculate the estimator for.
 
         """
-        # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
+        # Retrieve flux coeffs at current iterate and at previous time step.
         fv_coeffs_new = pp.get_solution_values(
-            f"{flux_name}_wrt_goal_rel_perm_RT0_coeffs",
+            f"{flux_name}_RT0_coeffs",
             self.g_data,
             iterate_index=0,
         )
         fv_coeffs_old = pp.get_solution_values(
-            f"{flux_name}_wrt_goal_rel_perm_RT0_coeffs",
+            f"{flux_name}_RT0_coeffs",
             self.g_data,
             time_step_index=0,
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            diff_coeffs = fv_coeffs_new - fv_coeffs_old
-            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
-            return np.linalg.norm(diff_flux, axis=-1)
+            coeffs_diff = fv_coeffs_new - fv_coeffs_old
+            flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
+            return np.sum(flux_diff**2, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -288,7 +313,7 @@ class EstimatesHCMixin(
             iterate_index=0,
         )
 
-    def local_hc_est(self, flux_name: str) -> None:
+    def local_hc_est(self, flux_name: FLUX_NAME) -> None:
         """
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -301,35 +326,70 @@ class EstimatesHCMixin(
 
         """
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
-        fv_coeffs = pp.get_solution_values(
+        fv_coeffs_new = pp.get_solution_values(
             f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
         )
-        fv_goal_rel_perm_coeffs = pp.get_solution_values(
-            f"{flux_name}_wrt_goal_rel_perm_RT0_coeffs",
+        fv_goal_const_laws_coeffs_new = pp.get_solution_values(
+            f"{flux_name}_wrt_goal_const_laws_RT0_coeffs", self.g_data, iterate_index=0
+        )
+        fv_coeffs_old = pp.get_solution_values(
+            f"{flux_name}_RT0_coeffs", self.g_data, time_step_index=0
+        )
+        fv_goal_const_laws_coeffs_old = pp.get_solution_values(
+            f"{flux_name}_wrt_goal_const_laws_RT0_coeffs",
             self.g_data,
-            iterate_index=0,
+            time_step_index=0,
         )
 
-        def integrand(x: np.ndarray) -> np.ndarray:
-            diff_coeffs = fv_coeffs - fv_goal_rel_perm_coeffs
-            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
-            return np.linalg.norm(diff_flux, axis=-1)
+        def integrand(
+            x: np.ndarray,
+            specifier: Literal["_norm", "_inner_product"],
+        ) -> np.ndarray:
+            differences: list[np.ndarray] = []
+
+            for i, (fv_coeffs, fv_goal_const_laws_coeffs) in enumerate(
+                [
+                    (fv_coeffs_new, fv_goal_const_laws_coeffs_new),
+                    (fv_coeffs_old, fv_goal_const_laws_coeffs_old),
+                ]
+            ):
+                # The norm of the previous difference was already computed during the
+                # last time step.
+                if specifier == "_norm" and i == 1:
+                    break
+
+                coeffs_diff = fv_coeffs - fv_goal_const_laws_coeffs
+                flux_diff = self._evaluate_flux_at_points(
+                    coeffs_diff, x[..., 0], x[..., 1]
+                )
+
+                differences.append(flux_diff)
+
+            # Some trickery to either return the norm or the inner product.
+            if specifier == "_norm":
+                return differences[0] ** 2
+            elif specifier == "_inner_product":
+                return differences[0] * differences[1]
 
         # Integrate elementwise and store the result.
-        integral: Integral = self.quadrature_est.integrate(
-            integrand,
-            self.quadpy_elements,
-            recalc_points=False,
-            recalc_volumes=False,
-        )
-        pp.set_solution_values(
-            f"{flux_name}_C_estimator",
-            integral.elementwise.squeeze(),
-            self.g_data,
-            iterate_index=0,
-        )
+        for specifier in ("_norm", "_inner_product"):
+            specifier = typing.cast(
+                Literal["_norm", "_inner_product"], specifier
+            )  # Satisfy mypy.
+            integral: Integral = self.quadrature_est.integrate(
+                functools.partial(integrand, specifier=specifier),
+                self.quadpy_elements,
+                recalc_points=False,
+                recalc_volumes=False,
+            )
+            pp.set_solution_values(
+                f"C_estimator{specifier}",
+                integral.elementwise.squeeze(),
+                self.g_data,
+                iterate_index=0,
+            )
 
-    def local_linearization_est(self, flux_name: str) -> None:
+    def local_lin_est(self, flux_name: FLUX_NAME) -> None:
         """
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -352,9 +412,9 @@ class EstimatesHCMixin(
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            diff_coeffs = fv_coeffs - fv_equil_coeffs
-            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
-            return np.linalg.norm(diff_flux, axis=-1)
+            coeffs_diff = fv_coeffs - fv_equil_coeffs
+            flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
+            return np.sum(flux_diff**2, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -412,11 +472,25 @@ class EstimatesHCMixin(
             logger.info(f"Global residual error estimator: {est}")
             return est
 
+    def global_nc_est(self) -> tuple[float, float]:
+        """Global nonconformity error estimates.
+
+        Note:
+            This is just the global Darcy error estimates with the changes described in
+            :meth:`local_nc_est`. This method is provided only for clarity in naming.
+
+        """
+        return self.global_darcy_est()
+
+    def global_nc_and_sp_est(self) -> float:
+        # In ``EstimatesProtocol``, this method is abstract, which mypy complains about.
+        return super().global_darcy_and_sp_est()  # type: ignore
+
     def global_spatial_est(self) -> float:
         """Evaluate the global spatial discretization error estimator."""
         residual_est = self.global_res_est()
-        darcy_and_sp_est = self.global_darcy_and_saturation_pressure_est()
-        est = residual_est + darcy_and_sp_est
+        nc_and_sp_est = self.global_nc_and_sp_est()
+        est = residual_est + nc_and_sp_est
         logger.info(f"Global spatial discretization error estimator: {est}")
         return est
 
@@ -441,11 +515,11 @@ class EstimatesHCMixin(
         logger.info(f"Global temporal discretization error estimator: {est}")
         return est
 
-    def global_discretization_est(self) -> float:
+    def global_discr_est(self) -> float:
         """Evaluate the global discretization error estimator."""
-        spatial_est = self.nonlinear_solver_statistics.spatial_est[-1][-1]
+        spat_est = self.nonlinear_solver_statistics.spatial_est[-1][-1]
         temp_est = self.nonlinear_solver_statistics.temp_est[-1][-1]
-        est = spatial_est + temp_est
+        est = spat_est + temp_est
         logger.info(f"Global discretization error estimator: {est}")
         return est
 
@@ -464,24 +538,30 @@ class EstimatesHCMixin(
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_hc_est(flux_name)
-            local_integral: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_C_estimator", self.g_data, iterate_index=0
-            )
 
-            # NOTE The stored values are squared, hence we do not need to square here.
-            global_integral: float = local_integral.sum()
-            # Integrate in time by multiplying constant value with time step size.
-            estimators.append(self.time_manager.dt * global_integral)
+            norm_key = f"{flux_name}_C_estimator_norm"
+            inner_key = f"{flux_name}_C_estimator_inner_product"
+
+            # Load local spatial integrals from current and previous time step and
+            # combined inner-product.
+            new = pp.get_solution_values(norm_key, self.g_data, iterate_index=0)
+            inner = pp.get_solution_values(inner_key, self.g_data, iterate_index=0)
+            old = pp.get_solution_values(norm_key, self.g_data, time_step_index=0)
+
+            # Estimate time integral with quadrature rule for linear functions.
+            # NOTE The stored values are already squared.
+            estimators.append(self.time_manager.dt / 3 * (new + inner + old).sum())
+
         # Sum estimators for both equations.
         est: float = sum(estimators) ** (1 / 2)
         logger.info(f"Global continuation error estimator: {est}")
         return est
 
-    def global_linearization_est(self) -> float:
+    def global_lin_est(self) -> float:
         estimators: list[float] = []
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
-            self.local_linearization_est(flux_name)
+            self.local_lin_est(flux_name)
             local_integral: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_L_estimator", self.g_data, iterate_index=0
             )
@@ -500,17 +580,12 @@ class EstimatesHCMixin(
         continuation, and linearization components.
 
         """
-        return (
-            self.global_discretization_est()
-            + self.global_hc_est()
-            + self.global_linearization_est()
-        )
+        return self.global_discr_est() + self.global_hc_est() + self.global_lin_est()
 
 
-# The various protocols define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class SolutionStrategyAHC(
     HCProtocol, EstimatesProtocol, ReconstructionProtocol, SolutionStrategyTPF
 ):  # type: ignore
@@ -550,7 +625,7 @@ class SolutionStrategyAHC(
         self.hc_toggle_fl = 0.0
         self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
-        # This is mixed with more Solutionstrategies that implement
+        # This is mixed with more ``SolutionStrategy`` classes that implement
         # ``prepare_simulation``. We ignore the mypy error.
         super().prepare_simulation()  # type: ignore
 
@@ -599,8 +674,7 @@ class SolutionStrategyAHC(
         # NOTE The super call does **NOT** set initial values for the local flux,
         # residual, and nonconformity estimators at the ``hc_index``. This is never
         # needed, hence not an issue.
-        # In ``EstimatesProtocol``, this method is abstract and
-        # not implemented, which mypy complains about
+        # In ``EstimatesProtocol``, this method is abstract, which mypy complains about.
         super().set_initial_estimators()  # type: ignore
 
         # Initialize iterate values for local estimators.
@@ -765,7 +839,7 @@ class SolutionStrategyAHC(
             # discretization error.
             if hc_params["hc_adaptive"]:
                 hc_est: float = self.nonlinear_solver_statistics.hc_est[-1][-1]
-                discr_est: float = self.global_discretization_est()
+                discr_est: float = self.global_discr_est()
                 if hc_est <= hc_params["hc_error_ratio"] * discr_est:
                     logger.info(
                         f"HC converged with HC error {hc_est} smaller than "
@@ -902,38 +976,30 @@ class SolutionStrategyAHC(
         # would avoid one Newton iteration.
 
     def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
-        """Calculate numerical fluxes w.r.t. the goal relative permeabilities.
-
-        This is done for the fluxes used in pressure reconstruction as well as for
-        the fluxes used in the continuation estimator.
-
-        """
+        """Calculate fluxes and mobilities w.r.t. the goal relative permeabilities."""
         # Ignore Pylance complaining about the method not being implemented.
         super().eval_postproc_qtys(time_step_index=time_step_index)  # type: ignore
 
-        # Save FV P0 pressures.
-        self.eval_glob_compl_pressure_on_domain(time_step_index=time_step_index)
-
-        # Switch rel. perm. to goal rel. perm, calculate fluxes.
+        # Switch const. laws to goal const. laws before evaluating the quantities.
         self.hc_toggle_fl = 0.0
         self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
-        for flux_name in [
+        for quantity_name in [
             TOTAL_FLUX,
             WETTING_FLUX,
-            TOTAL_FLUX + "_by_t_mobility",
-            TOTAL_FLUX + "_times_fractional_flow",
+            "total_mobility",
+            "fractional_flow",
         ]:
-            flux = self.postproc_ad_ops[flux_name].value(self.equation_system)
+            quantity = self.postproc_ad_ops[quantity_name].value(self.equation_system)
             pp.set_solution_values(
-                f"{flux_name}_wrt_goal_rel_perm",
-                flux,  # type: ignore
+                f"{quantity_name}_wrt_goal_const_laws",
+                quantity,  # type: ignore
                 self.g_data,
                 time_step_index=time_step_index,  # TODO Is saving at time step needed?
                 iterate_index=0,
             )
 
-        # Switch back to hc rel perm.
+        # Switch back to HC const. laws.
         self.hc_toggle_fl = 1.0
         self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
@@ -950,18 +1016,14 @@ class SolutionStrategyAHC(
                 # Saturation precedes pressure in nonlinear_increment as required by
                 # ``equilibrate_flux_during_Newton``.
                 self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
-
-                # Extend equilibrated fluxes.
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
 
-        # NOTE The fluxes w.r.t. goal rel. perm are only used to post-process the global
-        # and complementary pressures and in the contination estimators and do not need
-        # to be equilibrated.
+        # NOTE The fluxes w.r.t. goal const. laws are only used to post-process the
+        # global and complementary pressures and in the contination estimators and do
+        # not require equilibration.
         for flux_name, flux_specifier in (
-            (TOTAL_FLUX, "_wrt_goal_rel_perm"),
-            (WETTING_FLUX, "_wrt_goal_rel_perm"),
-            (TOTAL_FLUX, "_by_t_mobility" + "_wrt_goal_rel_perm"),
-            (TOTAL_FLUX, "_times_fractional_flow" + "_wrt_goal_rel_perm"),
+            (TOTAL_FLUX, "_wrt_goal_const_laws"),
+            (WETTING_FLUX, "_wrt_goal_const_laws"),
         ):
             flux_name = typing.cast(FLUX_NAME, flux_name)  # Satisfy mypy.
             self.extend_fv_fluxes(
@@ -973,7 +1035,7 @@ class SolutionStrategyAHC(
         for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
             self.postprocess_pressure_vohralik(
                 pressure_key,
-                flux_specifier="_wrt_goal_rel_perm",
+                flux_specifier="_wrt_goal_const_laws",
                 prepare_simulation=prepare_simulation,
             )
             self.reconstruct_pressure_vohralik(
@@ -1004,7 +1066,7 @@ class SolutionStrategyAHC(
         # NOTE The following does not need to be evaluated when hc_params["hc_adaptive"]
         # is False. However, to compare HC and apdative HC, we still evaluate it.
         hc_est: float = self.global_hc_est()
-        linearization_est: float = self.global_linearization_est()
+        lin_est: float = self.global_lin_est()
         self.nonlinear_solver_statistics.log_error(
             # NOTE The discretization error estimate does not need to be calculated
             # at this point. After HC convergence is sufficient if we want the code
@@ -1014,7 +1076,7 @@ class SolutionStrategyAHC(
             spatial_est=self.global_spatial_est(),
             temp_est=self.global_temp_est(),
             hc_est=hc_est,
-            linearization_est=linearization_est,
+            lin_est=lin_est,
         )
 
         # Switch rel. perm. back.
@@ -1031,11 +1093,11 @@ class SolutionStrategyAHC(
             # criterion might incorrectly stop the HC loop. Hence, we check that the
             # nonlinear increment norm is not too large.
             if (
-                linearization_est <= nl_params["nl_error_ratio"] * hc_est
+                lin_est <= nl_params["nl_error_ratio"] * hc_est
                 and nonlinear_increment_norm <= nl_params["hc_nl_convergence_tol"]
             ):
                 logger.info(
-                    f"Linearization error {linearization_est} smaller than"
+                    f"Linearization error {lin_est} smaller than"
                     + f" {nl_params['nl_error_ratio']} * HC error {hc_est}."
                     + " Stopping Newton loop."
                 )

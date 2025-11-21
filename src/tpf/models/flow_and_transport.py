@@ -780,9 +780,9 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
         # )
 
 
-# TPF and pp.SolutionStrategy define different types for ``nonlinear_solver_statistics``
-# and cause a MyPy error. This is not a problem in practice, but
-# ``nonlinear_solver_statistics`` needs to be called with care. We ignore the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
     @typing.override
     def __init__(self, params: dict | None) -> None:

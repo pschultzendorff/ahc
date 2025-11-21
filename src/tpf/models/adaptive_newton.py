@@ -94,9 +94,9 @@ class ErrorEstimateANewtonMixin(
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            diff_coeffs = fv_coeffs_new - fv_coeffs_old
-            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
-            return np.linalg.norm(diff_flux, axis=-1)
+            coeffs_diff = fv_coeffs_new - fv_coeffs_old
+            flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
+            return np.linalg.norm(flux_diff, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -112,7 +112,7 @@ class ErrorEstimateANewtonMixin(
             iterate_index=0,
         )
 
-    def local_linearization_est(self, flux_name: FLUX_NAME) -> None:
+    def local_lin_est(self, flux_name: FLUX_NAME) -> None:
         """
 
         We assume the following sub-dictionaries to be present in the data dictionary:
@@ -133,9 +133,9 @@ class ErrorEstimateANewtonMixin(
         )
 
         def integrand(x: np.ndarray) -> np.ndarray:
-            diff_coeffs = fv_coeffs - fv_equil_coeffs
-            diff_flux = self._evaluate_flux_at_points(diff_coeffs, x[..., 0], x[..., 1])
-            return np.linalg.norm(diff_flux, axis=-1)
+            coeffs_diff = fv_coeffs - fv_equil_coeffs
+            flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
+            return np.linalg.norm(flux_diff, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -196,7 +196,7 @@ class ErrorEstimateANewtonMixin(
     def global_spatial_est(self) -> float:
         """Evaluate the global spatial discretization error estimator."""
         residual_est = self.global_res_est()
-        darcy_and_sp_est = self.global_darcy_and_saturation_pressure_est()
+        darcy_and_sp_est = self.global_darcy_and_sp_est()
         est = residual_est + darcy_and_sp_est
         logger.info(f"Global spatial discretization error estimator: {est}")
         return est
@@ -223,7 +223,7 @@ class ErrorEstimateANewtonMixin(
         logger.info(f"Global temporal discretization error estimator: {est}")
         return est
 
-    def global_discretization_est(self) -> float:
+    def global_discr_est(self) -> float:
         """Evaluate the global discretization error estimator."""
         spatial_est = self.nonlinear_solver_statistics.spatial_est[-1]
         temp_est = self.nonlinear_solver_statistics.temp_est[-1]
@@ -231,7 +231,7 @@ class ErrorEstimateANewtonMixin(
         logger.info(f"Global discretization error estimator: {est}")
         return est
 
-    def global_linearization_est(self) -> float:
+    def global_lin_est(self) -> float:
         r"""Compute the global linearization error estimate.
 
 
@@ -243,7 +243,7 @@ class ErrorEstimateANewtonMixin(
         estimators: list[float] = []
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
-            self.local_linearization_est(flux_name)
+            self.local_lin_est(flux_name)
             local_integral: np.ndarray = pp.get_solution_values(
                 f"{flux_name}_L_estimator", self.g_data, iterate_index=0
             )
@@ -264,8 +264,7 @@ class SolutionStrategyANewtonMixin(
 ):
     def set_initial_estimators(self) -> None:
         """Initialize iterate and time step values for additional error estimators."""
-        # In ``EstimatesProtocol``, this method is abstract and
-        # not implemented, which mypy complains about
+        # In ``EstimatesProtocol``, this method is abstract, which mypy complains about.
         super().set_initial_estimators()  # type: ignore
         for flux_name, estimator_name in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
@@ -298,14 +297,14 @@ class SolutionStrategyANewtonMixin(
             nl_params,
         )
 
-        linearization_est: float = self.global_linearization_est()
+        lin_est: float = self.global_lin_est()
         self.nonlinear_solver_statistics.log_error(
             # NOTE The discretization error estimate does not need to be calculated
             # at this point. After HC convergence is sufficient if we want the code
             # to be more efficient.
             spatial_est=self.global_spatial_est(),
             temp_est=self.global_temp_est(),
-            linearization_est=linearization_est,
+            lin_est=lin_est,
         )
 
         # Adaptive stopping criterion.
@@ -313,16 +312,16 @@ class SolutionStrategyANewtonMixin(
             nonlinear_increment_norm: float = self.compute_nonlinear_increment_norm(  # type: ignore
                 nonlinear_increment
             )
-            discretization_est: float = self.global_discretization_est()
+            discretization_est: float = self.global_discr_est()
             # If Newton diverges, the estimators lose their meaning and the adaptive
             # criterion might incorrectly stop the HC loop. Hence, we check that the
             # nonlinear increment norm is not too large.
             if (
-                linearization_est <= nl_params["nl_error_ratio"] * discretization_est
+                lin_est <= nl_params["nl_error_ratio"] * discretization_est
                 and nonlinear_increment_norm <= nl_params["nl_adaptive_convergence_tol"]
             ):
                 logger.info(
-                    f"Linearization error {linearization_est} smaller than"
+                    f"Linearization error {lin_est} smaller than"
                     + f" {nl_params['nl_error_ratio']} * discretization error"
                     + f" {discretization_est}. Stopping Newton loop."
                 )

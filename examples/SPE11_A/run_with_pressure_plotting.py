@@ -341,7 +341,7 @@ def run_simulation(config: SimulationConfig) -> None:
         ]:
             plot_pressure(pressure)
 
-        global_pressure_diff_coeffs: np.ndarray = pp.get_solution_values(
+        global_pressure_coeffs_diff: np.ndarray = pp.get_solution_values(
             "global_pressure_coeffs_rec",
             model.mdg.subdomains(return_data=True)[0][1],
             iterate_index=0,
@@ -354,26 +354,26 @@ def run_simulation(config: SimulationConfig) -> None:
         plot_quadratic_pressures(
             model.g,
             model.domain.bounding_box,
-            global_pressure_diff_coeffs,
+            global_pressure_coeffs_diff,
             title="Global pressure difference reconstructed - postprocessed",
             save_path=config.folder_name / "global_pressure_difference.png",
         )
         global_pressure_diff_deriv_x_coeffs: np.ndarray = np.zeros_like(
-            global_pressure_diff_coeffs
+            global_pressure_coeffs_diff
         )
         global_pressure_diff_deriv_x_coeffs[:, 2] = (
-            2 * global_pressure_diff_coeffs[:, 0]
+            2 * global_pressure_coeffs_diff[:, 0]
         )
-        global_pressure_diff_deriv_x_coeffs[:, 4] = global_pressure_diff_coeffs[:, 1]
-        global_pressure_diff_deriv_x_coeffs[:, 5] = global_pressure_diff_coeffs[:, 2]
+        global_pressure_diff_deriv_x_coeffs[:, 4] = global_pressure_coeffs_diff[:, 1]
+        global_pressure_diff_deriv_x_coeffs[:, 5] = global_pressure_coeffs_diff[:, 2]
         global_pressure_diff_deriv_y_coeffs: np.ndarray = np.zeros_like(
-            global_pressure_diff_coeffs
+            global_pressure_coeffs_diff
         )
         global_pressure_diff_deriv_y_coeffs[:, 4] = (
-            2 * global_pressure_diff_coeffs[:, 3]
+            2 * global_pressure_coeffs_diff[:, 3]
         )
-        global_pressure_diff_deriv_y_coeffs[:, 2] = global_pressure_diff_coeffs[:, 1]
-        global_pressure_diff_deriv_y_coeffs[:, 5] = global_pressure_diff_coeffs[:, 4]
+        global_pressure_diff_deriv_y_coeffs[:, 2] = global_pressure_coeffs_diff[:, 1]
+        global_pressure_diff_deriv_y_coeffs[:, 5] = global_pressure_coeffs_diff[:, 4]
 
         plot_quadratic_pressures(
             model.g,

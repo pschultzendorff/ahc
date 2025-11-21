@@ -140,7 +140,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
     """List of residual and flux error estimates for each non-linear iteration."""
     darcy_est: list[dict[str, float]] = field(default_factory=list)
     """List of Darcy error estimates for each non-linear iteration."""
-    saturation_pressure_est: list[float] = field(default_factory=list)
+    sp_est: list[float] = field(default_factory=list)
     """List of saturation-pressure error estimates for each non-linear iteration."""
     global_energy_norm: list[float] = field(default_factory=list)
     """List of global energy norms for each non-linear iteration."""
@@ -155,12 +155,12 @@ class SolverStatisticsEst(SolverStatisticsRec):
         if (
             "residual_and_flux_est" in kwargs
             and "darcy_est" in kwargs
-            and "saturation_pressure_est" in kwargs
+            and "sp_est" in kwargs
             and "global_energy_norm" in kwargs
         ):
             self.residual_and_flux_est.append(kwargs["residual_and_flux_est"])
             self.darcy_est.append(kwargs["darcy_est"])
-            self.saturation_pressure_est.append(kwargs["saturation_pressure_est"])
+            self.sp_est.append(kwargs["sp_est"])
             self.global_energy_norm.append(kwargs["global_energy_norm"])
         else:
             super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
@@ -171,7 +171,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
         super().reset()
         self.residual_and_flux_est.clear()
         self.darcy_est.clear()
-        self.saturation_pressure_est.clear()
+        self.sp_est.clear()
         self.global_energy_norm.clear()
 
     @typing.override
@@ -196,7 +196,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
                 {
                     "residual_and_flux_est": self.residual_and_flux_est,
                     "darcy_est": self.darcy_est,
-                    "saturation_pressure_est": self.saturation_pressure_est,
+                    "sp_est": self.sp_est,
                     "global_energy_norm": self.global_energy_norm,
                 }
             )
@@ -212,7 +212,7 @@ class SolverStatisticsANewton(SolverStatisticsRec):
     """List of spatial discretization estimates for each non-linear iteration."""
     temp_est: list[float] = field(default_factory=list)
     """List of temporal discretization error estimates for each non-linear iteration."""
-    linearization_est: list[float] = field(default_factory=list)
+    lin_est: list[float] = field(default_factory=list)
     """List of linearization error estimates for each non-linear iteration."""
 
     @typing.override
@@ -222,16 +222,12 @@ class SolverStatisticsANewton(SolverStatisticsRec):
         residual_norm: float | None = None,
         **kwargs,
     ) -> None:
-        if (
-            "spatial_est" in kwargs
-            and "temp_est" in kwargs
-            and "linearization_est" in kwargs
-        ):
+        if "spatial_est" in kwargs and "temp_est" in kwargs and "lin_est" in kwargs:
             self.spatial_est.append(kwargs["spatial_est"])
             self.temp_est.append(
                 kwargs["temp_est"],
             )
-            self.linearization_est.append(kwargs["linearization_est"])
+            self.lin_est.append(kwargs["lin_est"])
         else:
             super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
 
@@ -241,7 +237,7 @@ class SolverStatisticsANewton(SolverStatisticsRec):
         super().reset()
         self.spatial_est.clear()
         self.temp_est.clear()
-        self.linearization_est.clear()
+        self.lin_est.clear()
 
     @typing.override
     def save(self) -> None:
@@ -265,7 +261,7 @@ class SolverStatisticsANewton(SolverStatisticsRec):
                 {
                     "spatial_est": self.spatial_est,
                     "temp_est": self.temp_est,
-                    "linearization_est": self.linearization_est,
+                    "lin_est": self.lin_est,
                 }
             )
 
@@ -318,7 +314,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
     iterations, inner list are non-linear iterations.
 
     """
-    linearization_est: list[list[float]] = field(default_factory=list)
+    lin_est: list[list[float]] = field(default_factory=list)
     """List of list of linearization error estimates. Outer list are HC iterations,
     inner list are non-linear iterations.
 
@@ -343,7 +339,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
             and "spatial_est" in kwargs
             and "temp_est" in kwargs
             and "hc_est" in kwargs
-            and "linearization_est" in kwargs
+            and "lin_est" in kwargs
         ):
             self.global_energy_norm[-1].append(kwargs["global_energy_norm"])
             self.equilibrated_flux_mismatch[-1].append(
@@ -352,7 +348,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
             self.spatial_est[-1].append(kwargs["spatial_est"])
             self.temp_est[-1].append(kwargs["temp_est"])
             self.hc_est[-1].append(kwargs["hc_est"])
-            self.linearization_est[-1].append(kwargs["linearization_est"])
+            self.lin_est[-1].append(kwargs["lin_est"])
         else:
             super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
 
@@ -375,7 +371,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
         self.spatial_est.append([])
         self.temp_est.append([])
         self.hc_est.append([])
-        self.linearization_est.append([])
+        self.lin_est.append([])
         self.global_energy_norm.append([])
         self.equilibrated_flux_mismatch.append([])
 
@@ -390,7 +386,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
         self.spatial_est.clear()
         self.hc_est.clear()
         self.temp_est.clear()
-        self.linearization_est.clear()
+        self.lin_est.clear()
         self.global_energy_norm.clear()
         self.equilibrated_flux_mismatch.clear()
 
@@ -443,7 +439,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                         self.spatial_est,
                         self.temp_est,
                         self.hc_est,
-                        self.linearization_est,
+                        self.lin_est,
                         self.global_energy_norm,
                         self.equilibrated_flux_mismatch,
                     )

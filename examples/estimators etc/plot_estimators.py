@@ -16,19 +16,19 @@ for hc_setup in ["linear to Corey", "linear to linear", "Corey to Corey"]:
 
     discretization_est: list[float] = []
     hc_est: list[float] = []
-    linearization_est: list[float] = []
+    lin_est: list[float] = []
     for time_step in list(history.values())[1:]:
         for nl_step in list(time_step.values()):
             if isinstance(nl_step, int):
                 continue
             discretization_est.extend(nl_step["discretization_error_estimates"])
             hc_est.extend(nl_step["hc_error_estimates"])
-            linearization_est.extend(nl_step["linearization_error_estimates"])
+            lin_est.extend(nl_step["linearization_error_estimates"])
 
     fig, ax = plt.subplots()
     ax.semilogy(discretization_est, label="Discretization estimator")
     ax.semilogy(hc_est, label="HC estimator")
-    ax.semilogy(linearization_est, label="Linearization estimator")
+    ax.semilogy(lin_est, label="Linearization estimator")
     ax.set_xlabel("Nonlinear iteration")
     ax.set_ylabel("Estimator")
     ax.set_title(f"Estimator values")

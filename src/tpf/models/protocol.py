@@ -414,7 +414,7 @@ else:
             """"""
             ...
 
-        def global_discretization_est(self) -> float:
+        def global_discr_est(self) -> float:
             """Estimate for global discretization error."""
             ...
 
@@ -430,7 +430,7 @@ else:
             """Estimate for global homotopy continuation error."""
             ...
 
-        def global_linearization_est(self) -> float:
+        def global_lin_est(self) -> float:
             """Estimate for global linearization error."""
             ...
 
@@ -638,7 +638,9 @@ else:
             """Calculate and store the local flux estimate for each element."""
             ...
 
-        def local_darcy_est(self, flux_name: FLUX_NAME) -> None:
+        def local_darcy_est(
+            self, flux_name: FLUX_NAME, flux_specifier: str = ""
+        ) -> None:
             """Calculate and store the local Darcy estimate for each element."""
             ...
 
@@ -665,11 +667,11 @@ else:
             """Sum local Darcy error estimators and integrate in time."""
             ...
 
-        def global_saturation_pressure_est(self) -> tuple[float, float]:
+        def global_sp_est(self) -> tuple[float, float]:
             """Sum local saturation-pressure error estimators and integrate in time."""
             ...
 
-        def global_darcy_and_saturation_pressure_est(self) -> float:
+        def global_darcy_and_sp_est(self) -> float:
             """Sum global Darcy and saturation-pressure error estimators."""
             ...
 
@@ -689,11 +691,11 @@ else:
             """Estimate for global temporal discretization error."""
             ...
 
-        def global_discretization_est(self) -> float:
+        def global_discr_est(self) -> float:
             """Estimate for global discretization error."""
             ...
 
-        def global_linearization_est(self) -> float:
+        def global_lin_est(self) -> float:
             """Estimate for global linearization error."""
             ...
 

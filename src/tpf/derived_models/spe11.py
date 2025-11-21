@@ -683,10 +683,9 @@ class SolutionStrategySPE11(TPFProtocol):
             self.iteration_exporter.add_constant_data(data)  # type: ignore
 
 
-# The various protocols define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class SPE11Mixin(
     CapillaryPressureSPE11,
     EquationsSPE11,

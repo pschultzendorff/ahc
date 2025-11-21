@@ -759,7 +759,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
         """
         # Calculate mismatches. The equilibrated flux values are stored in the data
         # dictionary were updated by :meth:`eval_postproc_qtys`.
-        # Ignore Mypy type check for *.value(*).
+        # Ignore mypy type check for *.value(*).
         flux_t_equil_mismatch: float = np.sum(
             np.abs(
                 self.postproc_ad_ops[TOTAL_FLUX + "_equil_mismatch"].value(
@@ -864,10 +864,10 @@ class EquationsRecMixin(TPFProtocol):
 
 # This could also be a mixin, but by subclassing ``SolutionStrategyTPF``, we avoid
 # having to pay attention to the order of the different solution strategy classes.
-# ``TPFProtocol`` and ``pp.SolutionStrategy`` define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+#
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class SolutionStrategyRec(  # type: ignore
     ReconstructionProtocol,
     SolutionStrategyTPF,
@@ -1343,10 +1343,9 @@ class DataSavingRec(DataSavingTPF):
         return data
 
 
-# ``TPFProtocol`` and ``pp.SolutionStrategy`` define different types for
-# ``nonlinear_solver_statistics`` and cause a MyPy error. This is not a problem in
-# practice, but ``nonlinear_solver_statistics`` needs to be called with care. We ignore
-# the error.
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
 class TwoPhaseFlowReconstruction(  # type: ignore
     GlobalPressureMixin,
     PressureReconstructionMixin,
