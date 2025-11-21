@@ -474,20 +474,20 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         else:
             raise ValueError("Not implemented for tensor permeability.")
 
-        # 2: Get reconstructed pressure coefficients and mobilities
+        # 2: Get reconstructed pressure coefficients and mobilities.
         if flux_name == TOTAL_FLUX:
             pressure_keys = (GLOBAL_PRESSURE,)
-            phases = (self.wetting, self.nonwetting)
+            mobility_keys = ("total_mobility",)
         elif flux_name == WETTING_FLUX:
             pressure_keys = (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE)
-            phases = (self.wetting,)
+            mobility_keys = ("total_mobility", "fractional_flow")
         else:
             raise ValueError(f"Unknown flux name: {flux_name}")
 
         pressure_coeffs_new = {}
         pressure_coeffs_old = {}
-        phase_mobilities_new = {}
-        phase_mobilities_old = {}
+        mobilities_new = {}
+        mobilities_old = {}
 
         for pressure_key in pressure_keys:
             pressure_coeffs_new[pressure_key] = pp.get_solution_values(
@@ -497,21 +497,12 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 f"{pressure_key}_coeffs_postproc", self.g_data, time_step_index=0
             )
 
-        for phase in phases:
-            # Non-upwinded mobilities.
-            phase_mobilities_new[phase.name] = (
-                self.rel_perm(  # type: ignore
-                    self.wetting.s,
-                    phase,
-                ).value(self.equation_system)
-                / phase.viscosity
+        for mobility_key in mobility_keys:
+            mobilities_new[mobility_key] = pp.get_solution_values(
+                mobility_key, self.g_data, iterate_index=0
             )
-            phase_mobilities_old[phase.name] = (
-                self.rel_perm(  # type: ignore
-                    self.wetting.s.previous_timestep(),
-                    phase,
-                ).value(self.equation_system)
-                / phase.viscosity
+            mobilities_old[mobility_key] = pp.get_solution_values(
+                mobility_key, self.g_data, time_step_index=0
             )
 
         # 3: Define helper functions to evaluate fluxes from reconstructed pressures and
@@ -530,10 +521,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                         pressure_coeffs[GLOBAL_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
-                total_mobility = (
-                    phase_mobilities[self.wetting.name]
-                    + phase_mobilities[self.nonwetting.name]
-                )
+                total_mobility = phase_mobilities["total_mobility"]
                 return (
                     -perm_arr[None, :, None]
                     * total_mobility[None, :, None]
@@ -557,7 +545,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                         pressure_coeffs[COMPLEMENTARY_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
-                wetting_mobility = phase_mobilities[self.wetting.name]
+                wetting_mobility = (
+                    phase_mobilities["fractional_flow"]
+                    * phase_mobilities["total_mobility"]
+                )
 
                 return -perm_arr[None, :, None] * (
                     wetting_mobility[None, :, None] * global_pressure_pot
@@ -578,7 +569,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 x[..., 1],
             )
             rec_flux_new = evaluate_flux_from_reconstructions(
-                x, pressure_coeffs_new, phase_mobilities_new
+                x, pressure_coeffs_new, mobilities_new
             )
 
             # FIXME Not zero for wetting flux.
@@ -596,7 +587,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                     x[..., 1],
                 )
                 rec_flux_old = evaluate_flux_from_reconstructions(
-                    x, pressure_coeffs_old, phase_mobilities_old
+                    x, pressure_coeffs_old, mobilities_old
                 )
                 flux_diff_old = fv_flux_old - rec_flux_old
 
@@ -675,6 +666,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         s_p0_old: np.ndarray = self.wetting.s.previous_timestep().value(
             self.equation_system
         )  # type: ignore
+        # Type: Might get an unintended wrong answer here at the first time step.
 
         def integrand(
             x: np.ndarray,
@@ -833,8 +825,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             old = pp.get_solution_values(norm_key, self.g_data, time_step_index=0)
 
             # Estimate time integral with quadrature rule for linear functions.
-            # NOTE The stored values are already squared.
-            estimators[flux_name] = self.time_manager.dt / 3 * (new + inner + old).sum()
+            # NOTE The stored local values are already squared.
+            estimators[flux_name] = (
+                self.time_manager.dt / 3 * (new + inner + old).sum()
+            ) ** 2
 
             logger.info(
                 f"Global {flux_name} Darcy error estimator:"
@@ -869,7 +863,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
         # Estimate time integral with quadrature rule for linear functions. NOTE The
         # stored values are already squared.
-        est = self.time_manager.dt / 3 * (new + inner + old).sum()
+        est = (self.time_manager.dt / 3 * (new + inner + old).sum()) ** 0.5
 
         logger.info(f"Global saturation-pressure error estimator: {est}")
 
@@ -879,7 +873,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         r"""Compute the combined global Darcy and saturation-pressure error estimator."""
         est_total, est_wetting = self.global_darcy_est()
         est_saturation_pressure = self.global_sp_est()
-        combined_est = (est_total + est_wetting + est_saturation_pressure) ** 0.5
+        combined_est = (
+            est_total**2 + est_wetting**2 + est_saturation_pressure**2
+        ) ** 0.5
         logger.info(
             "Combined global Darcy and saturation-pressure error estimator:"
             + f" {combined_est}"
@@ -1010,6 +1006,16 @@ class SolutionStrategyEst(  # type: ignore
             time_step_index=0,
             iterate_index=0,
         )
+
+        initial_values = np.ones(self.g.num_cells)
+        for mobility_key in ["total_mobility", "fractional_flow"]:
+            pp.set_solution_values(
+                mobility_key,
+                initial_values,
+                self.g_data,
+                time_step_index=0,
+                iterate_index=0,
+            )
 
     def check_convergence(
         self,

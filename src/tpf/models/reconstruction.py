@@ -283,7 +283,9 @@ class PressureReconstructionMixin(TPFProtocol):
             time_step_index: int | None = 0
             # Assume equilibrium with constant pressure values at initial conditions.
             coeffs = np.zeros((self.g.num_cells, self.POLY_COEFF_COUNT))
-
+            coeffs[:, -1] = pp.get_solution_values(
+                pressure_key, self.g_data, time_step_index=0
+            )
         else:
             time_step_index = None
 
@@ -394,6 +396,10 @@ class PressureReconstructionMixin(TPFProtocol):
             time_step_index: int | None = 0
             # Assume equilibrium with constant pressure values at initial conditions.
             coeffs_rec = np.zeros((self.g.num_cells, self.POLY_COEFF_COUNT))
+            coeffs_rec[:, -1] = pp.get_solution_values(
+                pressure_key, self.g_data, time_step_index=0
+            )
+
         else:
             time_step_index = None
 
