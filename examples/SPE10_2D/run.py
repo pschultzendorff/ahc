@@ -140,7 +140,6 @@ spe10_layer: int = 80
 default_params = {
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {},
     "rel_perm_constants": {},
     "cap_press_constants": {},

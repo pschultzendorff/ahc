@@ -121,7 +121,6 @@ class ModifiedEquations(EquationsTPF):
 
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
-
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann)."""
         # Dirichlet conditions for both phases.
@@ -182,7 +181,6 @@ params = {
     "progressbars": True,
     "nonlinear_solver_statistics": SolverStatisticsEst,
     "solver_statistics_file_name": foldername / "solver_statistics.json",
-    "formulation": "fractional_flow",
     # grid and time
     "grid_type": "simplex",
     "meshing_arguments": {"cell_size": 1.0},

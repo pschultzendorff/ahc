@@ -97,7 +97,6 @@ class SPE10Newton(
 default_params: dict[str, Any] = {
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {},
     "rel_perm_constants": {
         "model": "Brooks-Corey-Mualem",

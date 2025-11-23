@@ -91,7 +91,6 @@ class ModifiedEquations(EquationsTPF):
 
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
-
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann)."""
         # Dirichlet conditions for both phases.
@@ -106,7 +105,6 @@ class ModifiedConstitutiveLaws(
 
 
 class ModifiedSolutionStrategy(SolutionStrategyTPF):
-
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
         g = self.mdg.subdomains()[0]
@@ -191,7 +189,6 @@ params = {
         constant_dt=False,
     ),
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {
         "solid": solid_constants,
         "wetting": wetting_constants,
@@ -228,7 +225,7 @@ for model_1, model_2 in itertools.product(
         pathlib.Path(__file__).parent
         / "results"
         / "hc_estimators_test"
-        / f"{model_1["model"]} to {model_2["model"]}"
+        / f"{model_1['model']} to {model_2['model']}"
     )
     try:
         shutil.rmtree(foldername)

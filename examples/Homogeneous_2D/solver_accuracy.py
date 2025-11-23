@@ -392,7 +392,6 @@ params: dict[str, Any] = {
     "solver_statistics_file_name": dirname / "baseline" / "solver_statistics.json",
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {
         "solid": pp.SolidConstants({"porosity": 0.3, "permeability": 1e-15}),
     },

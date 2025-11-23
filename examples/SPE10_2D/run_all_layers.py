@@ -132,7 +132,6 @@ class SPE10Newton(
 default_params = {
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {},
     "rel_perm_constants": {},
     "cap_press_constants": {},

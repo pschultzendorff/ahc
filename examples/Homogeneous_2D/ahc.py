@@ -126,7 +126,6 @@ class HomogeneousSPE10HC(
 params: dict[str, Any] = {
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {
         "solid": pp.SolidConstants({"porosity": 0.3, "permeability": 1e-15}),
     },

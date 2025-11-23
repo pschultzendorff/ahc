@@ -170,7 +170,6 @@ params = {
     "max_iterations": 60,
     "nl_convergence_tol": 1e-5,
     "progressbars": True,
-    "formulation": "fractional_flow",
     # grid and time
     "grid_type": "simplex",
     "meshing_arguments": {"cell_size": 1.0},

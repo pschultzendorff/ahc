@@ -125,7 +125,6 @@ spe10_layer: int = 55
 default_params: dict[str, Any] = {
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {},
     "rel_perm_constants": {},
     "cap_press_constants": {},
@@ -272,7 +271,7 @@ rp_models: dict[str, Any] = {
 }
 
 cp_models: dict[str, Any] = {
-    "linear": {"model": "linear", "linear_param": 3.0, "entry_pressure": 900.0},
+    "linear": {"model": "linear", "linear_param": 1.0, "entry_pressure": 30.0},
 }
 
 

@@ -1047,13 +1047,13 @@ class SolutionStrategyEst(  # type: ignore
 
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
         super().after_nonlinear_iteration(nonlinear_increment)
-        # TODO Remove this again.
-        self.local_pressure_potential(GLOBAL_PRESSURE)
-        self.local_pressure_potential(COMPLEMENTARY_PRESSURE)
-        self.local_flux(TOTAL_FLUX)
-        self.local_flux(WETTING_FLUX)
-        self.local_darcy_est_from_postproc(TOTAL_FLUX)
-        self.local_darcy_est_from_postproc(WETTING_FLUX)
+        # FIXME Remove all these methods again and any reference to stored values.
+        # self.local_pressure_potential(GLOBAL_PRESSURE)
+        # self.local_pressure_potential(COMPLEMENTARY_PRESSURE)
+        # self.local_flux(TOTAL_FLUX)
+        # self.local_flux(WETTING_FLUX)
+        # self.local_darcy_est_from_postproc(TOTAL_FLUX)
+        # self.local_darcy_est_from_postproc(WETTING_FLUX)
 
     def after_nonlinear_convergence(self) -> None:
         super().after_nonlinear_convergence()
@@ -1071,7 +1071,7 @@ class SolutionStrategyEst(  # type: ignore
                 "F_estimator_new",
                 "F_estimator_old",
                 "D_estimator_norm",
-                "D_estimator_from_postproc_norm",
+                # "D_estimator_from_postproc_norm",
                 "RT0_coeffs",
                 "energy_norm",
             ],
@@ -1091,28 +1091,28 @@ class SolutionStrategyEst(  # type: ignore
             "SP_estimator_norm", time_step_values, self.g_data, time_step_index=0
         )
 
-        for pressure_key, specifier in itertools.product(
-            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
-        ):
-            time_step_values = pp.get_solution_values(
-                f"{pressure_key}{specifier}_potential", self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}{specifier}_potential",
-                time_step_values,
-                self.g_data,
-                time_step_index=0,
-            )
-        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
-            time_step_values = pp.get_solution_values(
-                f"{flux_name}_norm", self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{flux_name}_norm",
-                time_step_values,
-                self.g_data,
-                time_step_index=0,
-            )
+        # for pressure_key, specifier in itertools.product(
+        #     (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
+        # ):
+        #     time_step_values = pp.get_solution_values(
+        #         f"{pressure_key}{specifier}_potential", self.g_data, iterate_index=0
+        #     )
+        #     pp.set_solution_values(
+        #         f"{pressure_key}{specifier}_potential",
+        #         time_step_values,
+        #         self.g_data,
+        #         time_step_index=0,
+        #     )
+        # for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+        #     time_step_values = pp.get_solution_values(
+        #         f"{flux_name}_norm", self.g_data, iterate_index=0
+        #     )
+        #     pp.set_solution_values(
+        #         f"{flux_name}_norm",
+        #         time_step_values,
+        #         self.g_data,
+        #         time_step_index=0,
+        #     )
 
 
 class DataSavingEst(DataSavingRec):

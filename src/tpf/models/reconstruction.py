@@ -303,21 +303,71 @@ class PressureReconstructionMixin(TPFProtocol):
                     / total_mobility[..., None]
                 )
 
+                def integrand(
+                    x: np.ndarray,
+                ) -> np.ndarray:
+                    fv_flux = self._evaluate_flux_at_points(
+                        coeffs_flux,
+                        x[..., 0],
+                        x[..., 1],
+                    )
+                    return np.sqrt((fv_flux**2).sum(axis=-1))
+
+                integral: Integral = self.quadrature_est.integrate(
+                    integrand,
+                    self.quadpy_elements,
+                    recalc_points=False,
+                    recalc_volumes=False,
+                )
+                pp.set_solution_values(
+                    "intermediate_norm_g",
+                    integral.elementwise.squeeze(),
+                    self.g_data,
+                    iterate_index=0,
+                )
+
             elif pressure_key == COMPLEMENTARY_PRESSURE:
-                fractional_flow: np.ndarray = pp.get_solution_values(
-                    "fractional_flow", self.g_data, iterate_index=0
+                # FIXME Old approach. Remove once verified that the new one works
+                # better.
+                # fractional_flow: np.ndarray = pp.get_solution_values(
+                #     "fractional_flow", self.g_data, iterate_index=0
+                # )
+                # coeffs_flux: np.ndarray = pp.get_solution_values(
+                #     f"{WETTING_FLUX}{flux_specifier}_RT0_coeffs",
+                #     self.g_data,
+                #     iterate_index=0,
+                # ) - fractional_flow[..., None] * pp.get_solution_values(
+                #     f"{TOTAL_FLUX}{flux_specifier}_RT0_coeffs",
+                #     self.g_data,
+                #     iterate_index=0,
+                # )
+                coeffs_flux = pp.get_solution_values(
+                    "capillary_flux_RT0_coeffs", self.g_data, iterate_index=0
                 )
-                coeffs_flux: np.ndarray = fractional_flow[
-                    ..., None
-                ] * pp.get_solution_values(
-                    f"{TOTAL_FLUX}{flux_specifier}_RT0_coeffs",
+
+                def integrand(
+                    x: np.ndarray,
+                ) -> np.ndarray:
+                    fv_flux = self._evaluate_flux_at_points(
+                        coeffs_flux,
+                        x[..., 0],
+                        x[..., 1],
+                    )
+                    return np.sqrt((fv_flux**2).sum(axis=-1))
+
+                integral: Integral = self.quadrature_est.integrate(
+                    integrand,
+                    self.quadpy_elements,
+                    recalc_points=False,
+                    recalc_volumes=False,
+                )
+                pp.set_solution_values(
+                    "intermediate_norm_c",
+                    integral.elementwise.squeeze(),
                     self.g_data,
                     iterate_index=0,
-                ) - pp.get_solution_values(
-                    f"{WETTING_FLUX}{flux_specifier}_RT0_coeffs",
-                    self.g_data,
-                    iterate_index=0,
                 )
+
             else:
                 raise ValueError(f"Unknown pressure key: {pressure_key}")
 
@@ -343,25 +393,25 @@ class PressureReconstructionMixin(TPFProtocol):
             current_p_cc = self._evaluate_poly_at_points(coeffs, cc_x, cc_y)
             coeffs[:, 5] = actual_p_cc - current_p_cc
 
-            def integrand(x):
-                int_0 = coeffs[:, 0][None, ...] * x[..., 0] ** 2
-                int_1 = coeffs[:, 1][None, ...] * x[..., 0] * x[..., 1]
-                int_2 = coeffs[:, 2][None, ...] * x[..., 0]
-                int_3 = coeffs[:, 3][None, ...] * x[..., 1] ** 2
-                int_4 = coeffs[:, 4][None, ...] * x[..., 1]
-                return int_0 + int_1 + int_2 + int_3 + int_4
+            # def integrand(x):
+            #     int_0 = coeffs[:, 0][None, ...] * x[..., 0] ** 2
+            #     int_1 = coeffs[:, 1][None, ...] * x[..., 0] * x[..., 1]
+            #     int_2 = coeffs[:, 2][None, ...] * x[..., 0]
+            #     int_3 = coeffs[:, 3][None, ...] * x[..., 1] ** 2
+            #     int_4 = coeffs[:, 4][None, ...] * x[..., 1]
+            #     return int_0 + int_1 + int_2 + int_3 + int_4
 
-            integral: Integral = self.quadrature_rec.integrate(
-                integrand,
-                self.quadpy_elements,
-                recalc_points=False,
-                recalc_volumes=False,
-            )
+            # integral: Integral = self.quadrature_rec.integrate(
+            #     integrand,
+            #     self.quadpy_elements,
+            #     recalc_points=False,
+            #     recalc_volumes=False,
+            # )
 
-            # Now, we can compute the constant C, one per cell.
-            coeffs[:, 5] = (
-                actual_p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
-            )
+            # # Now, we can compute the constant C, one per cell.
+            # coeffs[:, 5] = (
+            #     actual_p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
+            # )
 
         # Store post-processed pressure coeffs.
         pp.set_solution_values(
@@ -810,7 +860,7 @@ class EquationsRecMixin(TPFProtocol):
         flux_t: pp.ad.Operator = self.total_flux(self.g)
         flux_w: pp.ad.Operator = self.wetting_flux(self.g)
 
-        # We construct non-uwpinded mobilities on cells.
+        # Construct non-upwinded mobility cell-values.
         phase_mobilities = {}
 
         for phase in [self.wetting, self.nonwetting]:
@@ -820,6 +870,23 @@ class EquationsRecMixin(TPFProtocol):
             )
         total_mobility = pp.ad.sum_operator_list(list(phase_mobilities.values()))
         fractional_flow = phase_mobilities[self.wetting.name] / total_mobility
+
+        # Get data and spatial discretization.
+        tpfa_cap_press = pp.ad.TpfaAd(self.cap_potential_key, [self.g])
+
+        # Compute cap pressure and mobilities.
+        pressure_c = self.cap_press(self.wetting.s)
+        mobility_w = self.phase_mobility(self.g, self.wetting)
+        mobility_n = self.phase_mobility(self.g, self.nonwetting)
+        mobility_t = self.total_mobility(self.g)
+
+        # Compute capillary and buoyancy potential.
+        capillary_potential = tpfa_cap_press.flux() @ pressure_c
+
+        flux_t = self.total_flux(self.g)
+        fractional_flow_upwinded = mobility_w / mobility_t
+
+        capillary_flux = fractional_flow_upwinded * mobility_n * capillary_potential
 
         # Equilibrated fluxes and mismatches.
         # TODO This copies 90% of the code from ``set_equations``. Make
@@ -860,6 +927,7 @@ class EquationsRecMixin(TPFProtocol):
             (WETTING_FLUX, flux_w),
             ("total_mobility", total_mobility),
             ("fractional_flow", fractional_flow),
+            ("capillary_flux", capillary_flux),
             (TOTAL_FLUX + "_equil", flux_t_equil),
             (WETTING_FLUX + "_equil", flux_w_equil),
             (TOTAL_FLUX + "_equil_mismatch", flux_t_equil_mismatch),
@@ -959,62 +1027,63 @@ class SolutionStrategyRec(  # type: ignore
         dirname = pathlib.Path(__file__).parent / ".." / ".." / ".." / "pressure_plots"
         dirname.mkdir(exist_ok=True)
 
-        global_pressure_coeffs = pp.get_solution_values(
-            GLOBAL_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
-        )
-        save_path = (
-            dirname
-            / f"g_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        )
+        # FIXME Remove this!
+        # global_pressure_coeffs = pp.get_solution_values(
+        #     GLOBAL_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
+        # )
+        # save_path = (
+        #     dirname
+        #     / f"g_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        # )
 
-        plot_quadratic_pressures(
-            self.g,
-            self._domain.bounding_box,
-            global_pressure_coeffs,
-            save_path=save_path,
-        )
+        # plot_quadratic_pressures(
+        #     self.g,
+        #     self._domain.bounding_box,
+        #     global_pressure_coeffs,
+        #     save_path=save_path,
+        # )
 
-        global_pressure_coeffs = pp.get_solution_values(
-            GLOBAL_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
-        )
-        save_path = (
-            dirname
-            / f"g_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        )
+        # global_pressure_coeffs = pp.get_solution_values(
+        #     GLOBAL_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
+        # )
+        # save_path = (
+        #     dirname
+        #     / f"g_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        # )
 
-        plot_quadratic_pressures(
-            self.g,
-            self._domain.bounding_box,
-            global_pressure_coeffs,
-            save_path=save_path,
-        )
+        # plot_quadratic_pressures(
+        #     self.g,
+        #     self._domain.bounding_box,
+        #     global_pressure_coeffs,
+        #     save_path=save_path,
+        # )
 
-        complementary_pressure_coeffs = pp.get_solution_values(
-            COMPLEMENTARY_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
-        )
-        save_path = (
-            dirname
-            / f"c_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        )
-        plot_quadratic_pressures(
-            self.g,
-            self._domain.bounding_box,
-            complementary_pressure_coeffs,
-            save_path=save_path,
-        )
-        complementary_pressure_coeffs = pp.get_solution_values(
-            COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
-        )
-        save_path = (
-            dirname
-            / f"c_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        )
-        plot_quadratic_pressures(
-            self.g,
-            self._domain.bounding_box,
-            complementary_pressure_coeffs,
-            save_path=save_path,
-        )
+        # complementary_pressure_coeffs = pp.get_solution_values(
+        #     COMPLEMENTARY_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
+        # )
+        # save_path = (
+        #     dirname
+        #     / f"c_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        # )
+        # plot_quadratic_pressures(
+        #     self.g,
+        #     self._domain.bounding_box,
+        #     complementary_pressure_coeffs,
+        #     save_path=save_path,
+        # )
+        # complementary_pressure_coeffs = pp.get_solution_values(
+        #     COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
+        # )
+        # save_path = (
+        #     dirname
+        #     / f"c_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
+        # )
+        # plot_quadratic_pressures(
+        #     self.g,
+        #     self._domain.bounding_box,
+        #     complementary_pressure_coeffs,
+        #     save_path=save_path,
+        # )
 
     @typing.override
     def check_convergence(
@@ -1117,10 +1186,7 @@ class SolutionStrategyRec(  # type: ignore
             )
 
         # Evaluate scaled fluxes required for pressure post-processing.
-        for scalar_name in [
-            "total_mobility",
-            "fractional_flow",
-        ]:
+        for scalar_name in ["total_mobility", "fractional_flow", "capillary_flux"]:
             scalar_value = self.postproc_ad_ops[scalar_name].value(self.equation_system)
             pp.set_solution_values(
                 scalar_name,
@@ -1145,6 +1211,9 @@ class SolutionStrategyRec(  # type: ignore
 
                 # Extend equilibrated fluxes.
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
+
+        if not prepare_simulation:
+            self.extend_fv_fluxes("capillary_flux")
 
         # Reconstruct pressures.
         for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
@@ -1346,6 +1415,35 @@ class DataSavingRec(DataSavingTPF):
                 )
             except KeyError:
                 pass
+            try:
+                data.append(
+                    (
+                        self.g,
+                        "intermediate_norm_g",
+                        pp.get_solution_values(
+                            "intermediate_norm_g",
+                            self.g_data,
+                            iterate_index=0,
+                        ),
+                    )
+                )
+            except KeyError:
+                pass
+            try:
+                data.append(
+                    (
+                        self.g,
+                        "intermediate_norm_c",
+                        pp.get_solution_values(
+                            "intermediate_norm_c",
+                            self.g_data,
+                            iterate_index=0,
+                        ),
+                    )
+                )
+            except KeyError:
+                pass
+
         return data
 
 

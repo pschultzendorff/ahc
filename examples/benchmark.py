@@ -99,7 +99,6 @@ params = {
     "meshing_arguments": {"cell_size": 600 * FEET / 30},
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {},
     "rel_perm_constants": {"model": "linear", "limit": False},
     "cap_press_constants": {"model": "linear", "linear_param": 0.1 * PSI},

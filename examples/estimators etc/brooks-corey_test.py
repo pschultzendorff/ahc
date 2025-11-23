@@ -113,7 +113,6 @@ class ModifiedEquations(EquationsTPF):
 
 
 class ModifiedBoundaryConditions(BoundaryConditionsTPF):
-
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann)."""
         # Dirichlet conditions for both phases.
@@ -121,7 +120,9 @@ class ModifiedBoundaryConditions(BoundaryConditionsTPF):
         return pp.BoundaryCondition(g, north_faces, "dir")
 
 
-class ModifiedTwoPhaseFlow(ModifiedEquations, ModifiedGeometry, ModifiedBoundaryConditions, TwoPhaseFlow): ...  # type: ignore
+class ModifiedTwoPhaseFlow(
+    ModifiedEquations, ModifiedGeometry, ModifiedBoundaryConditions, TwoPhaseFlow
+): ...  # type: ignore
 
 
 # Set up folder and files for logging/plots/saved time steps.
@@ -164,7 +165,6 @@ params = {
     "max_iterations": 60,
     "nl_convergence_tol": 1e-5,
     "progressbars": True,
-    "formulation": "fractional_flow",
     # grid and time
     "meshing_arguments": {"cell_size": 1.0},
     "time_manager": pp.TimeManager(

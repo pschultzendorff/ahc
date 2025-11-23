@@ -119,7 +119,6 @@ class SPE11Newton(
 default_params: dict[str, Any] = {
     "progressbars": True,
     # Model:
-    "formulation": "fractional_flow",
     "material_constants": {},
     "rel_perm_constants": {},
     "cap_press_constants": {},
