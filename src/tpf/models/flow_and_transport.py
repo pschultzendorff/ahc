@@ -324,15 +324,16 @@ class DarcyFluxes(TPFProtocol):
 
         # Gravity terms.
         buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
-        buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
+        # buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
 
         # Finally, we can combine all viscous and buoyancy fluxes multiplied with phase
         # mobilities to the total flux.
+        # FIXME Fix buoyancy potential.
         total_flux = (
             mobility_t * viscous_potential_n
             - mobility_w * capillary_potential
             - mobility_w * buoyancy_potential_w
-            - mobility_n * buoyancy_potential_n
+            # - mobility_n * buoyancy_potential_n
         )
         total_flux.set_name("Total volume flux")
         return total_flux
@@ -367,6 +368,7 @@ class DarcyFluxes(TPFProtocol):
         flux_t = self.total_flux(g)
         fractional_flow = mobility_w / mobility_t
 
+        # FIXME Fix buoyancy potential.
         wetting_flux = fractional_flow * flux_t + fractional_flow * mobility_n * (
             capillary_potential + buoyancy_potential_w - buoyancy_potential_n
         )
@@ -751,7 +753,7 @@ class BoundaryConditionsTPF(TPFProtocol, pp.BoundaryConditionMixin):
 
         """
         is_neu: np.ndarray = self.bc_type(g).is_neu
-        p_bc: np.ndarray = self._bc_dirichlet_pressure_values(g, self.nonwetting)
+        p_bc: np.ndarray = self._bc_dirichlet_pressure_values(g, phase)
         p_bc[is_neu] = 0
         return p_bc
 

@@ -452,7 +452,6 @@ def generate_configs() -> list[SimulationConfig]:
     # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3 with linear capillary
     # pressure.
     for init_s in [0.2, 0.3]:
-        continue
         for rp_model_name, rp_model in rp_models.items():
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 folder_name = (
@@ -473,7 +472,7 @@ def generate_configs() -> list[SimulationConfig]:
                         init_s=init_s,
                         rp_model_1={"model": "linear", "limit": False},
                         rp_model_2=rp_model,
-                        cp_model_1=cp_models["linear"],
+                        cp_model_1=cp_models["None"],
                         cp_model_2=cp_models["linear"],
                     )
                 )

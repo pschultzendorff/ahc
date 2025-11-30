@@ -57,7 +57,6 @@ from tpf.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
 from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
 from tpf.models.protocol import TPFProtocol
 from tpf.utils.constants_and_typing import FEET
-from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsEst
 
 # region SETUP
@@ -110,7 +109,6 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class ModelClass(
-    IterationExportingMixin,
     InitialConditionsMixin,
     SPE10Mixin,
     TwoPhaseFlowErrorEstimate,
@@ -280,7 +278,7 @@ cp_models: dict[str, Any] = {
     "linear": {
         "model": "Brooks-Corey",
         "n_b": 2.0,
-        "entry_pressure": 30 * pp.PASCAL,
+        "entry_pressure": 100 * pp.PASCAL,
     },
 }
 
@@ -290,7 +288,7 @@ def generate_configs() -> list[SimulationConfig]:
     configs = []
 
     # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3.
-    for init_s in [0.4]:
+    for init_s in [0.23]:
         folder_name = dirname / "test" / f"init_s_{init_s}"
         configs.append(
             SimulationConfig(

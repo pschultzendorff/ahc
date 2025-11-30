@@ -774,6 +774,7 @@ class SolutionStrategyAHC(
                 "C_estimator_norm",
                 "L_estimator",
                 "energy_norm",
+                "RT0_coeffs",
                 "wrt_goal_const_laws_RT0_coeffs",
             ],
         ):
@@ -784,10 +785,10 @@ class SolutionStrategyAHC(
             )
 
         time_step_values = pp.get_solution_values(
-            "SP_estimator_norm", self.g_data, hc_index=0
+            "SP_estimator", self.g_data, hc_index=0
         )
         pp.set_solution_values(
-            "SP_estimator_norm", time_step_values, self.g_data, time_step_index=0
+            "SP_estimator", time_step_values, self.g_data, time_step_index=0
         )
 
         # Save only after the time step values are updated..
@@ -1146,6 +1147,7 @@ class SolutionStrategyAHC(
                 "C_estimator_norm",
                 "L_estimator",
                 "energy_norm",
+                "RT0_coeffs",
                 "wrt_goal_const_laws_RT0_coeffs",
             ],
         ):
@@ -1154,11 +1156,9 @@ class SolutionStrategyAHC(
             pp.set_solution_values(key, hc_step_values, self.g_data, hc_index=0)
 
         hc_step_values = pp.get_solution_values(
-            "SP_estimator_norm", self.g_data, iterate_index=0
+            "SP_estimator", self.g_data, iterate_index=0
         )
-        pp.set_solution_values(
-            "SP_estimator_norm", hc_step_values, self.g_data, hc_index=0
-        )
+        pp.set_solution_values("SP_estimator", hc_step_values, self.g_data, hc_index=0)
 
         # Adapt decay rate based on number of nonlinear iterations. Do this only AFTER
         # at least one succesfull decay.

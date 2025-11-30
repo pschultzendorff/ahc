@@ -605,20 +605,13 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
         self, g: pp.Grid, phase: FluidPhase
     ) -> np.ndarray:
         """Dirichle pressure values."""
-        if phase == self.nonwetting:
-            domain_sides = self.domain_boundary_sides(g)
-            bc_values: np.ndarray = np.zeros(g.num_faces)
-            # Boundary pressure values are identical to initial pressure.
-            bc_values[np.logical_or(domain_sides.west, domain_sides.east)] = (
-                phase.convert_units(
-                    self.spe11_params["INITIAL_PRESSURE"], "kg*m^-1*s^-2"
-                )
-            )
-            return bc_values
-        else:
-            raise NotImplementedError(
-                "Dirichlet pressure values not implemented for the wetting phase."
-            )
+        domain_sides = self.domain_boundary_sides(g)
+        bc_values: np.ndarray = np.zeros(g.num_faces)
+        # Boundary pressure values are identical to initial pressure.
+        bc_values[np.logical_or(domain_sides.west, domain_sides.east)] = (
+            phase.convert_units(self.spe11_params["INITIAL_PRESSURE"], "kg*m^-1*s^-2")
+        )
+        return bc_values
 
 
 class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):

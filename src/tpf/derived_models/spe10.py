@@ -232,21 +232,14 @@ class ModifiedBoundarySPE10(TPFProtocol):
         prescribed pressure explicitely and act as wells.
 
         """
-        if phase == self.nonwetting:
-            height: float = (
-                HEIGHT / 2 if self.params["spe10_quarter_domain"] else HEIGHT
-            )
-            width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
-            corner_faces: np.ndarray = corner_faces_id(
-                g, height, width, PRODUCTION_WELL_SIZE
-            )
-            bc: np.ndarray = np.zeros(g.num_faces)
-            bc[corner_faces] = phase.convert_units(BHP, "kg*m^-1*s^-2")
-            return bc
-        else:
-            raise NotImplementedError(
-                "Dirichlet pressure values not implemented for the wetting phase."
-            )
+        height: float = HEIGHT / 2 if self.params["spe10_quarter_domain"] else HEIGHT
+        width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
+        corner_faces: np.ndarray = corner_faces_id(
+            g, height, width, PRODUCTION_WELL_SIZE
+        )
+        bc: np.ndarray = np.zeros(g.num_faces)
+        bc[corner_faces] = phase.convert_units(BHP, "kg*m^-1*s^-2")
+        return bc
 
 
 class SolutionStrategySPE10(TPFProtocol):

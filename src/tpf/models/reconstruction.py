@@ -567,18 +567,18 @@ class PressureReconstructionMixin(TPFProtocol):
             )
             coeffs_rec = linalg_solve_batch(A_elements, point_val)
 
-            dirname = (
-                pathlib.Path(__file__).parent
-                / ".."
-                / ".."
-                / ".."
-                / "pressure_plots"
-                / (
-                    f"{pressure_key}_{self.time_manager.time_index}"
-                    + f"_{self.nonlinear_solver_statistics.num_iteration}"
-                )
-            )
-            dirname.mkdir(parents=True, exist_ok=True)
+            # dirname = (
+            #     pathlib.Path(__file__).parent
+            #     / ".."
+            #     / ".."
+            #     / ".."
+            #     / "pressure_plots"
+            #     / (
+            #         f"{pressure_key}_{self.time_manager.time_index}"
+            #         + f"_{self.nonlinear_solver_statistics.num_iteration}"
+            #     )
+            # )
+            # dirname.mkdir(parents=True, exist_ok=True)
 
         # Store in data dictionary.
         pp.set_solution_values(

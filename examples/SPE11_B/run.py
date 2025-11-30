@@ -128,6 +128,7 @@ default_params = {
     "cap_press_constants": {},
     "grid_type": "simplex",
     # SPE11 parameters:
+    "spe11_case": "B",
     "spe11_heterogeneous_cap_pressure": False,
     "spe11_entry_pressure": 100.0,  # [Pa]
     # Nonlinear solver:
@@ -146,10 +147,10 @@ init_time_step_params = {
     "recomp_max": 8,
 }
 default_time_manager_params = {
-    "schedule": np.array([0.0, 300.0 * pp.DAY]),
-    "dt_init": 300.0 * pp.DAY,
+    "schedule": np.array([0.0, 3000.0 * pp.DAY]),
+    "dt_init": 3000.0 * pp.DAY,
     "constant_dt": False,
-    "dt_min_max": (1e-2 * pp.DAY, 300.0 * pp.DAY),
+    "dt_min_max": (1 * pp.DAY, 3000.0 * pp.DAY),
     "iter_optimal_range": (9, 12),
     "iter_relax_factors": (0.7, 1.3),
     "recomp_factor": 0.1,
@@ -359,19 +360,18 @@ def run_simulation(config: SimulationConfig) -> None:
         with (config.folder_name / "failure.txt").open("w") as f:
             f.write(str(e))
         logger.error(f"Run failed with error: {e}.")
-        raise e
 
 
 # endregion
 
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
-    ("AHC", 0.001),
+    ("AHC", 0.1),
     ("HC", 0.1),
     ("Newton", 0.1),
     ("NewtonAppleyard", 0.1),
 ]
-refinement_factors: list[float] = [10, 1, 0.1]  # , 0.5]
+refinement_factors: list[float] = [20, 5, 0.5]  # , 0.5]
 
 rp_models: dict[str, Any] = {
     "linear": {"model": "linear", "limit": True},
@@ -397,7 +397,6 @@ def generate_configs() -> list[SimulationConfig]:
     configs = []
     # Varying rel. perm. models at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
-        continue
         for rp_model_name, rp_model in rp_models.items():
             if rp_model_name == "linear":
                 continue
@@ -431,8 +430,6 @@ def generate_configs() -> list[SimulationConfig]:
             # that adaptive Newton only makes sense for small-sized updates to produce
             # physical solutions. But setting ``hc_nl_convergence_tol`` low makes AHC
             # require a lot of time steps.
-            if init_s == 0.9 and refinement_factor == 0.1:
-                continue
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 file_name = f"ref_fac_{refinement_factor:.2f}"
                 folder_name = (

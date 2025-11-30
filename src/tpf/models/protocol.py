@@ -343,16 +343,6 @@ else:
             """Phase dependent pressure bc values on Dirichlet boundaries."""
             ...
 
-        def bc_dirichlet_saturation_values(
-            self, g: pp.Grid, phase: FluidPhase
-        ) -> np.ndarray:  # type: ignore
-            """Phase dependent saturation bc values on Dirichlet boundaries."""
-            ...
-
-        def bc_neumann_flux_values(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
-            """Phase flux bc values on Neumann boundaries."""
-            ...
-
         # SolutionStrategyTPF attributes and methods:
         def bound_saturation(
             self,

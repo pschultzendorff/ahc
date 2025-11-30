@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import numpy as np
 import porepy as pp
+import scipy as sp
 from porepy.viz.exporter import DataInput
 
 from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFProtocol
@@ -704,62 +705,36 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         return np.stack([flux_x, flux_y], axis=-1)
 
     def local_sp_est(self) -> None:
-        coeffs_new: np.ndarray = pp.get_solution_values(
+        coeffs: np.ndarray = pp.get_solution_values(
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
-        coeffs_old: np.ndarray = pp.get_solution_values(
-            COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, time_step_index=0
-        )
-        s_p0_new: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
-        s_p0_old: np.ndarray = self.wetting.s.previous_timestep().value(
-            self.equation_system
-        )  # type: ignore
-        # Type: Might get an unintended wrong answer here at the first time step.
+        s_p0: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
 
         def integrand(
             x: np.ndarray,
-            specifier: Literal["_norm", "_inner_product"],
         ) -> np.ndarray:
-            differences: list[np.ndarray] = []
+            q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
+            s_p2 = self.eval_saturation(q_p2)
 
-            for i, (coeffs, s_p0) in enumerate(
-                [(coeffs_new, s_p0_new), (coeffs_old, s_p0_old)]
-            ):
-                # The norm of the previous difference was already computed during the
-                # last time step.
-                if specifier == "_norm" and i == 1:
-                    break
+            # Time integral by diving by time step size. In :meth:`global_sp_est`, the
+            # previous time step value is added.
+            # ``s_p2`` has shape (num_quad_points_per_element, num_cells), while
+            # ``s_p0`` has shape (num_cells,). Since the latter is cellwise
+            # constant, we can broadcast.
+            return (s_p0[None, ...] - s_p2) ** 2 / self.time_manager.dt
 
-                q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
-                s_p2 = self.eval_saturation(q_p2)
-
-                # ``s_p2`` has shape (num_quad_points_per_element, num_cells), while
-                # ``s_p0`` has shape (num_cells,). Since the latter is cellwise
-                # constant, we can broadcast.
-                differences.append(s_p0[None, ...] - s_p2)
-
-            # Some trickery to either return the norm or the inner product.
-            if specifier == "_norm":
-                return differences[0] ** 2
-            elif specifier == "_inner_product":
-                return differences[0] * differences[1]
-
-        for specifier in ("_norm", "_inner_product"):
-            specifier = typing.cast(
-                Literal["_norm", "_inner_product"], specifier
-            )  # Satisfy mypy.
-            integral: Integral = self.quadrature_est.integrate(
-                functools.partial(integrand, specifier=specifier),
-                self.quadpy_elements,
-                recalc_points=False,
-                recalc_volumes=False,
-            )
-            pp.set_solution_values(
-                f"SP_estimator{specifier}",
-                integral.elementwise.squeeze(),
-                self.g_data,
-                iterate_index=0,
-            )
+        integral: Integral = self.quadrature_est.integrate(
+            integrand,
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+        pp.set_solution_values(
+            "SP_estimator",
+            integral.elementwise.squeeze(),
+            self.g_data,
+            iterate_index=0,
+        )
 
     def global_res_and_flux_est(self) -> float:
         r"""Compute the global residual and flux error estimator by summing local
@@ -894,29 +869,21 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         r"""Compute the global saturation-pressure estimator by summing local
          contributions and integrating in time.
 
-        The same temporal quadrature rule as for
-        :meth:`~ErrorEstimateMixin.global_darcy_est` is used.
+        The temporal derivative of an (assumed) linear function is integrated.
 
         Returns:
             estimator: The global saturation-pressure error estimator.
 
         """
-
+        # Calculate local spatial integrals at current time step.
         self.local_sp_est()
 
-        # Load local spatial integrals from current and previous time step and
-        # combined inner-product.
-        base_key = "SP_estimator"
+        new = pp.get_solution_values("SP_estimator", self.g_data, iterate_index=0)
+        old = pp.get_solution_values("SP_estimator", self.g_data, time_step_index=0)
 
-        new = pp.get_solution_values(base_key + "_norm", self.g_data, iterate_index=0)
-        inner = pp.get_solution_values(
-            base_key + "_inner_product", self.g_data, iterate_index=0
-        )
-        old = pp.get_solution_values(base_key + "_norm", self.g_data, time_step_index=0)
-
-        # Estimate time integral with quadrature rule for linear functions. NOTE The
+        # Integrate in time by multiplying constant value with time step size. NOTE The
         # stored values are already squared.
-        est = (self.time_manager.dt / 3 * (new + inner + old).sum()) ** 0.5
+        est = (self.time_manager.dt * (new + old).sum()) ** 0.5
 
         if est < 0:
             raise RuntimeError("Temporal integral of SP error estimate is negative.")
@@ -1056,7 +1023,7 @@ class SolutionStrategyEst(  # type: ignore
             )
 
         pp.set_solution_values(
-            "SP_estimator_norm",
+            "SP_estimator",
             initial_values,
             self.g_data,
             time_step_index=0,
@@ -1143,34 +1110,34 @@ class SolutionStrategyEst(  # type: ignore
             )
 
         time_step_values = pp.get_solution_values(
-            "SP_estimator_norm", self.g_data, iterate_index=0
+            "SP_estimator", self.g_data, iterate_index=0
         )
         pp.set_solution_values(
-            "SP_estimator_norm", time_step_values, self.g_data, time_step_index=0
+            "SP_estimator", time_step_values, self.g_data, time_step_index=0
         )
 
-        for pressure_key, specifier in itertools.product(
-            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
-        ):
-            time_step_values = pp.get_solution_values(
-                f"{pressure_key}{specifier}_potential", self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}{specifier}_potential",
-                time_step_values,
-                self.g_data,
-                time_step_index=0,
-            )
-        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
-            time_step_values = pp.get_solution_values(
-                f"{flux_name}_norm", self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{flux_name}_norm",
-                time_step_values,
-                self.g_data,
-                time_step_index=0,
-            )
+        # for pressure_key, specifier in itertools.product(
+        #     (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
+        # ):
+        #     time_step_values = pp.get_solution_values(
+        #         f"{pressure_key}{specifier}_potential", self.g_data, iterate_index=0
+        #     )
+        #     pp.set_solution_values(
+        #         f"{pressure_key}{specifier}_potential",
+        #         time_step_values,
+        #         self.g_data,
+        #         time_step_index=0,
+        #     )
+        # for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+        #     time_step_values = pp.get_solution_values(
+        #         f"{flux_name}_norm", self.g_data, iterate_index=0
+        #     )
+        #     pp.set_solution_values(
+        #         f"{flux_name}_norm",
+        #         time_step_values,
+        #         self.g_data,
+        #         time_step_index=0,
+        #     )
 
 
 class DataSavingEst(DataSavingRec):
@@ -1219,9 +1186,9 @@ class DataSavingEst(DataSavingRec):
                 data.append(
                     (
                         self.g,
-                        "SP_estimator_norm",
+                        "SP_estimator",
                         pp.get_solution_values(
-                            "SP_estimator_norm",
+                            "SP_estimator",
                             self.g_data,
                             time_step_index=time_step_index,
                             iterate_index=iterate_index,
