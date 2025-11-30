@@ -111,7 +111,7 @@ default_params: dict[str, Any] = {
     # SPE11 parameters:
     "spe11_case": "B",
     "spe11_heterogeneous_cap_pressure": False,
-    "spe11_entry_pressure": 500.0,  # [Pa]
+    "spe11_entry_pressure": 100.0,  # [Pa]
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
 }

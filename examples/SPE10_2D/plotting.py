@@ -36,7 +36,6 @@ def flatten(xx: list[list]) -> list:
 
 
 def read_data(config: SimulationConfig) -> SimulationStatistics:
-    # If not we can read the data.
     with open(config.folder_name / "solver_statistics.json", "r") as f:
         data: dict[str, Any] = json.load(f)
 
@@ -45,7 +44,7 @@ def read_data(config: SimulationConfig) -> SimulationStatistics:
         final_time = list(data.values())[-1]["current time"]
         return SimulationStatistics(converged=False, final_time=final_time)
 
-    # Else, read all estimators etc.
+    # If not we can read the data.
     statistics = SimulationStatistics()
 
     for time_step in list(data.values())[1:]:
@@ -68,8 +67,8 @@ def read_data(config: SimulationConfig) -> SimulationStatistics:
             statistics.hc_estimator.append(hc_estimator)
             statistics.lambdas.append(time_step["hc_lambdas"])
         elif config.solver_name.startswith("Newton"):
-            if config.solver_name == "NewtonAppleyard":
-                pass
+            # if config.solver_name == "NewtonAppleyard":
+            #     pass
             # Read iterations per time step.
             num_nl_iterations = time_step["num_iteration"]
             spat_estimator = time_step["spatial_est"]
@@ -421,13 +420,14 @@ def plot_estimators(
 
 if __name__ == "__main__":
     configs = generate_configs()
-    # TODO: Check this!
-    # configs_varying_rp_init_s_02 = configs[:15]
-    configs_varying_rp_init_s_03 = configs[0:16]
-    configs_varying_init_s = configs[16:] + configs[:4]
-    # configs_cap_press = configs[15:20] + configs[45:]
+    configs_viscous_varying_rp_init_s_02 = configs[:16]
+    configs_viscous_varying_rp_init_s_03 = configs[16:32]
+    configs_viscous_varying_init_s = configs[4:8] + configs[32:44] + configs[20:24]
+    configs_viscous_and_cap_varying_cap_init_s_03 = configs[44:60]
+    configs_viscous_and_cap_varying_init_s = configs[60:72] + configs[44:48]
+    configs_viscous_and_cap_varying_entry_press = configs[44:48] + configs[72:]
     data_1 = {}
-    for config in configs_varying_rp_init_s_03:
+    for config in configs_viscous_varying_rp_init_s_03:
         if config.rp_model_2["model"] == "Corey":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
         elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
@@ -437,60 +437,63 @@ if __name__ == "__main__":
         data_1,
         "rel. perm. model",
     )
-    # data_2 = {}
-    # for config in configs_varying_rp_init_s_03:
-    #     if config.rp_model_2["model"] == "Corey":
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-    #     else:
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
-    #     data_2[key] = read_data(config)
-    # fig2 = plot_nl_iterations(
-    #     data_2,
-    #     "rel. perm. model",
-    # )
+    data_2 = {}
+    for config in configs_viscous_varying_rp_init_s_03:
+        if config.rp_model_2["model"] == "Corey":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
+        else:
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        data_2[key] = read_data(config)
+    fig2 = plot_nl_iterations(
+        data_2,
+        "rel. perm. model",
+    )
     data_3 = {}
-    for config in configs_varying_init_s:
+    for config in configs_viscous_varying_init_s:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
-        try:
-            statistics = read_data(config)
-        except ValueError:
-            statistics = SimulationStatistics()
+        statistics = read_data(config)
         data_3[key] = statistics
     fig3 = plot_nl_iterations(
         data_3,
         r"$s_\mathrm{w}^0$",
     )
-    # data_4 = {}
-    # for config in configs_cap_press:
-    #     if not config.solver_name.startswith("AHC"):
-    #         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
-    #     else:
-    #         # TODO Fix this! Run from None with p_e=30 as well and change configs for
-    #         # cap. pressure above!!!!
-    #         # assert config.cp_model_2["model"] != "linear", "Wrong config chosen"
-    #         # No need to plot AHC designs for the adaptive error ratio 0.1, which stops
-    #         # at the simple problem anyways.
-    #         if config.adaptive_error_ratio == 0.1:
-    #             continue
-    #         else:
-    #             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
-    #     try:
-    #         statistics = read_data(config)
-    #     except ValueError:
-    #         statistics = SimulationStatistics()
-    #     data_4[key] = statistics
-    # fig4 = plot_nl_iterations(
-    #     data_4,
-    #     "entry pressure [Pa]",
-    # )
+    data_4 = {}
+    for config in configs_viscous_and_cap_varying_cap_init_s_03:
+        key = (
+            f"{config.solver_name}_{config.adaptive_error_ratio}_"
+            + f"{config.cp_model_2['model']} $nb = {config.cp_model_2['n_b']}$"
+            + f" & {config.rp_model_2['model']}"
+        )
+        if config.rp_model_2["model"] == "Corey":
+            key += f"$p = {config.rp_model_2['power']}$"
+        statistics = read_data(config)
+        data_4[key] = statistics
+    fig4 = plot_nl_iterations(
+        data_4,
+        "cap. press. model & rel. perm. model",
+    )
+    data_5 = {}
+    for config in configs_viscous_and_cap_varying_init_s:
+        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
+        statistics = read_data(config)
+        data_5[key] = statistics
+    fig5 = plot_nl_iterations(
+        data_5,
+        r"$s_\mathrm{w}^0$",
+    )
+    data_6 = {}
+    for config in configs_viscous_and_cap_varying_entry_press:
+        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
+        statistics = read_data(config)
+        data_6[key] = statistics
+    fig6 = plot_nl_iterations(
+        data_6,
+        r"$p_\mathrm{e}$",
+    )
 
-    fig1.savefig(dirname / "nl_iters_rp_model_s_init_03.png")
-    # fig2.savefig(dirname / "nl_iters_rp_model_s_init_03.png")
-    fig3.savefig(dirname / "nl_iters_s_init.png")
-    # fig4.savefig(dirname / "nl_iters_cap_press.png")
-    # fig5 = plot_estimators(data_1["AHC_0.005_Corey 2"], combine_disc_est=True)
-    # fig5.savefig(dirname / "estimators_ahc_s0.2_Corey_2.png")
-    # fig6 = plot_estimators(data_1["NewtonAppleyard_0.1_Corey 2"])
-    # fig6.savefig(dirname / "estimators_NewtonAppleyard_s0.2_Corey_2.png")
-    # fig7 = plot_estimators(data_4["AHC from None_0.005_100.0"], combine_disc_est=True)
-    # fig7.savefig(dirname / "estimators_ahc_cp100.png")
+    fig1.savefig(dirname / "nl_iters_viscous_varying_rp_init_s_02.png")
+    fig2.savefig(dirname / "nl_iters_viscous_varying_rp_init_s_03.png")
+    fig3.savefig(dirname / "nl_iters_viscous_varying_init_s.png")
+    fig4.savefig(dirname / "nl_iters_viscous_and_cap_varying_cap_init_s_03.png")
+    fig5.savefig(dirname / "nl_iters_viscous_and_cap_varying_init_s.png")
+    fig6.savefig(dirname / "nl_iters_viscous_and_cap_varying_entry_press.png")

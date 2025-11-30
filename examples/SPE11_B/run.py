@@ -136,16 +136,6 @@ default_params = {
 }
 
 
-init_time_step_params = {
-    "schedule": np.array([0.0, 1.0 * pp.DAY]),
-    "dt_init": 1.0 * pp.DAY,
-    "constant_dt": False,
-    "dt_min_max": (1e-1 * pp.DAY, 1.0 * pp.DAY),
-    "iter_optimal_range": (9, 12),
-    "iter_relax_factors": (0.7, 1.3),
-    "recomp_factor": 0.1,
-    "recomp_max": 8,
-}
 default_time_manager_params = {
     "schedule": np.array([0.0, 3000.0 * pp.DAY]),
     "dt_init": 3000.0 * pp.DAY,
@@ -366,12 +356,12 @@ def run_simulation(config: SimulationConfig) -> None:
 
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
-    ("AHC", 0.1),
+    ("AHC", 0.001),
     ("HC", 0.1),
     ("Newton", 0.1),
     ("NewtonAppleyard", 0.1),
 ]
-refinement_factors: list[float] = [20, 5, 0.5]  # , 0.5]
+refinement_factors: list[float] = [10, 3, 0.5]  # , 0.5]
 
 rp_models: dict[str, Any] = {
     "linear": {"model": "linear", "limit": True},
@@ -448,9 +438,9 @@ def generate_configs() -> list[SimulationConfig]:
                         refinement_factor=refinement_factor,
                         init_s=init_s,
                         rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_models["Brooks-Corey"],
+                        rp_model_2=rp_models["Corey_power_2"],
                         cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["Brooks-Corey"],
+                        cp_model_2=cp_models["linear"],
                     )
                 )
 

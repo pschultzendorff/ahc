@@ -262,7 +262,6 @@ def run_simulation(config: SimulationConfig) -> None:
 
 # region RUN
 
-
 if __name__ == "__main__":
     rp_models: dict[str, Any] = {
         "linear": {
@@ -302,7 +301,7 @@ if __name__ == "__main__":
         cp_model_1=cp_models["None"],
         cp_model_2=cp_models["None"],
     )
-    # run_simulation(config)
+    run_simulation(config)
 
     # Nonlinear
     config = SimulationConfig(
@@ -317,9 +316,9 @@ if __name__ == "__main__":
         cp_model_1=cp_models["None"],
         cp_model_2=cp_models["linear_30"],
     )
-    # run_simulation(config)
+    run_simulation(config)
 
-    # Nonlinear
+    # Nonlinear but stop at the first homotopy step
     config = SimulationConfig(
         file_name=f"nonlinear_stop_early_{init_s}",
         folder_name=dirname / f"nonlinear_stop_early_{init_s}",

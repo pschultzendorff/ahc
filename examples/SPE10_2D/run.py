@@ -403,13 +403,6 @@ rp_models = {
         "n_b": 2.0,
         "eta": 2.0,
     },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-    # "van Genuchten": {
-    #     "model": "van Genuchten-Mualem",
-    #     "limit": True,
-    #     "n_g": 2,
-    #     "m_g": 0.5,
-    #     "kappa": 2.0,
-    # },
     "Corey_power_2": {"model": "Corey", "power": 2, "limit": True},
     "Corey_power_3": {"model": "Corey", "power": 3, "limit": True},
 }
@@ -447,7 +440,6 @@ def generate_configs() -> list[SimulationConfig]:
     configs = []
 
     # region VISCOUS
-    # NOTE HC affects only the rel. perm. models, not the capillary pressure models.
 
     # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3 with linear capillary
     # pressure.
@@ -477,7 +469,7 @@ def generate_configs() -> list[SimulationConfig]:
                     )
                 )
 
-    # # Varying init_s for the more challenging Brooks-Corey model.
+    # # Varying init_s for the more challenging Brooks-Corey rel. perm. model.
     for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"init_s_{init_s:.2f}"
@@ -498,7 +490,7 @@ def generate_configs() -> list[SimulationConfig]:
                     init_s=init_s,
                     rp_model_1={"model": "linear", "limit": True},
                     rp_model_2=rp_models["Brooks-Corey_nb_2"],
-                    cp_model_1=cp_models["linear"],
+                    cp_model_1=cp_models["None"],
                     cp_model_2=cp_models["linear"],
                 )
             )
@@ -508,7 +500,8 @@ def generate_configs() -> list[SimulationConfig]:
     # region VISCOUS_AND_CAPILLARY
     # NOTE HC starts with a linear rel. perm. model and zero capillary pressure.
 
-    # Varying rel. perm. models at init_s = 0.3 with Brooks-Corey capillary pressure.
+    # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
+    # capillary pressure.
     for rp_model_name, rp_model in rp_models.items():
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             folder_name = (
@@ -540,7 +533,7 @@ def generate_configs() -> list[SimulationConfig]:
             )
 
     # # Varying init_s for the less challenging Brooks-Corey model.
-    for init_s in list(np.linspace(0.225, 0.3, 4)[:-1]):
+    for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
