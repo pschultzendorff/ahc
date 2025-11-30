@@ -35,9 +35,7 @@ import numpy as np
 import porepy as pp
 from tpf.derived_models.spe11 import SPE11Mixin, case_B
 from tpf.models.flow_and_transport import TwoPhaseFlow
-from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
-from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsANewton
 
 # region SETUP
@@ -93,7 +91,6 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class SPE11Newton(
-    IterationExportingMixin,
     InitialConditionsMixin,
     SPE11Mixin,
     TwoPhaseFlow,
@@ -112,17 +109,16 @@ default_params: dict[str, Any] = {
     "cap_press_constants": {},
     "grid_type": "simplex",
     # SPE11 parameters:
-    "spe11_case": "A",
+    "spe11_case": "B",
     "spe11_heterogeneous_cap_pressure": False,
-    "spe11_entry_pressure": 0.0,  # [Pa]
-    # "spe11_entry_pressure": 0.0,
+    "spe11_entry_pressure": 500.0,  # [Pa]
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
 }
 
 time_manager_params: dict[str, Any] = {
-    "schedule": np.array([0.0, 10.0 * pp.DAY]),
-    "dt_init": 0.1 * pp.DAY,
+    "schedule": np.array([0.0, 3000.0 * pp.DAY]),
+    "dt_init": 1 * pp.DAY,
     "constant_dt": True,
 }
 
@@ -231,15 +227,14 @@ def run_simulation(config: SimulationConfig) -> None:
 
 if __name__ == "__main__":
     rp_model: dict[str, Any] = {
-        "model": "linear",
+        "model": "Brooks-Corey-Mualem",
         "limit": True,
         "n_b": 1.0,
         "eta": 2.0,
     }  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
 
     cp_model: dict[str, Any] = {
-        "model": "linear",
-        "linear_param": 0.0,
+        "model": "Brooks-Corey",
         "n_b": 2.0,
     }
     config = SimulationConfig(

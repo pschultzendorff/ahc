@@ -42,7 +42,6 @@ Model description:
 
 """
 
-import itertools
 import logging
 import os
 import pathlib
@@ -135,7 +134,7 @@ class SPE10Newton(
 # endregion
 
 # region UTILS
-spe10_layer: int = 80
+spe10_layer: int = 55
 
 default_params = {
     "progressbars": True,
@@ -383,13 +382,13 @@ def clean_up_after_simulation(config: SimulationConfig) -> None:
 # endregion
 
 # region RUN
-solvers = [
-    "AHC",
-    "Newton",
-    "NewtonAppleyard",
-    "HC",
+solvers_and_ratios: list[tuple[str, float]] = [
+    ("AHC", 0.001),
+    ("HC", 0.1),
+    ("Newton", 0.1),
+    ("NewtonAppleyard", 0.1),
 ]
-adaptive_error_ratios = [0.1, 0.001]
+
 
 rp_models = {
     "Brooks-Corey_nb_4": {
@@ -426,14 +425,6 @@ cp_models = {
         "entry_pressure": 0 * pp.PASCAL,
         "limit": False,
     },
-    # "van Genuchten": {
-    #     "model": "van Genuchten",
-    #     "n_g": 2,
-    #     "m_g": 0.5,
-    #     "beta_g": 1e-2,
-    #     "limit": True,
-    #     "max": 1e6,
-    # },
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey",
         "n_b": 4.0,
@@ -463,18 +454,7 @@ def generate_configs() -> list[SimulationConfig]:
     for init_s in [0.2, 0.3]:
         continue
         for rp_model_name, rp_model in rp_models.items():
-            for solver_name, adaptive_error_ratio in itertools.product(
-                solvers, adaptive_error_ratios
-            ):
-                # Newton solvers and HC are only run at an adaptive error ration of 0.1.
-                # For HC, the adaptive error ratio is not used.
-                if solver_name != "AHC" and adaptive_error_ratio == 0.001:
-                    continue
-                if solver_name == "AHC" and adaptive_error_ratio != 0.001:
-                    continue
-                # AHCAppleyard is not run with varying rel. perm. models.
-                if solver_name in ["AHCAppleyard", "HCAppleyard"]:
-                    continue
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 folder_name = (
                     dirname
                     / f"{solver_name}_{adaptive_error_ratio:.3f}"
@@ -500,19 +480,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # # Varying init_s for the more challenging Brooks-Corey model.
     for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
-        for solver_name, adaptive_error_ratio in itertools.product(
-            solvers, adaptive_error_ratios
-        ):
-            continue
-            # Newton solvers and HC are only run at an adaptive error ration of 0.1.
-            # For HC, the adaptive error ratio is not used.
-            if solver_name != "AHC" and adaptive_error_ratio == 0.001:
-                continue
-            if solver_name == "AHC" and adaptive_error_ratio != 0.001:
-                continue
-            # AHCAppleyard is not run with varying saturations.
-            if solver_name in ["AHCAppleyard", "HCAppleyard"]:
-                continue
+        for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
                 dirname
@@ -543,18 +511,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying rel. perm. models at init_s = 0.3 with Brooks-Corey capillary pressure.
     for rp_model_name, rp_model in rp_models.items():
-        for solver_name, adaptive_error_ratio in itertools.product(
-            solvers, adaptive_error_ratios
-        ):
-            # Newton solvers and HC are only run at an adaptive error ration of 0.1.
-            # For HC, the adaptive error ratio is not used.
-            if solver_name != "AHC" and adaptive_error_ratio == 0.001:
-                continue
-            if solver_name == "AHC" and adaptive_error_ratio != 0.001:
-                continue
-            # AHCAppleyard is not run with varying rel. perm. models.
-            if solver_name in ["AHCAppleyard", "HCAppleyard"]:
-                continue
+        for solver_name, adaptive_error_ratio in solvers_and_ratios:
             folder_name = (
                 dirname
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
@@ -585,18 +542,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # # Varying init_s for the less challenging Brooks-Corey model.
     for init_s in list(np.linspace(0.225, 0.3, 4)[:-1]):
-        for solver_name, adaptive_error_ratio in itertools.product(
-            solvers, adaptive_error_ratios
-        ):
-            # Newton solvers and HC are only run at an adaptive error ration of 0.1.
-            # For HC, the adaptive error ratio is not used.
-            if solver_name != "AHC" and adaptive_error_ratio == 0.001:
-                continue
-            if solver_name == "AHC" and adaptive_error_ratio != 0.001:
-                continue
-            # AHCAppleyard is not run with varying saturations.
-            if solver_name in ["AHCAppleyard", "HCAppleyard"]:
-                continue
+        for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
                 dirname
@@ -622,16 +568,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Less challenging Brooks-Corey cap. pressure with different entry pressures.
     for entry_pressure in [100, 300]:
-        for solver_name, adaptive_error_ratio in itertools.product(
-            solvers, adaptive_error_ratios
-        ):
-            # Newton solvers and HC are only run at an adaptive error ration of 0.1.
-            # For HC, the adaptive error ratio is not used.
-            if not solver_name.startswith("AHC") and adaptive_error_ratio == 0.001:
-                continue
-            # AHC is only run with adaptive error ratio 0.001.
-            elif solver_name.startswith("AHC") and adaptive_error_ratio != 0.001:
-                continue
+        for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
             folder_name = (
                 dirname

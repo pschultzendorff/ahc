@@ -37,6 +37,7 @@ pressure and 20°C.
 from typing import Any
 
 from porepy.applications.material_values.fluid_values import water as _water
+
 from tpf.utils.constants_and_typing import FEET, LB, cP
 
 # The values in the paper are given in [cP] and [lb ft^-3]. We convert them to [Pa s]
@@ -59,8 +60,17 @@ water.update(
     }
 )
 
-co2: dict[str, Any] = {
+# CO2 values calculated with https://www.peacesoftware.de/einigewerte/calc_co2.php7
+# Surface conditions: 1 bar and 25° C
+co2_surface: dict[str, Any] = {
     "name": "co2",
-    "density": 1.8393,  # [kg m^-3]
-    "viscosity": 1.4675e-05,  # [Pa s]
+    "density": 1.7845,  # [kg m^-3]
+    "viscosity": 1.493e-05,  # [Pa s]
+}
+
+# Reservoir conditions: 350 bar and 70° C
+co2_reservoir: dict[str, Any] = {
+    "name": "co2",
+    "density": 826.3,  # [kg m^-3]
+    "viscosity": 7.772e-05,  # [Pa s]
 }

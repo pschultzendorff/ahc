@@ -175,7 +175,7 @@ def run_simulation(config: SimulationConfig) -> None:
 # region RUN
 
 if __name__ == "__main__":
-    for spe10_layer in [80]:  # [10, 80]:
+    for spe10_layer in [10, 55]:
         config = SimulationConfig(
             file_name=f"plotting_layer_{spe10_layer}",
             folder_name=dirname / f"plotting_layer_{spe10_layer}",

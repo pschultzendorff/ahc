@@ -187,6 +187,17 @@ logger = logging.getLogger(__name__)
 
 
 class DarcyFluxes(TPFProtocol):
+    def phase_potential_discretization(self, g: pp.Grid) -> pp.ad.TpfaAd:
+        return pp.ad.TpfaAd(self.flux_key, [g])
+
+    def capillary_potential_discretization(self, g: pp.Grid) -> pp.ad.TpfaAd:
+        return pp.ad.TpfaAd(self.cap_potential_key, [g])
+
+    def phase_mobility_discretization(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> pp.ad.UpwindAd:
+        return pp.ad.UpwindAd(phase.mobility_key, [g])
+
     def phase_mobility(
         self,
         g: pp.Grid,
@@ -221,7 +232,7 @@ class DarcyFluxes(TPFProtocol):
         """
         # Get data and discretization.
         viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
-        upwind = pp.ad.UpwindAd(phase.mobility_key, [g])
+        upwind = self.phase_mobility_discretization(g, phase)
 
         # NOTE Neumann bc are no-flow, hence no need to determine mobilities there.
         mobility = (upwind.upwind() @ self.rel_perm(self.wetting.s, phase)) / viscosity
@@ -259,7 +270,7 @@ class DarcyFluxes(TPFProtocol):
             self.bc_dirichlet_pressure_values(g, phase)
         )
         phase_vector_source = pp.ad.DenseArray(self.vector_source(g, phase))
-        tpfa = pp.ad.TpfaAd(self.flux_key, [g])
+        tpfa = self.phase_potential_discretization(g)
 
         # Phase flux terms.
         pressure_potential = (
@@ -298,8 +309,8 @@ class DarcyFluxes(TPFProtocol):
         # reasons.
         # NOTE As capillary flux over boundaries is assumed to be zero, it does not
         # matter which flux key is used for TPFA.
-        tpfa = pp.ad.TpfaAd(self.flux_key, [g])
-        tpfa_cap_press = pp.ad.TpfaAd(self.cap_potential_key, [g])
+        tpfa = self.phase_potential_discretization(g)
+        tpfa_cap_press = self.capillary_potential_discretization(g)
 
         # Capillary pressure and phase mobilities.
         pressure_c = self.cap_press(self.wetting.s)
@@ -337,8 +348,8 @@ class DarcyFluxes(TPFProtocol):
 
         """
         # Get data and spatial discretization.
-        tpfa = pp.ad.TpfaAd(self.flux_key, [g])
-        tpfa_cap_press = pp.ad.TpfaAd(self.cap_potential_key, [g])
+        tpfa = self.phase_potential_discretization(g)
+        tpfa_cap_press = self.capillary_potential_discretization(g)
         vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
         vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
 
@@ -931,6 +942,7 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         self.discretize()
         self._initialize_linear_solver()
+        self.set_nonlinear_discretizations()
 
         # Save the initial values.
         self.save_data_time_step()
@@ -955,7 +967,10 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         super().set_discretization_parameters()
 
         # Constant parameters for TPFA discretizations.
-        if self.nonlinear_solver_statistics.num_iteration == 0:
+        if (
+            self.nonlinear_solver_statistics.num_iteration == 0
+            and self.time_manager.time_index == 0
+        ):
             perm = self.permeability(self.g)
             # Different treatment for scalar and tensor permeability.
             if isinstance(perm, np.ndarray):
@@ -999,10 +1014,12 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                 phase_potential: np.ndarray = self.phase_potential(self.g, phase).value(  # type: ignore
                     self.equation_system
                 )
+            elif self.time_manager.time_index == 0:
+                # Use unit values for the potential at the start of the simulation.
+                phase_potential = -np.ones(self.g.num_faces)
             else:
-                # Use unit values for the potential at the start of the time step.
-                phase_potential = np.ones(self.g.num_faces)
-
+                # Use previous values at the start of a new time step.
+                return None
             pp.initialize_data(
                 self.g,
                 self.g_data,
@@ -1115,21 +1132,13 @@ class SolutionStrategyTPF(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
 
     @typing.override
-    def rediscretize(self) -> None:
-        # TODO Rediscretize only nonlinear terms.
-        t_0 = time.time()
-        self.equation_system.discretize()
-        for phase in self.phases.values():
-            # TODO Cache `phase_potential`.
-            phase_potential = self.phase_potential(self.g, phase)
-            phase_potential.discretize(self.mdg)
-        logger.debug(f"Discretized in {time.time() - t_0:.2e} seconds")
-
-    @typing.override
     def set_nonlinear_discretizations(self) -> None:
-        # TODO Collect all nonlinear discretizations in one place. This way, linear
-        # discretizations do not get called at each nonlinear iteration.
-        ...
+        self.add_nonlinear_discretization(
+            self.phase_mobility_discretization(self.g, self.wetting).upwind(),
+        )
+        self.add_nonlinear_discretization(
+            self.phase_mobility_discretization(self.g, self.nonwetting).upwind(),
+        )
 
     @typing.override
     def assemble_linear_system(self) -> None:

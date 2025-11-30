@@ -110,6 +110,7 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class ModelClass(
+    IterationExportingMixin,
     InitialConditionsMixin,
     SPE10Mixin,
     TwoPhaseFlowErrorEstimate,
@@ -267,11 +268,20 @@ def run_simulation(config: SimulationConfig) -> None:
 # region RUN
 
 rp_models: dict[str, Any] = {
-    "linear": {"model": "linear", "limit": True},
+    "linear": {
+        "model": "Brooks-Corey-Mualem",
+        "limit": True,
+        "n_b": 1.0,
+        "eta": 2.0,
+    },
 }
 
 cp_models: dict[str, Any] = {
-    "linear": {"model": "linear", "linear_param": 1.0, "entry_pressure": 30.0},
+    "linear": {
+        "model": "Brooks-Corey",
+        "n_b": 2.0,
+        "entry_pressure": 30 * pp.PASCAL,
+    },
 }
 
 

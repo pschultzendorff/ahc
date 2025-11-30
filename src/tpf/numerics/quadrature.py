@@ -260,7 +260,6 @@ class BaseScheme(abc.ABC):
     # make use of numba as the other methods are only called once. When they are
     # recalculated each time, ``transform`` and ``calc_volumes`` should be decorated
     # with ``@njit`` as well.
-    # TODO How to implement conditional numba decoration?
     # TODO Must ``func`` be decorated with ``@njit`` for this to be efficient?
     # TODO Make this efficient!
     @staticmethod

@@ -111,8 +111,6 @@ else:
 
         """
 
-        formulation: Literal["fractional_flow"]
-        """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
         flow_equation_weight: float
         """Weighting factor for the flow equation in the residual and Jacobian."""
         transport_equation_weight: float
@@ -282,6 +280,10 @@ else:
             ...
 
         # DarcyFluxes attributes and methods:
+        def phase_mobility_discretization(
+            self, g: pp.Grid, phase: FluidPhase
+        ) -> pp.ad.UpwindAd: ...
+
         def phase_mobility(
             self,
             g: pp.Grid,
@@ -539,7 +541,7 @@ else:
         def postprocess_pressure_vohralik(
             self,
             pressure_key: PRESSURE_KEY,
-            flux_specifier: str = "",
+            specifier: str = "",
             prepare_simulation: bool = False,
         ) -> None:
             """Postprocess pressure into elementwise P2 polynomials."""
@@ -552,14 +554,6 @@ else:
         ) -> None:
             r"""Reconstruct pressures in :math:`H^1_0(\Omega)` by applying the Oswald
             interpolator."""
-            ...
-
-        @staticmethod
-        def _evaluate_poly_at_points(
-            coeffs: np.ndarray, x: np.ndarray, y: np.ndarray
-        ) -> np.ndarray:
-            """Evaluate P2 polynomial defined by `coeffs` at given (x, y)
-            coordinates."""
             ...
 
         # EquilibratedFluxMixin attributes and methods:

@@ -297,7 +297,7 @@ class EstimatesHCMixin(
         def integrand(x: np.ndarray) -> np.ndarray:
             coeffs_diff = fv_coeffs_new - fv_coeffs_old
             flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
-            return np.sum(flux_diff**2, axis=-1)
+            return (flux_diff**2).sum(axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -365,11 +365,12 @@ class EstimatesHCMixin(
 
                 differences.append(flux_diff)
 
-            # Some trickery to either return the norm or the inner product.
+            # Some trickery to either return the square of the norm or the inner
+            # product.
             if specifier == "_norm":
-                return differences[0] ** 2
+                return (differences[0] ** 2).sum(axis=-1)
             elif specifier == "_inner_product":
-                return differences[0] * differences[1]
+                return (differences[0] * differences[1]).sum(axis=-1)
 
         # Integrate elementwise and store the result.
         for specifier in ("_norm", "_inner_product"):
@@ -383,7 +384,7 @@ class EstimatesHCMixin(
                 recalc_volumes=False,
             )
             pp.set_solution_values(
-                f"C_estimator{specifier}",
+                f"{flux_name}_C_estimator{specifier}",
                 integral.elementwise.squeeze(),
                 self.g_data,
                 iterate_index=0,
@@ -414,7 +415,7 @@ class EstimatesHCMixin(
         def integrand(x: np.ndarray) -> np.ndarray:
             coeffs_diff = fv_coeffs - fv_equil_coeffs
             flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
-            return np.sum(flux_diff**2, axis=-1)
+            return (flux_diff**2).sum(axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -552,6 +553,11 @@ class EstimatesHCMixin(
             # NOTE The stored values are already squared.
             estimators.append(self.time_manager.dt / 3 * (new + inner + old).sum())
 
+            if estimators[-1] < 0:
+                raise RuntimeError(
+                    "Temporal integral of HC error estimate is negative."
+                )
+
         # Sum estimators for both equations.
         est: float = sum(estimators) ** (1 / 2)
         logger.info(f"Global continuation error estimator: {est}")
@@ -684,7 +690,7 @@ class SolutionStrategyAHC(
         # Check :meth:`DataSavingHC._data_to_export`.
         for flux_name, estimator_name in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
-            ["C_estimator", "L_estimator_new"],
+            ["C_estimator_norm", "L_estimator_new"],
         ):
             pp.set_solution_values(
                 f"{flux_name}_{estimator_name}",
@@ -765,10 +771,10 @@ class SolutionStrategyAHC(
                 "F_estimator_old",
                 "D_estimator_norm",
                 "T_estimator",
-                "C_estimator",
+                "C_estimator_norm",
                 "L_estimator",
                 "energy_norm",
-                "wrt_goal_rel_perm_RT0_coeffs",
+                "wrt_goal_const_laws_RT0_coeffs",
             ],
         ):
             key = f"{flux_name}_{specifier}"
@@ -976,7 +982,8 @@ class SolutionStrategyAHC(
         # would avoid one Newton iteration.
 
     def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
-        """Calculate fluxes and mobilities w.r.t. the goal relative permeabilities."""
+        """Calculate fluxes and total mobility w.r.t. the goal relative
+        permeabilities."""
         # Ignore Pylance complaining about the method not being implemented.
         super().eval_postproc_qtys(time_step_index=time_step_index)  # type: ignore
 
@@ -987,15 +994,15 @@ class SolutionStrategyAHC(
         for quantity_name in [
             TOTAL_FLUX,
             WETTING_FLUX,
+            "capillary_flux",
             "total_mobility",
-            "fractional_flow",
         ]:
             quantity = self.postproc_ad_ops[quantity_name].value(self.equation_system)
             pp.set_solution_values(
                 f"{quantity_name}_wrt_goal_const_laws",
                 quantity,  # type: ignore
                 self.g_data,
-                time_step_index=time_step_index,  # TODO Is saving at time step needed?
+                time_step_index=time_step_index,
                 iterate_index=0,
             )
 
@@ -1018,24 +1025,20 @@ class SolutionStrategyAHC(
                 self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
 
-        # NOTE The fluxes w.r.t. goal const. laws are only used to post-process the
-        # global and complementary pressures and in the contination estimators and do
-        # not require equilibration.
-        for flux_name, flux_specifier in (
-            (TOTAL_FLUX, "_wrt_goal_const_laws"),
-            (WETTING_FLUX, "_wrt_goal_const_laws"),
-        ):
+        # NOTE The fluxes w.r.t. goal const. laws are only used in the contination
+        # estimators and do not require equilibration.
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX, "capillary_flux"):
             flux_name = typing.cast(FLUX_NAME, flux_name)  # Satisfy mypy.
             self.extend_fv_fluxes(
                 flux_name,
-                flux_specifier=flux_specifier,
+                flux_specifier="_wrt_goal_const_laws",
                 prepare_simulation=prepare_simulation,
             )
 
         for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
             self.postprocess_pressure_vohralik(
                 pressure_key,
-                flux_specifier="_wrt_goal_const_laws",
+                specifier="_wrt_goal_const_laws",
                 prepare_simulation=prepare_simulation,
             )
             self.reconstruct_pressure_vohralik(
@@ -1140,10 +1143,10 @@ class SolutionStrategyAHC(
                 "F_estimator_old",
                 "D_estimator_norm",
                 "T_estimator",
-                "C_estimator",
+                "C_estimator_norm",
                 "L_estimator",
                 "energy_norm",
-                "wrt_goal_rel_perm_RT0_coeffs",
+                "wrt_goal_const_laws_RT0_coeffs",
             ],
         ):
             key = f"{flux_name}_{specifier}"

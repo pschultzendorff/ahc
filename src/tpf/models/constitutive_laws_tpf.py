@@ -534,32 +534,33 @@ class CapillaryPressure(TPFProtocol):
 
         s_normalized = self.normalize_saturation(saturation_w, self.wetting)
 
-        if cap_press_constants.model == "Brooks-Corey":
-            p_c: pp.ad.Operator = entry_pressure * s_normalized ** pp.ad.Scalar(
-                -1 / cap_press_constants.n_b
-            )
-        elif cap_press_constants.model == "linear":
-            linear_param = pp.ad.Scalar(
-                cap_press_constants.linear_param, name="linear param"
-            )
-            p_c = entry_pressure + linear_param * (pp.ad.Scalar(1) - s_normalized)
-        elif cap_press_constants.model == "van Genuchten":
-            beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
-            p_c = (
-                (
-                    (s_normalized ** pp.ad.Scalar(-1 / cap_press_constants.m_g))
-                    - pp.ad.Scalar(1)
-                )
-                ** pp.ad.Scalar(1 / cap_press_constants.n_g)
-            ) / beta_g
-
-        if cap_press_constants.limit:
-            # Limit capillary pressure from above.
-            p_c = self.limit_cap_press(p_c, cap_press_constants=cap_press_constants)
-
         if cap_press_constants.model is None:
             # Return cap. pressure 0. Do NOT limit to avoid non zero derivatives.
             p_c = pp.ad.Scalar(0)
+
+        else:
+            if cap_press_constants.model == "Brooks-Corey":
+                p_c: pp.ad.Operator = entry_pressure * s_normalized ** pp.ad.Scalar(
+                    -1 / cap_press_constants.n_b
+                )
+            elif cap_press_constants.model == "linear":
+                linear_param = pp.ad.Scalar(
+                    cap_press_constants.linear_param, name="linear param"
+                )
+                p_c = entry_pressure + linear_param * (pp.ad.Scalar(1) - s_normalized)
+            elif cap_press_constants.model == "van Genuchten":
+                beta_g = pp.ad.Scalar(cap_press_constants.beta_g)
+                p_c = (
+                    (
+                        (s_normalized ** pp.ad.Scalar(-1 / cap_press_constants.m_g))
+                        - pp.ad.Scalar(1)
+                    )
+                    ** pp.ad.Scalar(1 / cap_press_constants.n_g)
+                ) / beta_g
+
+            if cap_press_constants.limit:
+                # Limit capillary pressure from above.
+                p_c = self.limit_cap_press(p_c, cap_press_constants=cap_press_constants)
 
         p_c.set_name("cap. press.")
 
@@ -603,36 +604,41 @@ class CapillaryPressure(TPFProtocol):
 
         s_normalized = self.normalize_saturation_np(saturation_w, self.wetting)
 
-        if cap_press_constants.model == "Brooks-Corey":
-            p_c: np.ndarray = entry_pressure * np.power(
-                s_normalized,
-                -1 / cap_press_constants.n_b,
-                out=np.full_like(s_normalized, cap_press_constants.max),
-                where=s_normalized != 0,
-            )
-        elif cap_press_constants.model == "linear":
-            p_c = entry_pressure + cap_press_constants.linear_param * (1 - s_normalized)
-        elif cap_press_constants.model == "van Genuchten":
-            p_c = (
-                (
-                    np.power(
-                        s_normalized,
-                        -1 / cap_press_constants.m_g,
-                        out=np.full_like(s_normalized, cap_press_constants.max),
-                        where=s_normalized != 0,
-                    )
-                    - 1
-                )
-                ** (1 / cap_press_constants.n_g)
-            ) / cap_press_constants.beta_g
-
-        if cap_press_constants.limit:
-            # Limit capillary pressure from above.
-            p_c = self.limit_cap_press_np(p_c, cap_press_constants=cap_press_constants)
-
         if cap_press_constants.model is None:
             # Return cap. pressure 0. Do NOT limit to avoid non zero derivatives.
             p_c = 0 * s_normalized
+
+        else:
+            if cap_press_constants.model == "Brooks-Corey":
+                p_c: np.ndarray = entry_pressure * np.power(
+                    s_normalized,
+                    -1 / cap_press_constants.n_b,
+                    out=np.full_like(s_normalized, cap_press_constants.max),
+                    where=s_normalized != 0,
+                )
+            elif cap_press_constants.model == "linear":
+                p_c = entry_pressure + cap_press_constants.linear_param * (
+                    1 - s_normalized
+                )
+            elif cap_press_constants.model == "van Genuchten":
+                p_c = (
+                    (
+                        np.power(
+                            s_normalized,
+                            -1 / cap_press_constants.m_g,
+                            out=np.full_like(s_normalized, cap_press_constants.max),
+                            where=s_normalized != 0,
+                        )
+                        - 1
+                    )
+                    ** (1 / cap_press_constants.n_g)
+                ) / cap_press_constants.beta_g
+
+            if cap_press_constants.limit:
+                # Limit capillary pressure from above.
+                p_c = self.limit_cap_press_np(
+                    p_c, cap_press_constants=cap_press_constants
+                )
 
         return p_c
 

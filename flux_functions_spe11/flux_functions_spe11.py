@@ -6,12 +6,12 @@ import porepy as pp
 from numpy.typing import ArrayLike
 from tpf.derived_models.fluid_values import co2, oil, water
 from tpf.derived_models.spe10 import HEIGHT, WIDTH
-from tpf.derived_models.spe11 import LeverettJfunction, case_A, case_B
+from tpf.derived_models.spe11 import LeverettJfunction, case_B
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 total_flow: float = 0.3  # []
-permeability: float = case_A["PERMEABILITY"]["facies 3"]  # [m^2]
+permeability: float = case_B["PERMEABILITY"]["facies 3"]  # [m^2]
 
 mu_w: float = water["viscosity"]  # Viscosity of wetting phase [mP??]
 # mu_n: float = co2["viscosity"]  # Viscosity of non-wetting phase [mP??]

@@ -122,7 +122,7 @@ class SPE10HC(
 # endregion
 
 # region UTILS
-spe10_layer: int = 80
+spe10_layer: int = 55
 
 default_params: dict[str, Any] = {
     "progressbars": True,
@@ -571,7 +571,7 @@ if __name__ == "__main__":
         cp_model_2=cp_model_2,
     )
 
-    # run_simulation(config)
+    run_simulation(config)
 
     statistics = read_data(config)
     fig = plot_estimators(statistics, combine_disc_est=True)

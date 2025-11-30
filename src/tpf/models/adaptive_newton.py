@@ -96,7 +96,7 @@ class ErrorEstimateANewtonMixin(
         def integrand(x: np.ndarray) -> np.ndarray:
             coeffs_diff = fv_coeffs_new - fv_coeffs_old
             flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
-            return np.linalg.norm(flux_diff, axis=-1)
+            return np.sum(flux_diff**2, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -135,7 +135,7 @@ class ErrorEstimateANewtonMixin(
         def integrand(x: np.ndarray) -> np.ndarray:
             coeffs_diff = fv_coeffs - fv_equil_coeffs
             flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
-            return np.linalg.norm(flux_diff, axis=-1)
+            return np.sum(flux_diff**2, axis=-1)
 
         # Integrate elementwise and store the result.
         integral: Integral = self.quadrature_est.integrate(
@@ -249,7 +249,6 @@ class ErrorEstimateANewtonMixin(
             )
 
             # NOTE The stored values are squared, hence we do not need to square here.
-
             global_integral: float = local_integral.sum()
             # Integrate in time by multiplying constant value with time step size.
             estimators.append(self.time_manager.dt * global_integral)
@@ -257,6 +256,13 @@ class ErrorEstimateANewtonMixin(
         est: float = sum(estimators) ** (1 / 2)
         logger.info(f"Global linearization error estimator: {est}")
         return est
+
+    def total_est(self) -> float:
+        """Return total error estimator, consisting of discretization and linearization
+        components.
+
+        """
+        return self.global_discr_est() + self.global_lin_est()
 
 
 class SolutionStrategyANewtonMixin(

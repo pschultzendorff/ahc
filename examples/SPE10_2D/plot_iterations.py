@@ -135,7 +135,7 @@ class SPE10Newton(
 # endregion
 
 # region UTILS
-spe10_layer: int = 80
+spe10_layer: int = 55
 
 default_params: dict[str, Any] = {
     "progressbars": True,

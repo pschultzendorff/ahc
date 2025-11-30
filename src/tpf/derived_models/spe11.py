@@ -24,7 +24,8 @@ from numpy.typing import ArrayLike
 from porepy.fracs.fracture_importer import dfm_from_gmsh
 from porepy.viz.exporter import DataInput
 
-from tpf.derived_models.fluid_values import co2 as _co2
+from tpf.derived_models.fluid_values import co2_reservoir as _co2_reservoir
+from tpf.derived_models.fluid_values import co2_surface as _co2_surface
 from tpf.derived_models.fluid_values import water as _water
 from tpf.derived_models.utils import well_cell_id
 from tpf.models.constitutive_laws_tpf import CapPressConstants
@@ -44,14 +45,16 @@ GEO_FILE_CASE_B: str = "spe11b.geo"
 
 # region MODEL_PARAMETERS
 ATM: float = 0.0  # [Pa], atmospheric pressure
+RESERVOIR_PRESSURE: float = 3e7
 
 # region case A
 case_A: dict[str, Any] = {
+    "CASE_NAME": "A",
     "WIDTH": 2.8,  # [m]
     "HEIGHT": 1.2,  # [m]
     "INITIAL_PRESSURE": ATM,  # [Pa]
     "INITIAL_SATURATION": 0.8,  # [-], initial saturation. Domain filled with water.
-    "INJECTION_RATE": 1.7e-7 / _co2["density"],  # 1.7x10^- 7kg/s
+    "INJECTION_RATE": 1.7e-7 / _co2_surface["density"],  # 1.7x10^- 7kg/s
     "WELL_SIZE": 0.02,  # [m]
     "WELL_1_POS": (0.9, 0.3),  # [m]
     "WELL_2_POS": (1.7, 0.68),  # [m], slightly lower so it's fully inside facies 4.
@@ -83,17 +86,20 @@ case_A: dict[str, Any] = {
         "facies 6": 1.0,
         "facies 7": 1e-20,  # Epsilon to avoid ill-defined problem.
     },
+    "SCALE_FACTOR_X": 1.0,
+    "SCALE_FACTOR_Y": 1.0,
 }
 # endregion
 
 # region case B
 case_B: dict[str, Any] = {
+    "CASE_NAME": "B",
     "WIDTH": 8400,  # [m]
     "HEIGHT": 1200,  # [m]
-    "INITIAL_PRESSURE": 3e7,  # [Pa], specified only in the center of well 1. Without
+    "INITIAL_PRESSURE": RESERVOIR_PRESSURE,  # [Pa], specified only in the center of well 1. Without
     # calculating an equilibrium, we just assume this holds for the full domain.
     "INITIAL_SATURATION": 0.9,  # [-], initial saturation. Domain filled with water.
-    "INJECTION_RATE": 0.035 / _co2["density"],  # 0.035 kg/s
+    "INJECTION_RATE": 0.035 / _co2_reservoir["density"],  # 0.035 kg/s
     "WELL_1_POS": (2700, 300),  # [m]
     "WELL_2_POS": (5100, 700),  # [m]
     "WELL_SIZE": 0.2,  # [m]
@@ -116,6 +122,9 @@ case_B: dict[str, Any] = {
         "facies 6": 0.35,
         "facies 7": 1e-20,  # Epsilon to avoid ill-defined problem.
     },
+    "REFINEMENT_FACTOR_BASE": 4000.0,
+    "SCALE_FACTOR_X": 3000.0,
+    "SCALE_FACTOR_Y": 1000.0,
 }
 # endregion
 
@@ -128,19 +137,22 @@ water.update(
         "residual_saturation": 0.15,  # [-], residual saturation.
     }
 )
-co2: dict[str, Any] = _co2.copy()
-co2.update(
-    {
-        # Same residual gas saturation for case A and B.
-        "residual_saturation": 0.1,  # [-], residual saturation.
-    }
-)
+co2_surface: dict[str, Any] = _co2_surface.copy()
+co2_reservoir: dict[str, Any] = _co2_reservoir.copy()
+
+for co2 in [co2_surface, co2_reservoir]:
+    co2.update(
+        {
+            # Same residual gas saturation for case A and B.
+            "residual_saturation": 0.1,  # [-], residual saturation.
+        }
+    )
 
 # endregion
 
 
 def download_spe11_data(data_dir: pathlib.Path) -> None:
-    """Download the SPE11 geometric information and store them locally."""
+    """Download the SPE11 geometric data and store it."""
     # Ensure the destination directory exists.
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -182,20 +194,33 @@ def write_refinement_factor(
 
 def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
     """Add the well positions in the SPE11 geometric information."""
+    # Data is written to the `spe11a.geo` file and upscaled to case B size if necessary.
+    # All positions are therefore in case A scale.
+
+    scale_factor_x = case["SCALE_FACTOR_X"]
+    scale_factor_y = case["SCALE_FACTOR_Y"]
+
+    well_1_pos_x = case["WELL_1_POS"][0] / scale_factor_x
+    well_1_pos_y = case["WELL_1_POS"][1] / scale_factor_y
+    well_2_pos_x = case["WELL_2_POS"][0] / scale_factor_x
+    well_2_pos_y = case["WELL_2_POS"][1] / scale_factor_y
+    well_size_x = case["WELL_SIZE"] / scale_factor_x
+    well_size_y = case["WELL_SIZE"] / scale_factor_y
+
     with geo_file.open("r+") as f:
         lines: list[str] = f.readlines()
         # Add well positions.
         well_1_pts: list[str] = [
-            f"Point(288) = {{{case['WELL_1_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
-            f"Point(289) = {{{case['WELL_1_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
-            f"Point(290) = {{{case['WELL_1_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
-            f"Point(291) = {{{case['WELL_1_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_1_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(288) = {{{well_1_pos_x - well_size_x / 2}, {well_1_pos_y - well_size_y / 2}, 0, cl__1}};\n",
+            f"Point(289) = {{{well_1_pos_x + well_size_x / 2}, {well_1_pos_y - well_size_y / 2}, 0, cl__1}};\n",
+            f"Point(290) = {{{well_1_pos_x - well_size_x / 2}, {well_1_pos_y + well_size_y / 2}, 0, cl__1}};\n",
+            f"Point(291) = {{{well_1_pos_x + well_size_x / 2}, {well_1_pos_y + well_size_y / 2}, 0, cl__1}};\n",
         ]
         well_2_pts: list[str] = [
-            f"Point(292) = {{{case['WELL_2_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
-            f"Point(293) = {{{case['WELL_2_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] - case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
-            f"Point(294) = {{{case['WELL_2_POS'][0] - case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
-            f"Point(295) = {{{case['WELL_2_POS'][0] + case['WELL_SIZE'] / 2}, {case['WELL_2_POS'][1] + case['WELL_SIZE'] / 2}, 0, cl__1}};\n",
+            f"Point(292) = {{{well_2_pos_x - well_size_x / 2}, {well_2_pos_y - well_size_y / 2}, 0, cl__1}};\n",
+            f"Point(293) = {{{well_2_pos_x + well_size_x / 2}, {well_2_pos_y - well_size_y / 2}, 0, cl__1}};\n",
+            f"Point(294) = {{{well_2_pos_x - well_size_x / 2}, {well_2_pos_y + well_size_y / 2}, 0, cl__1}};\n",
+            f"Point(295) = {{{well_2_pos_x + well_size_x / 2}, {well_2_pos_y + well_size_y / 2}, 0, cl__1}};\n",
         ]
         well_1_lns: list[str] = [
             "Line(319) = {288, 290};\n",
@@ -329,7 +354,7 @@ def load_spe11_data(
     data_dir.mkdir(parents=True, exist_ok=True)
 
     geo_file: pathlib.Path = data_dir / (
-        GEO_FILE_CASE_A if case == case_A else GEO_FILE_CASE_B
+        GEO_FILE_CASE_A if case["CASE_NAME"] == "A" else GEO_FILE_CASE_B
     )
 
     # Assure that the `.geo` file exists. In lieu of a goto statement, run the
@@ -353,14 +378,20 @@ def load_spe11_data(
         )
         write_refinement_factor(geo_file, refinement_factor)
 
-    with geo_file.open("r") as f:
+    logger.warning(
+        "Well positions may be wrong if the files were downloaded previously and you"
+        + " switch between cases. Delete all .geo files and rerun. "
+    )
+
+    # The well positions always gets written to the case A geo file.
+    with (data_dir / GEO_FILE_CASE_A).open("r") as f:
         lines: list[str] = f.readlines()
         if len(lines) != 757:
             logger.info(
                 "Well positions not included in the .geo file. Adjusting and"
                 + " recomputing mesh ..."
             )
-            write_well_positions(geo_file, case)
+            write_well_positions(data_dir / GEO_FILE_CASE_A, case)
 
     gmsh_file: pathlib.Path = fix_face_normals(geo_file)
 
@@ -385,10 +416,21 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
     """Spatially heterogeneous capillary pressure and upper limit on capillary pressure."""
 
     def set_cap_press_constants(self) -> None:
-        constants = self.params.get("cap_press_constants", {})
-        constants["max"] = self.spe11_params["MAX_CAP_PRESS"]
-        constants["limit"] = True
-        self._cap_press_constants = CapPressConstants(**constants)
+        updated_constants = {"max": self.spe11_params["MAX_CAP_PRESS"], "limit": True}
+
+        if self.uses_hc:
+            constants: dict[str, dict] = self.params.get("cap_press_constants", {})
+            cap_press_1_constants: dict[str, Any] = constants.get("model_1", {})
+            cap_press_2_constants: dict[str, Any] = constants.get("model_2", {})
+            cap_press_1_constants.update(updated_constants)
+            cap_press_2_constants.update(updated_constants)
+            self._cap_press_constants_1 = CapPressConstants(**cap_press_1_constants)
+            self._cap_press_constants_2 = CapPressConstants(**cap_press_2_constants)
+
+        else:
+            cap_press_constants = self.params.get("cap_press_constants", {})
+            cap_press_constants.update(updated_constants)
+            self._cap_press_constants = CapPressConstants(**cap_press_constants)
 
     def entry_pressure(
         self,
@@ -542,6 +584,7 @@ class EquationsSPE11(SPE11Protocol, TPFProtocol):
                 self.spe11_params["INJECTION_RATE"], "m^3"
             ) / (phase.convert_units(pp.SECOND, "s") * len(well_2_ids))
             return array
+            # return super().phase_fluid_source(g, phase)
         elif phase.name == self.wetting.name:
             return super().phase_fluid_source(g, phase)
 
@@ -554,11 +597,8 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
 
         """
         domain_sides = self.domain_boundary_sides(g)
-        # return pp.BoundaryCondition(g, faces=domain_sides.west, cond="dir")
         return pp.BoundaryCondition(
-            g,
-            faces=np.logical_or(domain_sides.west, domain_sides.east),
-            cond="dir",
+            g, faces=np.logical_or(domain_sides.west, domain_sides.east), cond="dir"
         )
 
     def _bc_dirichlet_pressure_values(
@@ -568,8 +608,11 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
         if phase == self.nonwetting:
             domain_sides = self.domain_boundary_sides(g)
             bc_values: np.ndarray = np.zeros(g.num_faces)
+            # Boundary pressure values are identical to initial pressure.
             bc_values[np.logical_or(domain_sides.west, domain_sides.east)] = (
-                phase.convert_units(ATM, "kg*m^-1*s^-2")
+                phase.convert_units(
+                    self.spe11_params["INITIAL_PRESSURE"], "kg*m^-1*s^-2"
+                )
             )
             return bc_values
         else:
@@ -615,8 +658,12 @@ class SolutionStrategySPE11(TPFProtocol):
     """
 
     def __init__(self, params: dict | None) -> None:
-        super().__init__(params)  # type: ignore
-        self.spe11_case: str = self.params.get("spe11_case", "A")
+        # :attr:`self.spe11_case` has to be set before :meth:`self.set_phases` is
+        # called.
+        if params is None:
+            params = {}
+        self.spe11_case: str = params.get("spe11_case", "A")
+
         if self.spe11_case == "A":
             self.spe11_params = case_A
         elif self.spe11_case == "B":
@@ -627,8 +674,11 @@ class SolutionStrategySPE11(TPFProtocol):
                 + "Please choose either 'A' or 'B'."
             )
 
+        super().__init__(params)  # type: ignore
+
     def set_phases(self) -> None:
         self.phases: dict[str, FluidPhase] = {}
+        co2 = co2_surface if self.spe11_case == "A" else co2_reservoir
         for phase_name, constants in zip([WETTING, NONWETTING], [water, co2]):
             phase = FluidPhase(constants)
             phase.set_units(self.units)

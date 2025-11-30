@@ -17,7 +17,7 @@ Model description:
     - Permeability: SPE11, case A.
 - Fluid properties:
     - Water: pp.fluid_values.water. Residual saturation is 0.1.
-    - CO2: From the NIST database, taken at 20°C and atmospheric pressure. Residual
+    - CO2:  Residual
       saturation is 0.1.
 - Initial values:
     - Pressure: Atmospheric pressure.
@@ -30,7 +30,6 @@ Model description:
 
 """
 
-import itertools
 import logging
 import os
 import pathlib
@@ -47,7 +46,6 @@ from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
-from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 # region SETUP
@@ -101,19 +99,6 @@ class InitialConditionsMixin(TPFProtocol):
             iterate_index=0,
         )
 
-    def _bc_dirichlet_saturation_values(
-        self, g: pp.Grid, phase: FluidPhase
-    ) -> np.ndarray:
-        if phase.name == self.wetting.name:
-            s_bc: np.ndarray = np.full(
-                g.num_faces, self.params["spe11_initial_saturation"]
-            )
-        elif phase.name == self.nonwetting.name:
-            s_bc = np.ones(g.num_faces) - self._bc_dirichlet_saturation_values(
-                g, self.wetting
-            )
-        return s_bc
-
 
 class SPE11HC(
     InitialConditionsMixin,
@@ -135,7 +120,7 @@ class SPE11Newton(
 
 # region UTILS
 
-default_params: dict[str, Any] = {
+default_params = {
     "progressbars": True,
     # Model:
     "material_constants": {},
@@ -149,15 +134,26 @@ default_params: dict[str, Any] = {
     "nl_enforce_physical_saturation": True,
 }
 
-time_manager_params: dict[str, Any] = {
-    "schedule": np.array([0.0, 10.0 * pp.DAY]),
-    "dt_init": 10.0 * pp.DAY,
+
+init_time_step_params = {
+    "schedule": np.array([0.0, 1.0 * pp.DAY]),
+    "dt_init": 1.0 * pp.DAY,
     "constant_dt": False,
-    "dt_min_max": (1e-3 * pp.DAY, 10.0 * pp.DAY),
+    "dt_min_max": (1e-1 * pp.DAY, 1.0 * pp.DAY),
     "iter_optimal_range": (9, 12),
     "iter_relax_factors": (0.7, 1.3),
     "recomp_factor": 0.1,
-    "recomp_max": 5,
+    "recomp_max": 8,
+}
+default_time_manager_params = {
+    "schedule": np.array([0.0, 300.0 * pp.DAY]),
+    "dt_init": 300.0 * pp.DAY,
+    "constant_dt": False,
+    "dt_min_max": (1e-2 * pp.DAY, 300.0 * pp.DAY),
+    "iter_optimal_range": (9, 12),
+    "iter_relax_factors": (0.7, 1.3),
+    "recomp_factor": 0.1,
+    "recomp_max": 10,
 }
 
 
@@ -179,7 +175,7 @@ class SimulationConfig:
 
 def setup_solver(
     solver: str, adaptive_error_ratio: float
-) -> tuple[Type[SPE11HC] | Type[SPE11Newton], dict[str, Any]]:
+) -> tuple[Type[SPE11HC] | Type[SPE11Newton], dict[str, Any], dict[str, Any]]:
     """Return a tuple of solver-specific parameters and model class based on the solver
     name.
 
@@ -194,8 +190,37 @@ def setup_solver(
 
     """
     logger.info(f"solver: {solver}, adaptive error ratio: {adaptive_error_ratio:.2f}.")
+    if solver == "HC":
+        solver_params = {
+            # Homotopy Continuation (HC) parameters:
+            "nonlinear_solver_statistics": SolverStatisticsHC,
+            "nonlinear_solver": HCSolver,
+            "hc_constant_decay": False,
+            "hc_lambda_decay": 0.9,
+            "hc_decay_min_max": (0.1, 0.95),
+            "nl_iter_optimal_range": (7, 10),
+            "nl_iter_relax_factors": (0.7, 1.3),
+            "hc_decay_recomp_max": 5,
+            # Non-adaptive stopping criteria:
+            "hc_adaptive": False,
+            "hc_max_iterations": 100,
+            "hc_lambda_min": 0.01,
+            # Nonlinear solver parameters:
+            "nl_convergence_tol": 5e-5,
+            "nl_divergence_tol": 1e30,
+            "max_iterations": 20,
+            "nl_appleyard_chopping": False,
+        }
+        # Update adaptive time stepping parameters for HC.
+        time_manager_params = {
+            "iter_optimal_range": (30, 80),
+            "iter_relax_factors": (0.7, 1.3),
+            "iter_max": 100,  # This has to be the same as "hc_max_iterations", but
+            # the TimeManager does not know about that.
+        }
+        model_class = SPE11HC
 
-    if solver == "AHC":
+    elif solver == "AHC":
         solver_params: dict[str, Any] = {
             # Homotopy Continuation (HC) parameters:
             "nonlinear_solver_statistics": SolverStatisticsHC,
@@ -215,10 +240,13 @@ def setup_solver(
             # Nonlinear solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
-            "max_iterations": 50,
+            "max_iterations": 20,
             "nl_appleyard_chopping": False,
         }
+        time_manager_params = {}
+
         model_class = SPE11HC
+
     elif solver == "Newton":
         solver_params = {
             # Newton solver parameters:
@@ -232,8 +260,9 @@ def setup_solver(
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": False,
-            "max_iterations": 50,
+            "max_iterations": 20,
         }
+        time_manager_params = {}
         model_class = SPE11Newton
     elif solver == "NewtonAppleyard":
         solver_params = {
@@ -248,10 +277,11 @@ def setup_solver(
             "nl_appleyard_chopping": True,
             "max_iterations": 50,
         }
+        time_manager_params = {}
         model_class = SPE11Newton
     else:
         raise ValueError(f"Unknown solver: {solver}")
-    return model_class, solver_params
+    return model_class, solver_params, time_manager_params
 
 
 def run_simulation(config: SimulationConfig) -> None:
@@ -267,13 +297,13 @@ def run_simulation(config: SimulationConfig) -> None:
         f"CP model 2: {config.cp_model_2}."
     )
 
-    model_class, solver_params = setup_solver(
+    model_class, solver_params, time_manager_params = setup_solver(
         config.solver_name, config.adaptive_error_ratio
     )
 
-    # Build params dictionary
-    params = default_params.copy()
-    params.update(solver_params)
+    # Build params dictionaries.
+    params = default_params | solver_params
+    time_manager_params = default_time_manager_params | time_manager_params
 
     # Newton and Appleyard Newton require only one of each constitutive law.
     if config.solver_name.startswith("Newton"):
@@ -316,132 +346,49 @@ def run_simulation(config: SimulationConfig) -> None:
 
     try:
         model = model_class(params)
+        # # "Heat up" the model to not have temporal discretization error super large only
+        # # due to starting from zero.
+        # pp.run_time_dependent_model(model=model, params=params)
+
+        # # Actually run the simulation.
+        params.update({"time_manager": pp.TimeManager(**time_manager_params)})
         pp.run_time_dependent_model(model=model, params=params)
 
-        def plot_pressure(pressure: str) -> None:
-            """Plot quadratic pressures."""
-            plot_quadratic_pressures(
-                model.g,
-                model.domain.bounding_box,
-                pp.get_solution_values(
-                    f"{pressure}_coeffs",
-                    model.mdg.subdomains(return_data=True)[0][1],
-                    iterate_index=0,
-                ),
-                title=" ".join(pressure.split("_")),
-                save_path=config.folder_name / f"{pressure}.png",
-            )
-
-        for pressure in [
-            "global_pressure_postprocessed",
-            "global_pressure_reconstructed",
-            "complementary_pressure_postprocessed",
-            "complementary_pressure_reconstructed",
-        ]:
-            plot_pressure(pressure)
-
-        global_pressure_coeffs_diff: np.ndarray = pp.get_solution_values(
-            "global_pressure_coeffs_rec",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        ) - pp.get_solution_values(
-            "global_pressure_coeffs_postproc",
-            model.mdg.subdomains(return_data=True)[0][1],
-            iterate_index=0,
-        )
-
-        plot_quadratic_pressures(
-            model.g,
-            model.domain.bounding_box,
-            global_pressure_coeffs_diff,
-            title="Global pressure difference reconstructed - postprocessed",
-            save_path=config.folder_name / "global_pressure_difference.png",
-        )
-        global_pressure_diff_deriv_x_coeffs: np.ndarray = np.zeros_like(
-            global_pressure_coeffs_diff
-        )
-        global_pressure_diff_deriv_x_coeffs[:, 2] = (
-            2 * global_pressure_coeffs_diff[:, 0]
-        )
-        global_pressure_diff_deriv_x_coeffs[:, 4] = global_pressure_coeffs_diff[:, 1]
-        global_pressure_diff_deriv_x_coeffs[:, 5] = global_pressure_coeffs_diff[:, 2]
-        global_pressure_diff_deriv_y_coeffs: np.ndarray = np.zeros_like(
-            global_pressure_coeffs_diff
-        )
-        global_pressure_diff_deriv_y_coeffs[:, 4] = (
-            2 * global_pressure_coeffs_diff[:, 3]
-        )
-        global_pressure_diff_deriv_y_coeffs[:, 2] = global_pressure_coeffs_diff[:, 1]
-        global_pressure_diff_deriv_y_coeffs[:, 5] = global_pressure_coeffs_diff[:, 4]
-
-        plot_quadratic_pressures(
-            model.g,
-            model.domain.bounding_box,
-            global_pressure_diff_deriv_x_coeffs,
-            title=r"Global pressure difference $\partial_x(reconstructed - postprocessed)$",
-            save_path=config.folder_name / "global_pressure_difference_deriv_x.png",
-        )
-        plot_quadratic_pressures(
-            model.g,
-            model.domain.bounding_box,
-            global_pressure_diff_deriv_y_coeffs,
-            title=r"Global pressure difference $\partial_y(reconstructed - postprocessed)$",
-            save_path=config.folder_name / "global_pressure_difference_deriv_y.png",
-        )
-
-        plot_quadratic_pressures(
-            model.g,
-            model.domain.bounding_box,
-            pp.get_solution_values(
-                "complementary_pressure_coeffs_rec",
-                model.mdg.subdomains(return_data=True)[0][1],
-                iterate_index=0,
-            )
-            - pp.get_solution_values(
-                "complementary_pressure_coeffs_postproc",
-                model.mdg.subdomains(return_data=True)[0][1],
-                iterate_index=0,
-            ),
-            title="complementary pressure difference reconstructed - postprocessed",
-            save_path=config.folder_name / "complementary_pressure_difference.png",
-        )
-
     except Exception as e:
+        config.folder_name.mkdir(parents=True, exist_ok=True)
         with (config.folder_name / "failure.txt").open("w") as f:
             f.write(str(e))
         logger.error(f"Run failed with error: {e}.")
+        raise e
 
 
 # endregion
 
 # region RUN
-solvers: list[str] = ["AHC", "Newton", "NewtonAppleyard"]
-adaptive_error_ratios: list[float] = [0.1, 0.00005]
-refinement_factors: list[float] = [10, 5, 1, 0.5]
+solvers_and_ratios: list[tuple[str, float]] = [
+    ("AHC", 0.001),
+    ("HC", 0.1),
+    ("Newton", 0.1),
+    ("NewtonAppleyard", 0.1),
+]
+refinement_factors: list[float] = [10, 1, 0.1]  # , 0.5]
 
 rp_models: dict[str, Any] = {
+    "linear": {"model": "linear", "limit": True},
     "Brooks-Corey": {
         "model": "Brooks-Corey-Mualem",
-        "limit": False,
+        "limit": True,
         "n_b": 1.0,
         "eta": 2.0,
     },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-    "Corey_power_2": {"model": "Corey", "limit": False, "power": 2},
-    "Corey_power_3": {"model": "Corey", "limit": False, "power": 3},
+    "Corey_power_2": {"model": "Corey", "limit": True, "power": 2},
+    "Corey_power_3": {"model": "Corey", "limit": True, "power": 3},
 }
 
 cp_models: dict[str, Any] = {
-    "None": {
-        "model": None,
-    },
-    "linear": {
-        "model": "linear",
-        "linear_param": 3.0,
-    },
-    "Brooks-Corey": {
-        "model": "Brooks-Corey",
-        "n_b": 2.0,
-    },
+    "None": {"model": None},
+    "linear": {"model": "linear", "linear_param": 3.0},
+    "Brooks-Corey": {"model": "Brooks-Corey", "n_b": 2.0},
 }
 
 
@@ -452,11 +399,9 @@ def generate_configs() -> list[SimulationConfig]:
     for init_s in [0.8, 0.9]:
         continue
         for rp_model_name, rp_model in rp_models.items():
-            for solver_name, adaptive_error_ratio in itertools.product(
-                solvers, adaptive_error_ratios
-            ):
-                if solver_name.startswith("Newton") and adaptive_error_ratio <= 0.005:
-                    continue
+            if rp_model_name == "linear":
+                continue
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 folder_name = (
                     dirname
                     / f"{solver_name}_{adaptive_error_ratio:.3f}"
@@ -472,9 +417,9 @@ def generate_configs() -> list[SimulationConfig]:
                         adaptive_error_ratio=adaptive_error_ratio,
                         refinement_factor=refinement_factors[0],
                         init_s=init_s,
-                        rp_model_1={"model": "linear", "limit": False},
+                        rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
-                        cp_model_1=cp_models["linear"],
+                        cp_model_1=cp_models["None"],
                         cp_model_2=cp_models["Brooks-Corey"],
                     )
                 )
@@ -486,18 +431,9 @@ def generate_configs() -> list[SimulationConfig]:
             # that adaptive Newton only makes sense for small-sized updates to produce
             # physical solutions. But setting ``hc_nl_convergence_tol`` low makes AHC
             # require a lot of time steps.
-            if init_s == 0.9 and refinement_factor == 0.5:
+            if init_s == 0.9 and refinement_factor == 0.1:
                 continue
-
-            for solver_name, adaptive_error_ratio in itertools.product(
-                solvers, adaptive_error_ratios
-            ):
-                if solver_name.startswith("Newton"):
-                    continue
-                if adaptive_error_ratio <= 0.005:
-                    continue
-                if solver_name.startswith("Newton") and adaptive_error_ratio <= 0.005:
-                    continue
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 file_name = f"ref_fac_{refinement_factor:.2f}"
                 folder_name = (
                     dirname
@@ -514,9 +450,9 @@ def generate_configs() -> list[SimulationConfig]:
                         adaptive_error_ratio=adaptive_error_ratio,
                         refinement_factor=refinement_factor,
                         init_s=init_s,
-                        rp_model_1={"model": "linear", "limit": False},
+                        rp_model_1=rp_models["linear"],
                         rp_model_2=rp_models["Brooks-Corey"],
-                        cp_model_1=cp_models["linear"],
+                        cp_model_1=cp_models["None"],
                         cp_model_2=cp_models["Brooks-Corey"],
                     )
                 )

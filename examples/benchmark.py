@@ -44,12 +44,9 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from numba import config
 from tpf.derived_models.spe10 import SPE10Mixin
 from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
-from tpf.models.flow_and_transport import TwoPhaseFlow
 from tpf.utils.constants_and_typing import FEET, PSI
-from tpf.viz.iteration_exporting import IterationExportingMixin
 from tpf.viz.solver_statistics import SolverStatisticsEst
 from viztracer import VizTracer  # type: ignore[import]
 
@@ -81,7 +78,6 @@ logger.setLevel(logging.WARNING)
 
 
 class Benchmark(
-    IterationExportingMixin,
     SPE10Mixin,
     TwoPhaseFlowErrorEstimate,
 ): ...  # type: ignore

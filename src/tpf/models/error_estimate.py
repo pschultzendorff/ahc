@@ -13,6 +13,7 @@ from tpf.models.reconstruction import (
     DataSavingRec,
     SolutionStrategyRec,
     TwoPhaseFlowReconstruction,
+    evaluate_poly_at_points,
 )
 from tpf.numerics.quadrature import Integral, TriangleQuadrature
 from tpf.utils.constants_and_typing import (
@@ -157,7 +158,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         def integrand(x: np.ndarray, fv_coeffs: np.ndarray) -> np.ndarray:
             coeffs_diff = fv_coeffs - equil_coeffs
             flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
-            return np.linalg.norm(flux_diff, axis=-1)
+            return (flux_diff**2).sum(axis=-1)
 
         # Integrate in space at current and previous time step and store the result.
         for time_step in ["_new", "_old"]:
@@ -224,6 +225,53 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 self.g_data,
                 iterate_index=0,
             )
+
+    def local_saturation_min_max(self, specifier: str) -> None:
+        pressure_coeffs = pp.get_solution_values(
+            f"{COMPLEMENTARY_PRESSURE}_coeffs_{specifier}", self.g_data, iterate_index=0
+        )
+
+        def integrand_min(
+            x: np.ndarray,
+            pressure_coeffs: np.ndarray,
+        ) -> np.ndarray:
+            pressure = evaluate_poly_at_points(pressure_coeffs, x[..., 0], x[..., 1])
+            saturation = self.eval_saturation(pressure)
+            return np.repeat(np.min(saturation, axis=0)[None, ...], 6, axis=0)
+
+        integral: Integral = self.quadrature_est.integrate(
+            functools.partial(integrand_min, pressure_coeffs=pressure_coeffs),
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+        pp.set_solution_values(
+            f"s_w_min_{specifier}",
+            integral.elementwise.squeeze() / self.quadrature_est.volumes,
+            self.g_data,
+            iterate_index=0,
+        )
+
+        def integrand_max(
+            x: np.ndarray,
+            pressure_coeffs: np.ndarray,
+        ) -> np.ndarray:
+            pressure = evaluate_poly_at_points(pressure_coeffs, x[..., 0], x[..., 1])
+            saturation = self.eval_saturation(pressure)
+            return np.repeat(np.max(saturation, axis=0)[None, ...], 6, axis=0)
+
+        integral: Integral = self.quadrature_est.integrate(
+            functools.partial(integrand_max, pressure_coeffs=pressure_coeffs),
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+        pp.set_solution_values(
+            f"s_w_max_{specifier}",
+            integral.elementwise.squeeze() / self.quadrature_est.volumes,
+            self.g_data,
+            iterate_index=0,
+        )
 
     def local_flux(self, flux_name: FLUX_NAME) -> None:
         def integrand(
@@ -682,7 +730,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 if specifier == "_norm" and i == 1:
                     break
 
-                q_p2 = self._evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
+                q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
                 s_p2 = self.eval_saturation(q_p2)
 
                 # ``s_p2`` has shape (num_quad_points_per_element, num_cells), while
@@ -828,7 +876,12 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             # NOTE The stored local values are already squared.
             estimators[flux_name] = (
                 self.time_manager.dt / 3 * (new + inner + old).sum()
-            ) ** 2
+            ) ** 0.5
+
+            if estimators[flux_name] < 0:
+                raise RuntimeError(
+                    "Temporal integral of Darcy error estimate is negative."
+                )
 
             logger.info(
                 f"Global {flux_name} Darcy error estimator:"
@@ -864,6 +917,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         # Estimate time integral with quadrature rule for linear functions. NOTE The
         # stored values are already squared.
         est = (self.time_manager.dt / 3 * (new + inner + old).sum()) ** 0.5
+
+        if est < 0:
+            raise RuntimeError("Temporal integral of SP error estimate is negative.")
 
         logger.info(f"Global saturation-pressure error estimator: {est}")
 
@@ -904,7 +960,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 fv_flux = self._evaluate_flux_at_points(
                     fv_flux_coeffs, x[..., 0], x[..., 1]
                 )
-                return np.linalg.norm(fv_flux, axis=-1)
+                return (fv_flux**2).sum(axis=-1)
 
             local_energy: Integral = self.quadrature_est.integrate(
                 integrand,
@@ -1008,7 +1064,7 @@ class SolutionStrategyEst(  # type: ignore
         )
 
         initial_values = np.ones(self.g.num_cells)
-        for mobility_key in ["total_mobility", "fractional_flow"]:
+        for mobility_key in ["total_mobility"]:
             pp.set_solution_values(
                 mobility_key,
                 initial_values,
@@ -1052,6 +1108,8 @@ class SolutionStrategyEst(  # type: ignore
         # self.local_pressure_potential(COMPLEMENTARY_PRESSURE)
         # self.local_flux(TOTAL_FLUX)
         # self.local_flux(WETTING_FLUX)
+        # self.local_saturation_min_max("rec")
+        # self.local_saturation_min_max("postproc")
         # self.local_darcy_est_from_postproc(TOTAL_FLUX)
         # self.local_darcy_est_from_postproc(WETTING_FLUX)
 
@@ -1091,28 +1149,28 @@ class SolutionStrategyEst(  # type: ignore
             "SP_estimator_norm", time_step_values, self.g_data, time_step_index=0
         )
 
-        # for pressure_key, specifier in itertools.product(
-        #     (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
-        # ):
-        #     time_step_values = pp.get_solution_values(
-        #         f"{pressure_key}{specifier}_potential", self.g_data, iterate_index=0
-        #     )
-        #     pp.set_solution_values(
-        #         f"{pressure_key}{specifier}_potential",
-        #         time_step_values,
-        #         self.g_data,
-        #         time_step_index=0,
-        #     )
-        # for flux_name in (TOTAL_FLUX, WETTING_FLUX):
-        #     time_step_values = pp.get_solution_values(
-        #         f"{flux_name}_norm", self.g_data, iterate_index=0
-        #     )
-        #     pp.set_solution_values(
-        #         f"{flux_name}_norm",
-        #         time_step_values,
-        #         self.g_data,
-        #         time_step_index=0,
-        #     )
+        for pressure_key, specifier in itertools.product(
+            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE), ("_postproc", "_rec")
+        ):
+            time_step_values = pp.get_solution_values(
+                f"{pressure_key}{specifier}_potential", self.g_data, iterate_index=0
+            )
+            pp.set_solution_values(
+                f"{pressure_key}{specifier}_potential",
+                time_step_values,
+                self.g_data,
+                time_step_index=0,
+            )
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+            time_step_values = pp.get_solution_values(
+                f"{flux_name}_norm", self.g_data, iterate_index=0
+            )
+            pp.set_solution_values(
+                f"{flux_name}_norm",
+                time_step_values,
+                self.g_data,
+                time_step_index=0,
+            )
 
 
 class DataSavingEst(DataSavingRec):
@@ -1201,6 +1259,19 @@ class DataSavingEst(DataSavingRec):
                             self.g_data,
                             time_step_index=time_step_index,
                             iterate_index=iterate_index,
+                        ),
+                    )
+                )
+            except KeyError:
+                pass
+        for specifier in ["max_postproc", "min_postproc", "max_rec", "min_rec"]:
+            try:
+                data.append(
+                    (
+                        self.g,
+                        f"s_w_{specifier}",
+                        pp.get_solution_values(
+                            f"s_w_{specifier}", self.g_data, iterate_index=0
                         ),
                     )
                 )

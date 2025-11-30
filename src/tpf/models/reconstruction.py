@@ -255,17 +255,17 @@ class PressureReconstructionMixin(TPFProtocol):
     def postprocess_pressure_vohralik(
         self,
         pressure_key: PRESSURE_KEY,
-        flux_specifier: str = "",
+        specifier: str = "",
         prepare_simulation: bool = False,
     ) -> None:
         """Postprocess pressure into elementwise P2 polynomials.
 
         Parameters:
             pressure_key: Name of the pressure field to be reconstructed.
-            flux_specifier: Specify the name of the flux field used to post-process the
-                pressure. Used, e.g., in homotopy continuation, where the fluxes used
-                are ``f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs"`` instead of
-                ``f"{flux_name}_flux_RT0_coeffs"``.
+            specifier: Specify the name of the flux field and total mobility used to
+                post-process the pressure. Used, e.g., in homotopy continuation, where
+                the fluxes used are ``f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs"``
+                instead of ``f"{flux_name}_flux_RT0_coeffs"``.
                 Gets appended between ``f"{flux_name}_flux"`` and ``"_RT0_coeffs"``,
                 i.e., the values ``f"{flux_name}_flux{flux_specifier}_RT0_coeffs"`` in
                 the data dir are accessed.
@@ -292,39 +292,39 @@ class PressureReconstructionMixin(TPFProtocol):
             # Retrieve RT0 flux coefficients depending on pressure type.
             if pressure_key == GLOBAL_PRESSURE:
                 total_mobility: np.ndarray = pp.get_solution_values(
-                    "total_mobility", self.g_data, iterate_index=0
+                    f"total_mobility{specifier}", self.g_data, iterate_index=0
                 )
                 coeffs_flux: np.ndarray = (
                     pp.get_solution_values(
-                        f"{TOTAL_FLUX}{flux_specifier}_RT0_coeffs",
+                        f"{TOTAL_FLUX}{specifier}_RT0_coeffs",
                         self.g_data,
                         iterate_index=0,
                     )
                     / total_mobility[..., None]
                 )
 
-                def integrand(
-                    x: np.ndarray,
-                ) -> np.ndarray:
-                    fv_flux = self._evaluate_flux_at_points(
-                        coeffs_flux,
-                        x[..., 0],
-                        x[..., 1],
-                    )
-                    return np.sqrt((fv_flux**2).sum(axis=-1))
+                # def integrand(
+                #     x: np.ndarray,
+                # ) -> np.ndarray:
+                #     fv_flux = self._evaluate_flux_at_points(
+                #         coeffs_flux,
+                #         x[..., 0],
+                #         x[..., 1],
+                #     )
+                #     return np.sqrt((fv_flux**2).sum(axis=-1))
 
-                integral: Integral = self.quadrature_est.integrate(
-                    integrand,
-                    self.quadpy_elements,
-                    recalc_points=False,
-                    recalc_volumes=False,
-                )
-                pp.set_solution_values(
-                    "intermediate_norm_g",
-                    integral.elementwise.squeeze(),
-                    self.g_data,
-                    iterate_index=0,
-                )
+                # integral: Integral = self.quadrature_est.integrate(
+                #     integrand,
+                #     self.quadpy_elements,
+                #     recalc_points=False,
+                #     recalc_volumes=False,
+                # )
+                # pp.set_solution_values(
+                #     "intermediate_norm_g",
+                #     integral.elementwise.squeeze(),
+                #     self.g_data,
+                #     iterate_index=0,
+                # )
 
             elif pressure_key == COMPLEMENTARY_PRESSURE:
                 # FIXME Old approach. Remove once verified that the new one works
@@ -342,31 +342,33 @@ class PressureReconstructionMixin(TPFProtocol):
                 #     iterate_index=0,
                 # )
                 coeffs_flux = pp.get_solution_values(
-                    "capillary_flux_RT0_coeffs", self.g_data, iterate_index=0
-                )
-
-                def integrand(
-                    x: np.ndarray,
-                ) -> np.ndarray:
-                    fv_flux = self._evaluate_flux_at_points(
-                        coeffs_flux,
-                        x[..., 0],
-                        x[..., 1],
-                    )
-                    return np.sqrt((fv_flux**2).sum(axis=-1))
-
-                integral: Integral = self.quadrature_est.integrate(
-                    integrand,
-                    self.quadpy_elements,
-                    recalc_points=False,
-                    recalc_volumes=False,
-                )
-                pp.set_solution_values(
-                    "intermediate_norm_c",
-                    integral.elementwise.squeeze(),
+                    f"capillary_flux{specifier}_RT0_coeffs",
                     self.g_data,
                     iterate_index=0,
                 )
+
+                # def integrand(
+                #     x: np.ndarray,
+                # ) -> np.ndarray:
+                #     fv_flux = self._evaluate_flux_at_points(
+                #         coeffs_flux,
+                #         x[..., 0],
+                #         x[..., 1],
+                #     )
+                #     return np.sqrt((fv_flux**2).sum(axis=-1))
+
+                # integral: Integral = self.quadrature_est.integrate(
+                #     integrand,
+                #     self.quadpy_elements,
+                #     recalc_points=False,
+                #     recalc_volumes=False,
+                # )
+                # pp.set_solution_values(
+                #     "intermediate_norm_c",
+                #     integral.elementwise.squeeze(),
+                #     self.g_data,
+                #     iterate_index=0,
+                # )
 
             else:
                 raise ValueError(f"Unknown pressure key: {pressure_key}")
@@ -390,28 +392,28 @@ class PressureReconstructionMixin(TPFProtocol):
             actual_p_cc = pp.get_solution_values(
                 pressure_key, self.g_data, iterate_index=0
             )
-            current_p_cc = self._evaluate_poly_at_points(coeffs, cc_x, cc_y)
+            current_p_cc = evaluate_poly_at_points(coeffs, cc_x, cc_y)
             coeffs[:, 5] = actual_p_cc - current_p_cc
 
-            # def integrand(x):
-            #     int_0 = coeffs[:, 0][None, ...] * x[..., 0] ** 2
-            #     int_1 = coeffs[:, 1][None, ...] * x[..., 0] * x[..., 1]
-            #     int_2 = coeffs[:, 2][None, ...] * x[..., 0]
-            #     int_3 = coeffs[:, 3][None, ...] * x[..., 1] ** 2
-            #     int_4 = coeffs[:, 4][None, ...] * x[..., 1]
-            #     return int_0 + int_1 + int_2 + int_3 + int_4
+            def integrand(x):
+                int_0 = coeffs[:, 0][None, ...] * x[..., 0] ** 2
+                int_1 = coeffs[:, 1][None, ...] * x[..., 0] * x[..., 1]
+                int_2 = coeffs[:, 2][None, ...] * x[..., 0]
+                int_3 = coeffs[:, 3][None, ...] * x[..., 1] ** 2
+                int_4 = coeffs[:, 4][None, ...] * x[..., 1]
+                return int_0 + int_1 + int_2 + int_3 + int_4
 
-            # integral: Integral = self.quadrature_rec.integrate(
-            #     integrand,
-            #     self.quadpy_elements,
-            #     recalc_points=False,
-            #     recalc_volumes=False,
-            # )
+            integral: Integral = self.quadrature_rec.integrate(
+                integrand,
+                self.quadpy_elements,
+                recalc_points=False,
+                recalc_volumes=False,
+            )
 
-            # # Now, we can compute the constant C, one per cell.
-            # coeffs[:, 5] = (
-            #     actual_p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
-            # )
+            # Now, we can compute the constant C, one per cell.
+            coeffs[:, 5] = (
+                actual_p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
+            )
 
         # Store post-processed pressure coeffs.
         pp.set_solution_values(
@@ -478,12 +480,12 @@ class PressureReconstructionMixin(TPFProtocol):
 
             # Compute node pressures.
             for col in range(dim + 1):
-                nodes_p[:, col] = self._evaluate_poly_at_points(
+                nodes_p[:, col] = evaluate_poly_at_points(
                     coeffs_postproc, nx[:, col], ny[:, col]
                 )
 
             # Average nodal pressure.
-            node_pressure = self._average_over_entities(
+            node_pressure = average_over_entities(
                 nodes_p, self.cell_nodes_map, self.nodes_of_cell, nn
             )
 
@@ -498,12 +500,12 @@ class PressureReconstructionMixin(TPFProtocol):
             ]  # local face-center y-coordinates
 
             for col in range(3):
-                faces_p[:, col] = self._evaluate_poly_at_points(
+                faces_p[:, col] = evaluate_poly_at_points(
                     coeffs_postproc, fx[:, col], fy[:, col]
                 )
 
             # Average face pressure.
-            face_pressure = self._average_over_entities(
+            face_pressure = average_over_entities(
                 faces_p, self.cell_faces_map, self.faces_of_cell, nf
             )
 
@@ -586,39 +588,6 @@ class PressureReconstructionMixin(TPFProtocol):
             time_step_index=time_step_index,
             iterate_index=0,
         )
-
-    @staticmethod
-    def _evaluate_poly_at_points(
-        coeffs: np.ndarray, x: np.ndarray, y: np.ndarray
-    ) -> np.ndarray:
-        """Evaluate P2 polynomial defined by `coeffs` at given (x, y) coordinates."""
-        c = coeffs
-        return (
-            c[:, 0] * x**2
-            + c[:, 1] * x * y
-            + c[:, 2] * x
-            + c[:, 3] * y**2
-            + c[:, 4] * y
-            + c[:, 5]
-        )
-
-    @staticmethod
-    def _average_over_entities(
-        values: np.ndarray,
-        cell_entities_map: np.ndarray,
-        entities_of_cell: np.ndarray,
-        num_entities: int,
-    ) -> np.ndarray:
-        """Average per-cell entity values (nodes or faces) over shared entities."""
-        cardinality = np.bincount(cell_entities_map)
-        result = np.zeros(num_entities)
-        for col in range(values.shape[1]):
-            result += np.bincount(
-                entities_of_cell[:, col],
-                weights=values[:, col],
-                minlength=num_entities,
-            )
-        return result / np.maximum(cardinality, 1)
 
 
 class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
@@ -869,7 +838,7 @@ class EquationsRecMixin(TPFProtocol):
                 self.rel_perm(self.wetting.s, phase) / viscosity
             )
         total_mobility = pp.ad.sum_operator_list(list(phase_mobilities.values()))
-        fractional_flow = phase_mobilities[self.wetting.name] / total_mobility
+        # fractional_flow = phase_mobilities[self.wetting.name] / total_mobility
 
         # Get data and spatial discretization.
         tpfa_cap_press = pp.ad.TpfaAd(self.cap_potential_key, [self.g])
@@ -926,7 +895,7 @@ class EquationsRecMixin(TPFProtocol):
             (TOTAL_FLUX, flux_t),
             (WETTING_FLUX, flux_w),
             ("total_mobility", total_mobility),
-            ("fractional_flow", fractional_flow),
+            # ("fractional_flow", fractional_flow),
             ("capillary_flux", capillary_flux),
             (TOTAL_FLUX + "_equil", flux_t_equil),
             (WETTING_FLUX + "_equil", flux_w_equil),
@@ -966,9 +935,9 @@ class SolutionStrategyRec(  # type: ignore
         # Initalize P0 pressures and scaled fluxes for piecewise P2 reconstruction at
         # `iterate_index` 0 and `time_step_index` 0.
         self.eval_postproc_qtys(time_step_index=0)
-        # Flux equilibration needs two iterates. Initialize both the current and
-        # previous iterate with the same data. Calling ``eval_postproc_qtys`` twice
-        # shifts value from `iterate_index` 0 to 'iterate_index' 1 .
+
+        # Flux equilibration needs two iterates. Initialize the current and the previous
+        # ``iterate_index`` with the same data by calling ``eval_postproc_qtys`` twice.
         self.eval_postproc_qtys()
 
         self.postprocess_solution(
@@ -1186,7 +1155,7 @@ class SolutionStrategyRec(  # type: ignore
             )
 
         # Evaluate scaled fluxes required for pressure post-processing.
-        for scalar_name in ["total_mobility", "fractional_flow", "capillary_flux"]:
+        for scalar_name in ["total_mobility", "capillary_flux"]:
             scalar_value = self.postproc_ad_ops[scalar_name].value(self.equation_system)
             pp.set_solution_values(
                 scalar_name,
@@ -1212,8 +1181,7 @@ class SolutionStrategyRec(  # type: ignore
                 # Extend equilibrated fluxes.
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
 
-        if not prepare_simulation:
-            self.extend_fv_fluxes("capillary_flux")
+        self.extend_fv_fluxes("capillary_flux")
 
         # Reconstruct pressures.
         for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
@@ -1318,10 +1286,45 @@ def get_sign_normals(g: pp.Grid) -> np.ndarray:
     return sign_normals
 
 
+@njit
+def evaluate_poly_at_points(
+    coeffs: np.ndarray, x: np.ndarray, y: np.ndarray
+) -> np.ndarray:
+    """Evaluate P2 polynomial defined by `coeffs` at given (x, y) coordinates."""
+    c = coeffs
+    return (
+        c[:, 0] * x**2
+        + c[:, 1] * x * y
+        + c[:, 2] * x
+        + c[:, 3] * y**2
+        + c[:, 4] * y
+        + c[:, 5]
+    )
+
+
+@njit
+def average_over_entities(
+    values: np.ndarray,
+    cell_entities_map: np.ndarray,
+    entities_of_cell: np.ndarray,
+    num_entities: int,
+) -> np.ndarray:
+    """Average per-cell entity values (nodes or faces) over shared entities."""
+    cardinality = np.bincount(cell_entities_map)
+    result = np.zeros(num_entities)
+    for col in range(values.shape[1]):
+        result += np.bincount(
+            entities_of_cell[:, col],
+            weights=values[:, col],
+            minlength=num_entities,
+        )
+    return result / np.maximum(cardinality, 1)
+
+
 # The loop could be parallelized with njit(parallel=True) and prange. However, on a
 # small grids (<16000 cells) the overhead made :meth:`postprocess_pressure_vohralik`
 # slower.
-# @njit
+@njit
 def compute_pressure_coeffs(
     num_cells: int, dim: int, perm: np.ndarray, flux_coeffs: np.ndarray
 ) -> np.ndarray:
