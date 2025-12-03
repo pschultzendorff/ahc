@@ -51,8 +51,6 @@ from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsH
 
 # region SETUP
 
-# Disable numba JIT for debugging.
-# config.DISABLE_JIT = False
 
 # Limit number of threads for NREC.
 N_THREADS = "4"
@@ -61,8 +59,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = N_THREADS
 os.environ["OMP_NUM_THREADS"] = N_THREADS
 os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
 
-# Catch all numpy errors except underflow. The latter can appear during estimator
-# calculation.
+# Catch all numpy errors except underflow, which may occur when calculating estimators.
 np.seterr(all="raise")
 np.seterr(under="ignore")
 

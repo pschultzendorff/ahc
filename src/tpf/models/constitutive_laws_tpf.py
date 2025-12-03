@@ -536,7 +536,11 @@ class CapillaryPressure(TPFProtocol):
 
         if cap_press_constants.model is None:
             # Return cap. pressure 0. Do NOT limit to avoid non zero derivatives.
-            p_c = pp.ad.Scalar(0)
+            p_c = pp.ad.DenseArray(
+                np.zeros(
+                    self.g.num_cells,
+                )
+            )
 
         else:
             if cap_press_constants.model == "Brooks-Corey":

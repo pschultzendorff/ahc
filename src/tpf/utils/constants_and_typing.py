@@ -23,9 +23,10 @@ PRESSURE_KEY: TypeAlias = Literal["global_pressure", "complementary_pressure"]
 GLOBAL_PRESSURE: Final[PRESSURE_KEY] = "global_pressure"
 COMPLEMENTARY_PRESSURE: Final[PRESSURE_KEY] = "complementary_pressure"
 
-FLUX_NAME: TypeAlias = Literal["total_flux", "wetting_flux"]
+FLUX_NAME: TypeAlias = Literal["total_flux", "wetting_flux", "capillary_flux"]
 TOTAL_FLUX: Final[FLUX_NAME] = "total_flux"
 WETTING_FLUX: Final[FLUX_NAME] = "wetting_flux"
+CAPILLARY_FLUX: Final[FLUX_NAME] = "capillary_flux"
 
 # Homotopy continuation:
 CONTINUATION_SOLUTIONS: Final = "continuation_solutions"

@@ -35,6 +35,7 @@ from tpf.models.reconstruction import (
 )
 from tpf.numerics.quadrature import Integral
 from tpf.utils.constants_and_typing import (
+    CAPILLARY_FLUX,
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
     GLOBAL_PRESSURE,
@@ -553,10 +554,9 @@ class EstimatesHCMixin(
             # NOTE The stored values are already squared.
             estimators.append(self.time_manager.dt / 3 * (new + inner + old).sum())
 
-            if estimators[-1] < 0:
-                raise RuntimeError(
-                    "Temporal integral of HC error estimate is negative."
-                )
+            assert estimators[-1] >= 0, (
+                "Temporal integral of HC error estimate is negative."
+            )
 
         # Sum estimators for both equations.
         est: float = sum(estimators) ** (1 / 2)
@@ -690,7 +690,7 @@ class SolutionStrategyAHC(
         # Check :meth:`DataSavingHC._data_to_export`.
         for flux_name, estimator_name in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
-            ["C_estimator_norm", "L_estimator_new"],
+            ["C_estimator_norm", "L_estimator"],
         ):
             pp.set_solution_values(
                 f"{flux_name}_{estimator_name}",
@@ -995,7 +995,7 @@ class SolutionStrategyAHC(
         for quantity_name in [
             TOTAL_FLUX,
             WETTING_FLUX,
-            "capillary_flux",
+            CAPILLARY_FLUX,
             "total_mobility",
         ]:
             quantity = self.postproc_ad_ops[quantity_name].value(self.equation_system)
@@ -1028,8 +1028,7 @@ class SolutionStrategyAHC(
 
         # NOTE The fluxes w.r.t. goal const. laws are only used in the contination
         # estimators and do not require equilibration.
-        for flux_name in (TOTAL_FLUX, WETTING_FLUX, "capillary_flux"):
-            flux_name = typing.cast(FLUX_NAME, flux_name)  # Satisfy mypy.
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX, CAPILLARY_FLUX):
             self.extend_fv_fluxes(
                 flux_name,
                 flux_specifier="_wrt_goal_const_laws",
@@ -1200,7 +1199,8 @@ class DataSavingHC(DataSavingEst):
             iterate_index=iterate_index,
         )
         for flux_name, estimator_name in itertools.product(
-            (TOTAL_FLUX, WETTING_FLUX), ["T_estimator", "C_estimator", "L_estimator"]
+            (TOTAL_FLUX, WETTING_FLUX),
+            ["T_estimator", "C_estimator_norm", "L_estimator"],
         ):
             try:
                 data.append(

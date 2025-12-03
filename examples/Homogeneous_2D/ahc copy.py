@@ -49,8 +49,6 @@ from tpf.viz.solver_statistics import SolverStatisticsHC
 
 # region SETUP
 
-# Disable numba JIT for debugging.
-# config.DISABLE_JIT = False
 
 # Limit number of threads for NREC.
 N_THREADS = "4"

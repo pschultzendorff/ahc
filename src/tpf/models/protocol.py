@@ -629,6 +629,18 @@ else:
             ...
 
         @staticmethod
+        def _evaluate_pressure_potential_at_points(
+            coeffs: np.ndarray,
+            x: np.ndarray,
+            y: np.ndarray,
+        ) -> np.ndarray:
+            """Helper function to evaluate the potential of a P2 pressure defined by the
+            given coefficients at the specified points.
+
+            """
+            ...
+
+        @staticmethod
         def _evaluate_flux_at_points(
             coeffs: np.ndarray,
             x: np.ndarray,

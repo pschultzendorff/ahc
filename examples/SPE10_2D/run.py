@@ -46,9 +46,9 @@ import logging
 import os
 import pathlib
 import shutil
+import sys
 import warnings
-from dataclasses import dataclass
-from typing import Any, Type
+from typing import Type
 
 import numpy as np
 import porepy as pp
@@ -56,15 +56,13 @@ from tpf.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
 from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.models.protocol import TPFProtocol
-from tpf.numerics.nonlinear.hc_solver import HCSolver
-from tpf.utils.constants_and_typing import FEET
-from tpf.viz.iteration_exporting import IterationExportingMixin
-from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
+
+sys.path.append(str(pathlib.Path(__file__).parent.parent))
+
+from utils import SimulationConfig, clean_up_after_simulation, setup_model
 
 # region SETUP
 
-# Disable numba JIT for debugging.
-# config.DISABLE_JIT = False
 
 # Limit number of threads for NREC.
 N_THREADS = "4"
@@ -73,8 +71,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = N_THREADS
 os.environ["OMP_NUM_THREADS"] = N_THREADS
 os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
 
-# Catch all numpy errors except underflow. The latter can appear during estimator
-# calculation.
+# Catch all numpy errors except underflow, which may occur when calculating estimators.
 np.seterr(all="raise")
 np.seterr(under="ignore")
 
@@ -144,7 +141,6 @@ default_params = {
     "cap_press_constants": {},
     "grid_type": "simplex",
     "spe10_quarter_domain": False,
-    "spe10_layer": spe10_layer,
     "spe10_isotropic_perm": True,
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
@@ -162,135 +158,22 @@ default_time_manager_params = {
 }
 
 
-@dataclass(unsafe_hash=True)
-class SimulationConfig:
-    """Class to store all the simulation parameters that can vary."""
-
-    folder_name: pathlib.Path
-    file_name: str
-    solver_name: str
-    adaptive_error_ratio: float
-    cell_size: float
-    init_s: float
-    rp_model_1: dict[str, Any]
-    rp_model_2: dict[str, Any]
-    cp_model_1: dict[str, Any]
-    cp_model_2: dict[str, Any]
-
-
-def setup_solver(
-    solver: str, adaptive_error_ratio: float
-) -> tuple[Type[SPE10HC] | Type[SPE10Newton], dict[str, Any], dict[str, Any]]:
-    """Return a tuple of solver-specific parameters and model class based on the solver
-    name.
+def setup_solver(solver: str) -> Type[SPE10HC] | Type[SPE10Newton]:
+    """Return a model class based on the solver name.
 
     Parameters:
-        solver: The name of the solver ("AHC", "Newton", or "NewtonAppleyard").
-        adaptive_error_ratio: The error ratio used for adaptive parameter settings.
+        solver: The name of the solver ("AHC", "HC", "Newton", or "NewtonAppleyard").
 
     Returns:
-        A tuple ``(model_class, solver_params, time_manager_params)``, where
-        ``model_class`` is the model class with the correct adaptive solver,
-        ``solver_params`` contains parameters for the nonlinear solver, and
-        ``time_manager_params`` contains parameters for the time manager.
+        The model class with the correct adaptive solver.
 
     """
-    logger.info(f"solver: {solver}, adaptive error ratio: {adaptive_error_ratio:.2f}.")
-    if solver == "HC":
-        solver_params = {
-            # Homotopy Continuation (HC) parameters:
-            "nonlinear_solver_statistics": SolverStatisticsHC,
-            "nonlinear_solver": HCSolver,
-            "hc_constant_decay": False,
-            "hc_lambda_decay": 0.9,
-            "hc_decay_min_max": (0.1, 0.95),
-            "nl_iter_optimal_range": (7, 10),
-            "nl_iter_relax_factors": (0.7, 1.3),
-            "hc_decay_recomp_max": 5,
-            # Non-adaptive stopping criteria:
-            "hc_adaptive": False,
-            "hc_max_iterations": 100,
-            "hc_lambda_min": 0.01,
-            # Nonlinear solver parameters:
-            "nl_convergence_tol": 5e-5,
-            "nl_divergence_tol": 1e30,
-            "max_iterations": 20,
-            "nl_appleyard_chopping": False,
-        }
-        # Update adaptive time stepping parameters for HC.
-        time_manager_params = {
-            "iter_optimal_range": (30, 80),
-            "iter_relax_factors": (0.7, 1.3),
-            "iter_max": 100,  # This has to be the same as "hc_max_iterations", but
-            # the TimeManager does not know about that.
-        }
-        model_class = SPE10HC
-    elif solver == "AHC":
-        solver_params = {
-            # Homotopy Continuation (HC) parameters:
-            "nonlinear_solver_statistics": SolverStatisticsHC,
-            "nonlinear_solver": HCSolver,
-            "hc_max_iterations": 30,
-            "hc_constant_decay": False,
-            "hc_lambda_decay": 0.9,
-            "hc_decay_min_max": (0.1, 0.95),
-            "nl_iter_optimal_range": (6, 9),
-            "nl_iter_relax_factors": (0.7, 1.3),
-            "hc_decay_recomp_max": 5,
-            # Adaptivity:
-            "hc_adaptive": True,
-            "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
-            "nl_error_ratio": 0.1,
-            "hc_nl_convergence_tol": 1e2,
-            # Nonlinear solver parameters:
-            "nl_convergence_tol": 1e-5,
-            "nl_divergence_tol": 1e30,
-            "max_iterations": 20,
-            "nl_appleyard_chopping": False,
-        }
-        # Update adaptive time stepping parameters for AHC.
-        time_manager_params = {
-            "iter_optimal_range": (8, 20),
-            "iter_relax_factors": (0.7, 1.3),
-            "iter_max": 100,  # This has to be the same as "hc_max_iterations", but
-            # the TimeManager does not know about that.
-        }
-        model_class = SPE10HC
-    elif solver == "Newton":
-        solver_params = {
-            # Newton solver parameters:
-            "nonlinear_solver_statistics": SolverStatisticsANewton,
-            "nonlinear_solver": pp.NewtonSolver,
-            # Adaptivity:
-            "nl_adaptive": True,
-            "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e2,
-            # Further parameters:
-            "nl_convergence_tol": 1e-5,
-            "nl_divergence_tol": 1e30,
-            "nl_appleyard_chopping": False,
-            "max_iterations": 50,
-        }
-        time_manager_params = {}
-        model_class = SPE10Newton
-    elif solver == "NewtonAppleyard":
-        solver_params = {
-            # Newton solver params with Appleyard chopping:
-            "nonlinear_solver_statistics": SolverStatisticsANewton,
-            "nonlinear_solver": pp.NewtonSolver,
-            "nl_adaptive": True,
-            "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e2,
-            "nl_convergence_tol": 1e-5,
-            "nl_divergence_tol": 1e30,
-            "nl_appleyard_chopping": True,
-            "max_iterations": 50,
-        }
-        time_manager_params = {}
-        model_class = SPE10Newton
+    if solver in ["HC", "AHC"]:
+        return SPE10HC
+    elif solver in ["Newton", "NewtonAppleyard"]:
+        return SPE10Newton
     else:
         raise ValueError(f"Unknown solver: {solver}")
-    return model_class, solver_params, time_manager_params
 
 
 def run_simulation(config: SimulationConfig) -> None:
@@ -304,8 +187,8 @@ def run_simulation(config: SimulationConfig) -> None:
         f"RP model 2: {config.rp_model_2}, \n"
         f"CP model: {config.cp_model_2}."
     )
-
-    model_class, solver_params, time_manager_params = setup_solver(
+    model_class = setup_solver(config.solver_name)
+    solver_params, time_manager_params = setup_model(
         config.solver_name, config.adaptive_error_ratio
     )
 
@@ -332,6 +215,7 @@ def run_simulation(config: SimulationConfig) -> None:
             "rel_perm_constants": rel_perm_constants,
             "cap_press_constants": cap_press_constants,
             "spe10_initial_saturation": config.init_s,
+            "spe10_layer": config.spe10_layer,
         }
     )
 
@@ -359,24 +243,6 @@ def run_simulation(config: SimulationConfig) -> None:
             f.write(str(e))
         logger.error(f"Run failed with error: {e}.")
         raise e
-
-
-def clean_up_after_simulation(config: SimulationConfig) -> None:
-    """Remove large files that are not needed for the analysis.
-
-    Parameters:
-        config: The simulation configuration containing the folder name.
-
-    """
-    for file in config.folder_name.glob("*.[vtu pvd]*"):
-        try:
-            file.unlink()
-        except Exception:
-            pass
-    try:
-        (config.folder_name / "times.json").unlink()
-    except Exception:
-        pass
 
 
 # endregion
@@ -460,12 +326,12 @@ def generate_configs() -> list[SimulationConfig]:
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        cell_size=600 * FEET / 30,
                         init_s=init_s,
                         rp_model_1={"model": "linear", "limit": False},
                         rp_model_2=rp_model,
                         cp_model_1=cp_models["None"],
                         cp_model_2=cp_models["linear"],
+                        spe10_layer=spe10_layer,
                     )
                 )
 
@@ -486,12 +352,12 @@ def generate_configs() -> list[SimulationConfig]:
                     folder_name=folder_name,
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
-                    cell_size=600 * FEET / 30,
                     init_s=init_s,
                     rp_model_1={"model": "linear", "limit": True},
                     rp_model_2=rp_models["Brooks-Corey_nb_2"],
                     cp_model_1=cp_models["None"],
                     cp_model_2=cp_models["linear"],
+                    spe10_layer=spe10_layer,
                 )
             )
 
@@ -523,12 +389,12 @@ def generate_configs() -> list[SimulationConfig]:
                     folder_name=folder_name,
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
-                    cell_size=600 * FEET / 30,
                     init_s=0.3,
                     rp_model_1={"model": "linear", "limit": False},
                     rp_model_2=rp_model,
                     cp_model_1=cp_models["None"],
                     cp_model_2=cp_model_2,
+                    spe10_layer=spe10_layer,
                 )
             )
 
@@ -549,12 +415,12 @@ def generate_configs() -> list[SimulationConfig]:
                     folder_name=folder_name,
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
-                    cell_size=600 * FEET / 30,
                     init_s=init_s,
                     rp_model_1={"model": "linear", "limit": True},
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=cp_models["None"],
                     cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    spe10_layer=spe10_layer,
                 )
             )
 
@@ -577,12 +443,12 @@ def generate_configs() -> list[SimulationConfig]:
                     folder_name=folder_name,
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
-                    cell_size=600 * FEET / 30,
                     init_s=0.3,
                     rp_model_1={"model": "linear", "limit": True},
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=cp_models["None"],
                     cp_model_2=target_cp_model,
+                    spe10_layer=spe10_layer,
                 )
             )
     # endregion

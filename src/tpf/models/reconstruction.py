@@ -25,6 +25,7 @@ from tpf.numerics.quadrature import (
     get_quadpy_elements,
 )
 from tpf.utils.constants_and_typing import (
+    CAPILLARY_FLUX,
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
     GLOBAL_PRESSURE,
@@ -32,7 +33,6 @@ from tpf.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
-from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
 
 logger = logging.getLogger(__name__)
 
@@ -896,7 +896,7 @@ class EquationsRecMixin(TPFProtocol):
             (WETTING_FLUX, flux_w),
             ("total_mobility", total_mobility),
             # ("fractional_flow", fractional_flow),
-            ("capillary_flux", capillary_flux),
+            (CAPILLARY_FLUX, capillary_flux),
             (TOTAL_FLUX + "_equil", flux_t_equil),
             (WETTING_FLUX + "_equil", flux_w_equil),
             (TOTAL_FLUX + "_equil_mismatch", flux_t_equil_mismatch),
@@ -992,67 +992,6 @@ class SolutionStrategyRec(  # type: ignore
                 + " Skipping postprocessing this iteration."
             )
             logger.warning(e)
-
-        dirname = pathlib.Path(__file__).parent / ".." / ".." / ".." / "pressure_plots"
-        dirname.mkdir(exist_ok=True)
-
-        # FIXME Remove this!
-        # global_pressure_coeffs = pp.get_solution_values(
-        #     GLOBAL_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
-        # )
-        # save_path = (
-        #     dirname
-        #     / f"g_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        # )
-
-        # plot_quadratic_pressures(
-        #     self.g,
-        #     self._domain.bounding_box,
-        #     global_pressure_coeffs,
-        #     save_path=save_path,
-        # )
-
-        # global_pressure_coeffs = pp.get_solution_values(
-        #     GLOBAL_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
-        # )
-        # save_path = (
-        #     dirname
-        #     / f"g_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        # )
-
-        # plot_quadratic_pressures(
-        #     self.g,
-        #     self._domain.bounding_box,
-        #     global_pressure_coeffs,
-        #     save_path=save_path,
-        # )
-
-        # complementary_pressure_coeffs = pp.get_solution_values(
-        #     COMPLEMENTARY_PRESSURE + "_coeffs_postproc", self.g_data, iterate_index=0
-        # )
-        # save_path = (
-        #     dirname
-        #     / f"c_pp_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        # )
-        # plot_quadratic_pressures(
-        #     self.g,
-        #     self._domain.bounding_box,
-        #     complementary_pressure_coeffs,
-        #     save_path=save_path,
-        # )
-        # complementary_pressure_coeffs = pp.get_solution_values(
-        #     COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
-        # )
-        # save_path = (
-        #     dirname
-        #     / f"c_rec_{self.time_manager.time_index}_{self.nonlinear_solver_statistics.num_iteration}.png"
-        # )
-        # plot_quadratic_pressures(
-        #     self.g,
-        #     self._domain.bounding_box,
-        #     complementary_pressure_coeffs,
-        #     save_path=save_path,
-        # )
 
     @typing.override
     def check_convergence(
@@ -1155,7 +1094,7 @@ class SolutionStrategyRec(  # type: ignore
             )
 
         # Evaluate scaled fluxes required for pressure post-processing.
-        for scalar_name in ["total_mobility", "capillary_flux"]:
+        for scalar_name in ["total_mobility", CAPILLARY_FLUX]:
             scalar_value = self.postproc_ad_ops[scalar_name].value(self.equation_system)
             pp.set_solution_values(
                 scalar_name,
@@ -1181,7 +1120,7 @@ class SolutionStrategyRec(  # type: ignore
                 # Extend equilibrated fluxes.
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
 
-        self.extend_fv_fluxes("capillary_flux")
+        self.extend_fv_fluxes(CAPILLARY_FLUX)
 
         # Reconstruct pressures.
         for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):

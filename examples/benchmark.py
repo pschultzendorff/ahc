@@ -52,8 +52,6 @@ from viztracer import VizTracer  # type: ignore[import]
 
 # region SETUP
 
-# Disable numba JIT for debugging.
-# config.DISABLE_JIT = False
 
 # Limit number of threads for NREC.
 N_THREADS = "4"
