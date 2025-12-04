@@ -39,14 +39,15 @@ Model description:
 
 import os
 import pathlib
+import sys
 import warnings
-from typing import Any
 
 import numpy as np
-import porepy as pp
-from run import run_simulation
+from run import cp_models, rp_models, run_simulation
 
-from ..utils import SimulationConfig, plot_estimators, read_data
+sys.path.append(str(pathlib.Path(__file__).parent.parent))
+
+from utils import SimulationConfig, plot_estimators, read_data
 
 # region SETUP
 
@@ -74,32 +75,16 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 spe10_layer: int = 55
 
 if __name__ == "__main__":
-    rp_model_1 = {"model": "linear", "limit": False}
-    cp_model_1 = {
-        "model": None,
-    }
-    rp_model_2 = {
-        "model": "Brooks-Corey-Mualem",
-        "limit": True,
-        "n_b": 1.0,
-        "eta": 2.0,
-    }  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-
-    cp_model_2: dict[str, Any] = {
-        "model": "Brooks-Corey",
-        "n_b": 2.0,
-        "entry_pressure": 30 * pp.PASCAL,
-    }
     config = SimulationConfig(
         file_name="ahc_for_plots",
         folder_name=dirname / "ahc_for_plots",
         solver_name="AHC",
         adaptive_error_ratio=0.00000001,
         init_s=0.3,
-        rp_model_1=rp_model_1,
-        rp_model_2=rp_model_2,
-        cp_model_1=cp_model_1,
-        cp_model_2=cp_model_2,
+        rp_model_1=rp_models["linear"],
+        rp_model_2=rp_models["Brooks-Corey_nb_4"],
+        cp_model_1=cp_models["None"],
+        cp_model_2=cp_models["linear"],
         spe10_layer=spe10_layer,
     )
 
@@ -107,6 +92,9 @@ if __name__ == "__main__":
 
     statistics = read_data(config)
     fig = plot_estimators(statistics, combine_disc_est=True)
-    fig.savefig(dirname / "convergence_estimators.png")
+
+    fig_dir = dirname / "figures"
+    fig_dir.mkdir(exist_ok=True)
+    fig.savefig(fig_dir / "convergence_estimators.png")
 
 # endregion

@@ -44,8 +44,8 @@ class SimulationConfig:
     refinement_factor: float = 1.0
 
 
-def setup_model(
-    solver: str, adaptive_error_ratio: float
+def setup_params(
+    solver: str, adaptive_error_ratio: float | None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Select correct solver and time manager parameters.
 

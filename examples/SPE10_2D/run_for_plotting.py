@@ -38,7 +38,7 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import run_simulation
+from run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -70,29 +70,27 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 
 # region RUN
-rp_model = {"model": "Brooks-Corey-Mualem", "n_b": 4.0, "eta": 2.0, "limit": True}
-cp_model = {
-    "model": "Brooks-Corey",
-    "n_b": 4.0,
-    "entry_pressure": 50 * pp.PASCAL,
-    "limit": True,
-    "max": 1e6 * pp.PASCAL,
+time_manager_params = {
+    "schedule": np.array([0.0, 30.0 * pp.DAY]),
+    "dt_init": 1.0 * pp.DAY,
+    "constant_dt": True,
 }
+
 
 if __name__ == "__main__":
     for spe10_layer in [10, 55]:
         config = SimulationConfig(
             file_name=f"plotting_layer_{spe10_layer}",
             folder_name=dirname / f"plotting_layer_{spe10_layer}",
-            solver_name="Newton",
-            adaptive_error_ratio=0.1,
+            solver_name="NewtonAppleyard",
+            adaptive_error_ratio=0.0,  # Disregarded
             init_s=0.3,
-            rp_model_1=rp_model,
-            rp_model_2=rp_model,
-            cp_model_1=cp_model,
-            cp_model_2=cp_model,
+            rp_model_1=rp_models["Brooks-Corey_nb_4"],
+            rp_model_2=rp_models["Brooks-Corey_nb_4"],
+            cp_model_1=cp_models["linear"],
+            cp_model_2=cp_models["linear"],
             spe10_layer=spe10_layer,
         )
-        run_simulation(config)
+        run_simulation(config, time_manager_params=time_manager_params)
 
 # endregion

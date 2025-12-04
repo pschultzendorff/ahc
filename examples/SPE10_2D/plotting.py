@@ -19,7 +19,7 @@ if __name__ == "__main__":
     configs_viscous_and_cap_varying_init_s = configs[60:72] + configs[44:48]
     configs_viscous_and_cap_varying_entry_press = configs[44:48] + configs[72:]
     data_1 = {}
-    for config in configs_viscous_varying_rp_init_s_03:
+    for config in configs_viscous_varying_rp_init_s_02:
         if config.rp_model_2["model"] == "Corey":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
         elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
@@ -33,8 +33,8 @@ if __name__ == "__main__":
     for config in configs_viscous_varying_rp_init_s_03:
         if config.rp_model_2["model"] == "Corey":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-        else:
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']}"
+        elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
+            key = f"{config.solver_name}_{config.adaptive_error_ratio}_Br.-Corey {config.rp_model_2['n_b']}"
         data_2[key] = read_data(config)
     fig2 = plot_nl_iterations(
         data_2,
@@ -83,9 +83,11 @@ if __name__ == "__main__":
         r"$p_\mathrm{e}$",
     )
 
-    fig1.savefig(dirname / "nl_iters_viscous_varying_rp_init_s_02.png")
-    fig2.savefig(dirname / "nl_iters_viscous_varying_rp_init_s_03.png")
-    fig3.savefig(dirname / "nl_iters_viscous_varying_init_s.png")
-    fig4.savefig(dirname / "nl_iters_viscous_and_cap_varying_cap_init_s_03.png")
-    fig5.savefig(dirname / "nl_iters_viscous_and_cap_varying_init_s.png")
-    fig6.savefig(dirname / "nl_iters_viscous_and_cap_varying_entry_press.png")
+    fig_dir = dirname / "figures"
+    fig_dir.mkdir(exist_ok=True)
+    fig1.savefig(fig_dir / "nl_iters_viscous_varying_rp_init_s_02.png")
+    fig2.savefig(fig_dir / "nl_iters_viscous_varying_rp_init_s_03.png")
+    fig3.savefig(fig_dir / "nl_iters_viscous_varying_init_s.png")
+    fig4.savefig(fig_dir / "nl_iters_viscous_and_cap_varying_cap_init_s_03.png")
+    fig5.savefig(fig_dir / "nl_iters_viscous_and_cap_varying_init_s.png")
+    fig6.savefig(fig_dir / "nl_iters_viscous_and_cap_varying_entry_press.png")

@@ -56,10 +56,11 @@ from tpf.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
 from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
 from tpf.models.protocol import TPFProtocol
+from tpf.viz.iteration_exporting import IterationExportingMixin
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, clean_up_after_simulation, setup_model
+from utils import SimulationConfig, clean_up_after_simulation, setup_params
 
 # region SETUP
 
@@ -111,7 +112,6 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class SPE10HC(
-    # IterationExportingMixin,
     InitialConditionsMixin,
     SPE10Mixin,
     TwoPhaseFlowAHC,
@@ -120,7 +120,6 @@ class SPE10HC(
 
 
 class SPE10Newton(
-    # IterationExportingMixin,
     InitialConditionsMixin,
     SPE10Mixin,
     TwoPhaseFlowANewton,
@@ -133,7 +132,7 @@ class SPE10Newton(
 # region UTILS
 spe10_layer: int = 55
 
-default_params = {
+default_solver_params = {
     "progressbars": True,
     # Model:
     "material_constants": {},
@@ -158,7 +157,9 @@ default_time_manager_params = {
 }
 
 
-def setup_solver(solver: str) -> Type[SPE10HC] | Type[SPE10Newton]:
+def setup_model(
+    solver: str, iteration_exporting: bool = False
+) -> Type[SPE10HC] | Type[SPE10Newton]:
     """Return a model class based on the solver name.
 
     Parameters:
@@ -169,14 +170,26 @@ def setup_solver(solver: str) -> Type[SPE10HC] | Type[SPE10Newton]:
 
     """
     if solver in ["HC", "AHC"]:
-        return SPE10HC
+        model_class = SPE10HC
     elif solver in ["Newton", "NewtonAppleyard"]:
-        return SPE10Newton
+        model_class = SPE10Newton
     else:
         raise ValueError(f"Unknown solver: {solver}")
+    if iteration_exporting:
+        model_class = type(
+            f"{model_class.__name__}WithIterationExporting",
+            (IterationExportingMixin, model_class),
+            {},
+        )
+    return model_class
 
 
-def run_simulation(config: SimulationConfig) -> None:
+def run_simulation(
+    config: SimulationConfig,
+    solver_params: dict | None = None,
+    time_manager_params: dict | None = None,
+    **kwargs,
+) -> None:
     """Run simulation for a single configuration."""
     logger.info(
         f"solver: {config.solver_name}, "
@@ -187,14 +200,16 @@ def run_simulation(config: SimulationConfig) -> None:
         f"RP model 2: {config.rp_model_2}, \n"
         f"CP model: {config.cp_model_2}."
     )
-    model_class = setup_solver(config.solver_name)
-    solver_params, time_manager_params = setup_model(
+    model_class = setup_model(config.solver_name, **kwargs)
+    updated_solver_params, updated_time_manager_params = setup_params(
         config.solver_name, config.adaptive_error_ratio
     )
 
     # Build params dictionaries.
-    params = default_params | solver_params
-    time_manager_params = default_time_manager_params | time_manager_params
+    if solver_params is None:
+        solver_params = default_solver_params | updated_solver_params
+    if time_manager_params is None:
+        time_manager_params = default_time_manager_params | updated_time_manager_params
 
     # Newton and Appleyard Newton require only one of each constitutive law.
     if config.solver_name.startswith("Newton"):
@@ -209,18 +224,13 @@ def run_simulation(config: SimulationConfig) -> None:
             "model_1": config.cp_model_1,
             "model_2": config.cp_model_2,
         }
-    params.update(
+    solver_params.update(
         {
             "meshing_arguments": {"cell_size": config.cell_size},
             "rel_perm_constants": rel_perm_constants,
             "cap_press_constants": cap_press_constants,
             "spe10_initial_saturation": config.init_s,
             "spe10_layer": config.spe10_layer,
-        }
-    )
-
-    params.update(
-        {
             "folder_name": config.folder_name,
             "file_name": config.file_name,
             "solver_statistics_file_name": config.folder_name
@@ -236,20 +246,19 @@ def run_simulation(config: SimulationConfig) -> None:
         pass
 
     try:
-        model = model_class(params)
-        pp.run_time_dependent_model(model=model, params=params)
+        model = model_class(solver_params)
+        pp.run_time_dependent_model(model=model, params=solver_params)
     except Exception as e:
         with (config.folder_name / "failure.txt").open("w") as f:
             f.write(str(e))
         logger.error(f"Run failed with error: {e}.")
-        raise e
 
 
 # endregion
 
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
-    ("AHC", 0.001),
+    ("AHC", 0.01),
     ("HC", 0.1),
     ("Newton", 0.1),
     ("NewtonAppleyard", 0.1),
@@ -257,6 +266,7 @@ solvers_and_ratios: list[tuple[str, float]] = [
 
 
 rp_models = {
+    "linear": {"model": "linear", "limit": True},
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey-Mualem",
         "limit": True,
@@ -277,24 +287,24 @@ cp_models = {
     "None": {
         "model": None,
     },
-    # Linear cap. pressure model without entry pressure for (almost) viscous flow.
     "linear": {
         "model": "linear",
-        "linear_param": 1000,
-        "entry_pressure": 0 * pp.PASCAL,
-        "limit": False,
+        "entry_pressure": 50 * pp.PASCAL,
+        "linear_param": 5.0,
+        "limit": True,
+        "max": 1e6 * pp.PASCAL,
     },
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey",
         "n_b": 4.0,
-        "entry_pressure": 50 * pp.PASCAL,
+        "entry_pressure": 100 * pp.PASCAL,
         "limit": True,
         "max": 1e6 * pp.PASCAL,
     },
     "Brooks-Corey_nb_2": {
         "model": "Brooks-Corey",
         "n_b": 2.0,
-        "entry_pressure": 50 * pp.PASCAL,
+        "entry_pressure": 100 * pp.PASCAL,
         "limit": True,
         "max": 1e6 * pp.PASCAL,
     },
@@ -311,6 +321,8 @@ def generate_configs() -> list[SimulationConfig]:
     # pressure.
     for init_s in [0.2, 0.3]:
         for rp_model_name, rp_model in rp_models.items():
+            if rp_model_name == "linear":
+                continue
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 folder_name = (
                     dirname
@@ -327,7 +339,7 @@ def generate_configs() -> list[SimulationConfig]:
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
                         init_s=init_s,
-                        rp_model_1={"model": "linear", "limit": False},
+                        rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
                         cp_model_1=cp_models["None"],
                         cp_model_2=cp_models["linear"],
@@ -353,7 +365,7 @@ def generate_configs() -> list[SimulationConfig]:
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
                     init_s=init_s,
-                    rp_model_1={"model": "linear", "limit": True},
+                    rp_model_1=rp_models["linear"],
                     rp_model_2=rp_models["Brooks-Corey_nb_2"],
                     cp_model_1=cp_models["None"],
                     cp_model_2=cp_models["linear"],
@@ -369,6 +381,8 @@ def generate_configs() -> list[SimulationConfig]:
     # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
     # capillary pressure.
     for rp_model_name, rp_model in rp_models.items():
+        if rp_model_name == "linear":
+            continue
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             folder_name = (
                 dirname
@@ -390,14 +404,13 @@ def generate_configs() -> list[SimulationConfig]:
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
                     init_s=0.3,
-                    rp_model_1={"model": "linear", "limit": False},
+                    rp_model_1=rp_models["linear"],
                     rp_model_2=rp_model,
                     cp_model_1=cp_models["None"],
                     cp_model_2=cp_model_2,
                     spe10_layer=spe10_layer,
                 )
             )
-
     # # Varying init_s for the less challenging Brooks-Corey model.
     for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
@@ -416,16 +429,16 @@ def generate_configs() -> list[SimulationConfig]:
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
                     init_s=init_s,
-                    rp_model_1={"model": "linear", "limit": True},
+                    rp_model_1=rp_models["linear"],
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=cp_models["None"],
-                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    cp_model_2=cp_model_2,
                     spe10_layer=spe10_layer,
                 )
             )
 
     # Less challenging Brooks-Corey cap. pressure with different entry pressures.
-    for entry_pressure in [100, 300]:
+    for entry_pressure in [100, 200, 300]:
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
             folder_name = (
@@ -435,8 +448,8 @@ def generate_configs() -> list[SimulationConfig]:
                 / "varying_entry_pressure"
                 / file_name
             )
-            target_cp_model = cp_models["Brooks-Corey_nb_4"].copy()
-            target_cp_model["entry_pressure"] = entry_pressure * pp.PASCAL
+            cp_model_2 = cp_models["Brooks-Corey_nb_4"].copy()
+            cp_model_2["entry_pressure"] = entry_pressure * pp.PASCAL
             configs.append(
                 SimulationConfig(
                     file_name=file_name,
@@ -444,10 +457,10 @@ def generate_configs() -> list[SimulationConfig]:
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
                     init_s=0.3,
-                    rp_model_1={"model": "linear", "limit": True},
+                    rp_model_1=rp_models["linear"],
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=cp_models["None"],
-                    cp_model_2=target_cp_model,
+                    cp_model_2=cp_model_2,
                     spe10_layer=spe10_layer,
                 )
             )

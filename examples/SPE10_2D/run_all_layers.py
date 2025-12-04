@@ -45,8 +45,7 @@ import sys
 import warnings
 
 import numpy as np
-import porepy as pp
-from run import run_simulation
+from run import cp_models, rp_models, run_simulation, solvers_and_ratios
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -72,29 +71,6 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 
 # region RUN
-solvers = [
-    "AHC",
-    "Newton",
-    "NewtonAppleyard",
-    "HC",
-]
-adaptive_error_ratios = [0.001, 0.1, 0.1, 0.1]
-
-rp_model = {
-    "model": "Brooks-Corey-Mualem",
-    "limit": True,
-    "n_b": 4.0,
-    "eta": 2.0,
-}  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-
-
-cp_model = {
-    "model": "Brooks-Corey",
-    "n_b": 4.0,
-    "entry_pressure": 50 * pp.PASCAL,
-    "limit": True,
-    "max": 1e6 * pp.PASCAL,
-}
 
 
 def generate_configs() -> list[SimulationConfig]:
@@ -103,7 +79,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3.
     for spe10_layer in range(85):
-        for solver_name, adaptive_error_ratio in zip(solvers, adaptive_error_ratios):
+        for solver_name, adaptive_error_ratio in solvers_and_ratios:
             folder_name = (
                 dirname
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
@@ -116,10 +92,10 @@ def generate_configs() -> list[SimulationConfig]:
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
                     init_s=0.3,
-                    rp_model_1={"model": "linear", "limit": True},
-                    rp_model_2=rp_model,
-                    cp_model_1={"model": None},
-                    cp_model_2=cp_model,
+                    rp_model_1=rp_models["linear"],
+                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                    cp_model_1=cp_models["None"],
+                    cp_model_2=cp_models["linear"],
                     spe10_layer=spe10_layer,
                 )
             )

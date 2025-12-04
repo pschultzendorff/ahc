@@ -47,7 +47,7 @@ from tpf.models.protocol import TPFProtocol
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, clean_up_after_simulation, setup_model
+from utils import SimulationConfig, clean_up_after_simulation, setup_params
 
 # region SETUP
 
@@ -118,7 +118,7 @@ class SPE11Newton(
 
 # region UTILS
 
-default_params = {
+default_solver_params = {
     "progressbars": True,
     # Model:
     "material_constants": {},
@@ -146,7 +146,7 @@ default_time_manager_params = {
 }
 
 
-def setup_solver(solver: str) -> Type[SPE11HC] | Type[SPE11Newton]:
+def setup_model(solver: str) -> Type[SPE11HC] | Type[SPE11Newton]:
     """Return a model class based on the solver name.
 
     Parameters:
@@ -164,7 +164,11 @@ def setup_solver(solver: str) -> Type[SPE11HC] | Type[SPE11Newton]:
         raise ValueError(f"Unknown solver: {solver}")
 
 
-def run_simulation(config: SimulationConfig) -> None:
+def run_simulation(
+    config: SimulationConfig,
+    solver_params: dict | None = None,
+    time_manager_params: dict | None = None,
+) -> None:
     """Run simulation for a single configuration."""
     logger.info(
         f"solver: {config.solver_name}, "
@@ -177,14 +181,16 @@ def run_simulation(config: SimulationConfig) -> None:
         f"CP model 2: {config.cp_model_2}."
     )
 
-    model_class = setup_solver(config.solver_name)
-    solver_params, time_manager_params = setup_model(
+    model_class = setup_model(config.solver_name)
+    updated_solver_params, updated_time_manager_params = setup_params(
         config.solver_name, config.adaptive_error_ratio
     )
 
     # Build params dictionaries.
-    params = default_params | solver_params
-    time_manager_params = default_time_manager_params | time_manager_params
+    if solver_params is None:
+        solver_params = default_solver_params | updated_solver_params
+    if time_manager_params is None:
+        time_manager_params = default_time_manager_params | updated_time_manager_params
 
     # Newton and Appleyard Newton require only one of each constitutive law.
     if config.solver_name.startswith("Newton"):
@@ -200,17 +206,12 @@ def run_simulation(config: SimulationConfig) -> None:
             "model_2": config.cp_model_2,
         }
 
-    params.update(
+    solver_params.update(
         {
             "meshing_arguments": {"spe11_refinement_factor": config.refinement_factor},
             "rel_perm_constants": rel_perm_constants,
             "cap_press_constants": cap_press_constants,
             "spe11_initial_saturation": config.init_s,
-        }
-    )
-
-    params.update(
-        {
             "folder_name": config.folder_name,
             "file_name": config.file_name,
             "solver_statistics_file_name": config.folder_name
@@ -226,8 +227,8 @@ def run_simulation(config: SimulationConfig) -> None:
         pass
 
     try:
-        model = model_class(params)
-        pp.run_time_dependent_model(model=model, params=params)
+        model = model_class(solver_params)
+        pp.run_time_dependent_model(model=model, params=solver_params)
 
     except Exception as e:
         config.folder_name.mkdir(parents=True, exist_ok=True)
@@ -249,10 +250,16 @@ refinement_factors: list[float] = [10, 3, 0.5]  # , 0.5]
 
 rp_models: dict[str, Any] = {
     "linear": {"model": "linear", "limit": True},
-    "Brooks-Corey": {
+    "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey-Mualem",
         "limit": True,
-        "n_b": 1.0,
+        "n_b": 4.0,
+        "eta": 2.0,
+    },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
+    "Brooks-Corey_nb_2": {
+        "model": "Brooks-Corey-Mualem",
+        "limit": True,
+        "n_b": 2.0,
         "eta": 2.0,
     },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
     "Corey_power_2": {"model": "Corey", "limit": True, "power": 2},
@@ -261,8 +268,24 @@ rp_models: dict[str, Any] = {
 
 cp_models: dict[str, Any] = {
     "None": {"model": None},
-    "linear": {"model": "linear", "linear_param": 3.0},
-    "Brooks-Corey": {"model": "Brooks-Corey", "n_b": 2.0},
+    "linear": {
+        "model": "linear",
+        "linear_param": 5.0,
+        "limit": True,
+        "max": 1e6 * pp.PASCAL,
+    },
+    "Brooks-Corey_nb_4": {
+        "model": "Brooks-Corey",
+        "n_b": 4.0,
+        "limit": True,
+        "max": 1e6 * pp.PASCAL,
+    },
+    "Brooks-Corey_nb_2": {
+        "model": "Brooks-Corey",
+        "n_b": 2.0,
+        "limit": True,
+        "max": 1e6 * pp.PASCAL,
+    },
 }
 
 
@@ -293,7 +316,7 @@ def generate_configs() -> list[SimulationConfig]:
                         rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
                         cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["Brooks-Corey"],
+                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
                     )
                 )
 
@@ -322,9 +345,9 @@ def generate_configs() -> list[SimulationConfig]:
                         refinement_factor=refinement_factor,
                         init_s=init_s,
                         rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_models["Corey_power_2"],
+                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
                         cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["linear"],
+                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
                     )
                 )
 

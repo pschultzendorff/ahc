@@ -46,14 +46,16 @@ Model description:
 import logging
 import os
 import pathlib
+import sys
 import warnings
-from typing import Any
 
 import numpy as np
 import porepy as pp
-from run import run_simulation
+from run import cp_models, rp_models, run_simulation, solvers_and_ratios
 
-from ..utils import SimulationConfig
+sys.path.append(str(pathlib.Path(__file__).parent.parent))
+
+from utils import SimulationConfig
 
 # region SETUP
 
@@ -82,31 +84,10 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # region RUN
 spe10_layer = 55
-
-solvers: list[tuple[str, float]] = [
-    ("AHC", 0.005),
-    ("Newton", 0.1),
-    ("NewtonAppleyard", 0.1),
-]
-
-rp_models: dict[str, Any] = {
-    "Brooks-Corey": {
-        "model": "Brooks-Corey-Mualem",
-        "limit": True,
-        "n_b": 1.0,
-        "eta": 2.0,
-    },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-}
-
-cp_models: dict[str, Any] = {
-    "None": {
-        "model": None,
-    },
-    "linear": {
-        "model": "linear",
-        "entry_pressure": 30 * pp.PASCAL,
-        "linear_param": 3.0,
-    },
+time_manager_params = {
+    "schedule": np.array([0.0, 30.0 * pp.DAY]),
+    "dt_init": 30.0 * pp.DAY,
+    "constant_dt": True,
 }
 
 
@@ -116,7 +97,13 @@ def generate_configs() -> list[SimulationConfig]:
 
     # # Varying init_s for the Brooks-Corey model.
     for init_s in [0.2, 0.3, 0.5]:
-        for solver_name, adaptive_error_ratio in solvers:
+        for solver_name, adaptive_error_ratio in solvers_and_ratios:
+            if solver_name == "HC":
+                continue
+            elif solver_name == "AHC":
+                adaptive_error_ratio = 1e-4
+            else:
+                continue
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
                 dirname
@@ -131,8 +118,8 @@ def generate_configs() -> list[SimulationConfig]:
                     solver_name=solver_name,
                     adaptive_error_ratio=adaptive_error_ratio,
                     init_s=init_s,
-                    rp_model_1={"model": "linear", "limit": False},
-                    rp_model_2=rp_models["Brooks-Corey"],
+                    rp_model_1=rp_models["linear"],
+                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=cp_models["None"],
                     cp_model_2=cp_models["linear"],
                     spe10_layer=spe10_layer,
@@ -145,6 +132,8 @@ def generate_configs() -> list[SimulationConfig]:
 if __name__ == "__main__":
     configs = generate_configs()
     for config in configs:
-        run_simulation(config)
+        run_simulation(
+            config, time_manager_params=time_manager_params, iteration_exporting=True
+        )
 
 # endregion

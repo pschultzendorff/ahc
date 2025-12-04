@@ -174,7 +174,7 @@ class SimulationConfig:
     cp_model_2: dict[str, Any]
 
 
-def setup_solver(
+def setup_model(
     solver: str, adaptive_error_ratio: float
 ) -> tuple[Type[SPE11HC] | Type[SPE11Newton], dict[str, Any]]:
     """Return a tuple of solver-specific parameters and model class based on the solver
@@ -264,7 +264,7 @@ def run_simulation(config: SimulationConfig) -> None:
         f"CP model 2: {config.cp_model_2}."
     )
 
-    model_class, solver_params = setup_solver(
+    model_class, solver_params = setup_model(
         config.solver_name, config.adaptive_error_ratio
     )
 

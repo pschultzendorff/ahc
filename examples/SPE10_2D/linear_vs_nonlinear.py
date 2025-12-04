@@ -43,11 +43,9 @@ import os
 import pathlib
 import sys
 import warnings
-from typing import Any
 
 import numpy as np
-import porepy as pp
-from run import run_simulation
+from run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -82,38 +80,15 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 
 if __name__ == "__main__":
-    rp_models: dict[str, Any] = {
-        "linear": {
-            "model": "linear",
-            "limit": True,
-        },
-        "Brooks-Corey": {
-            "model": "Brooks-Corey-Mualem",
-            "limit": True,
-            "n_b": 1.0,
-            "eta": 2.0,
-        },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-    }
-    cp_models: dict[str, Any] = {
-        "None": {
-            "model": None,
-        },
-        "linear_30": {
-            "model": "linear",
-            "entry_pressure": 30 * pp.PASCAL,
-            "linear_param": 3.0,
-        },
-    }
-
     spe10_layer: int = 55
 
     for init_s in [0.2, 0.3]:
         # Linear
         config = SimulationConfig(
             file_name="linear",
-            folder_name=dirname / f"linear_{init_s}",
-            solver_name="AHC",  # Disregarded
-            adaptive_error_ratio=0.001,
+            folder_name=dirname / "linear_vs_nonlinear" / f"linear_{init_s}",
+            solver_name="AHC",
+            adaptive_error_ratio=1e-4,
             init_s=init_s,
             rp_model_1=rp_models["linear"],
             rp_model_2=rp_models["linear"],
@@ -126,14 +101,14 @@ if __name__ == "__main__":
         # Nonlinear
         config = SimulationConfig(
             file_name="nonlinear",
-            folder_name=dirname / f"nonlinear_{init_s}",
-            solver_name="AHC",  # Disregarded
-            adaptive_error_ratio=0.001,
+            folder_name=dirname / "linear_vs_nonlinear" / f"nonlinear_{init_s}",
+            solver_name="AHC",
+            adaptive_error_ratio=1e-4,
             init_s=init_s,
             rp_model_1=rp_models["linear"],
-            rp_model_2=rp_models["Brooks-Corey"],
+            rp_model_2=rp_models["Brooks-Corey_nb_4"],
             cp_model_1=cp_models["None"],
-            cp_model_2=cp_models["linear_30"],
+            cp_model_2=cp_models["linear"],
             spe10_layer=spe10_layer,
         )
         run_simulation(config)
@@ -141,14 +116,16 @@ if __name__ == "__main__":
         # Nonlinear but stop at the first homotopy step
         config = SimulationConfig(
             file_name="nonlinear_stop_early",
-            folder_name=dirname / f"nonlinear_stop_early_{init_s}",
-            solver_name="AHC",  # Disregarded
+            folder_name=dirname
+            / "linear_vs_nonlinear"
+            / f"nonlinear_stop_early_{init_s}",
+            solver_name="AHC",
             adaptive_error_ratio=1.0,  # Stop early
             init_s=init_s,
             rp_model_1=rp_models["linear"],
-            rp_model_2=rp_models["Brooks-Corey"],
+            rp_model_2=rp_models["Brooks-Corey_nb_4"],
             cp_model_1=cp_models["None"],
-            cp_model_2=cp_models["linear_30"],
+            cp_model_2=cp_models["linear"],
             spe10_layer=spe10_layer,
         )
         run_simulation(config)

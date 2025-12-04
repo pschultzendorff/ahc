@@ -28,10 +28,10 @@ import os
 import pathlib
 import sys
 import warnings
-from typing import Any
 
 import numpy as np
-from run import run_simulation
+import porepy as pp
+from run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -64,19 +64,13 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # region RUN
 
+time_manager_params = {
+    "schedule": np.array([0.0, 3000.0 * pp.DAY]),
+    "dt_init": 1.0 * pp.DAY,
+    "constant_dt": True,
+}
 
 if __name__ == "__main__":
-    rp_model: dict[str, Any] = {
-        "model": "Brooks-Corey-Mualem",
-        "limit": True,
-        "n_b": 1.0,
-        "eta": 2.0,
-    }  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-
-    cp_model: dict[str, Any] = {
-        "model": "Brooks-Corey",
-        "n_b": 2.0,
-    }
     config = SimulationConfig(
         file_name="plotting",
         folder_name=dirname / "plotting",
@@ -84,10 +78,10 @@ if __name__ == "__main__":
         adaptive_error_ratio=0.0,  # Disregarded
         refinement_factor=1.0,
         init_s=0.8,
-        rp_model_1=rp_model,
-        rp_model_2=rp_model,
-        cp_model_1=cp_model,
-        cp_model_2=cp_model,
+        rp_model_1=rp_models["Brooks-Corey_nb_4"],
+        rp_model_2=rp_models["Brooks-Corey_nb_4"],
+        cp_model_1=cp_models["Brooks-Corey_nb_4"],
+        cp_model_2=cp_models["Brooks-Corey_nb_4"],
     )
-    run_simulation(config)
+    run_simulation(config, time_manager_params=time_manager_params)
 # endregion
