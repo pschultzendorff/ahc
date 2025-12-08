@@ -66,7 +66,7 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 time_manager_params = {
     "schedule": np.array([0.0, 3000.0 * pp.DAY]),
-    "dt_init": 1.0 * pp.DAY,
+    "dt_init": 30.0 * pp.DAY,
     "constant_dt": True,
 }
 
@@ -74,13 +74,13 @@ if __name__ == "__main__":
     config = SimulationConfig(
         file_name="plotting",
         folder_name=dirname / "plotting",
-        solver_name="NewtonAppleyard",
-        adaptive_error_ratio=0.0,  # Disregarded
-        refinement_factor=1.0,
+        solver_name="AHC",  # NewtonAppleyard requires too many time steps
+        adaptive_error_ratio=0.01,  # Disregarded
+        refinement_factor=3.0,
         init_s=0.8,
-        rp_model_1=rp_models["Brooks-Corey_nb_4"],
+        rp_model_1=rp_models["linear"],
         rp_model_2=rp_models["Brooks-Corey_nb_4"],
-        cp_model_1=cp_models["Brooks-Corey_nb_4"],
+        cp_model_1=cp_models["None"],
         cp_model_2=cp_models["Brooks-Corey_nb_4"],
     )
     run_simulation(config, time_manager_params=time_manager_params)

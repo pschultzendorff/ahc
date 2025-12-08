@@ -609,97 +609,169 @@ def plot_estimators(
     return fig
 
 
-def plot_spatial_convergence(
-    statistics: list[SimulationStatistics],
-    ref_facs: list[float],
-    title: str | None = None,
-    combine_disc_est: bool = True,
+# def plot_spatial_convergence(
+#     statistics: list[SimulationStatistics],
+#     ref_facs: list[float],
+#     title: str | None = None,
+#     combine_disc_est: bool = True,
+# ) -> plt.Figure:
+#     """Plot estimators for different mesh sizes.
+
+#     Returns:
+#         A matplotlib figure with the plotted estimators.
+
+#     """
+#     fig, ax = plt.subplots(figsize=(8, 6))
+
+#     cmap = plt.get_cmap("viridis")
+#     colors = [cmap(i) for i in np.linspace(0, 1, len(statistics))]
+
+#     for ref_fac, color, statistic in zip(ref_facs, colors, statistics):
+#         uses_hc: bool = len(statistic.hc_estimator) > 0
+
+#         tot_nl_iterations: int = 0
+#         tot_nl_iterations_fine: int = 0
+#         # Plot spatial estimator
+#         for i, (time, spat_est, temp_est, lin_est) in enumerate(
+#             zip(
+#                 statistic.time_steps,
+#                 statistic.spat_estimator,
+#                 statistic.temp_estimator,
+#                 statistic.lin_estimator,
+#             )
+#         ):
+#             if uses_hc:
+#                 hc_est_flat = flatten(statistic.hc_estimator[i])
+#                 spat_est_flat = flatten(spat_est)
+#                 temp_est_flat = flatten(temp_est)
+#             else:
+#                 spat_est_flat = spat_est
+#                 temp_est_flat = temp_est
+
+#             # Plot spatial and temporal estimators for the full time step.
+
+#             # Combine spatial and temporal estimators.
+#             disc_est_flat = np.array(spat_est_flat) + np.array(temp_est_flat)
+#             ax.plot(
+#                 range(tot_nl_iterations, tot_nl_iterations + len(disc_est_flat)),
+#                 disc_est_flat,
+#                 "o-",
+#                 color=color,
+#                 markersize=4,
+#                 fillstyle="none",
+#                 markerfacecolor=color,
+#                 label=rf"{ref_fac} $\eta_{{disc}}$" if i == 0 else "",
+#             )
+#             # Update number of nl iterations.
+#             tot_nl_iterations += len(spat_est_flat)
+
+#     # Set y scale to log
+#     ax.set_yscale("log")
+
+#     # Add labels and title
+#     ax.tick_params(axis="both", labelsize=12)
+#     ax.set_xlabel(
+#         "Nonlinear iteration",
+#         fontsize=14,
+#         fontweight="bold",
+#     )
+#     ax.set_ylabel(
+#         "Error estimate (log scale)",
+#         fontsize=14,
+#         fontweight="bold",
+#     )
+#     if title is None:
+#         title = "Spatial Convergence of Error Estimators"
+#     ax.set_title(
+#         title,
+#         fontsize=16,
+#         fontweight="bold",
+#     )
+
+#     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
+
+#     # Add legend
+#     handles, labels = ax.get_legend_handles_labels()
+#     by_label = dict(zip(labels, handles))
+#     ax.legend(
+#         by_label.values(),
+#         by_label.keys(),
+#         loc="best",
+#         ncol=2,
+#         prop={"size": 14, "weight": "bold"},
+#     )
+
+#     fig.tight_layout()
+#     return fig
+
+
+def plot_convergence(
+    stats: list[SimulationStatistics],
+    parameters: list[float],
+    parameter_name: str,
 ) -> plt.Figure:
-    """Plot estimators for different mesh sizes.
+    """Plot spatial or temporal error estimator convergence.
 
     Returns:
         A matplotlib figure with the plotted estimators.
 
     """
     fig, ax = plt.subplots(figsize=(8, 6))
+    final_estimators = []
 
-    cmap = plt.get_cmap("viridis")
-    colors = [cmap(i) for i in np.linspace(0, 1, len(statistics))]
+    for stat in stats:
+        uses_hc: bool = len(stat.hc_estimator) > 0
 
-    for ref_fac, color, statistic in zip(ref_facs, colors, statistics):
-        uses_hc: bool = len(statistic.hc_estimator) > 0
-
-        tot_nl_iterations: int = 0
-        tot_nl_iterations_fine: int = 0
-        # Plot spatial estimator
-        for i, (time, spat_est, temp_est, lin_est) in enumerate(
-            zip(
-                statistic.time_steps,
-                statistic.spat_estimator,
-                statistic.temp_estimator,
-                statistic.lin_estimator,
-            )
-        ):
+        if parameter_name == "refinement_factor":
             if uses_hc:
-                hc_est_flat = flatten(statistic.hc_estimator[i])
-                spat_est_flat = flatten(spat_est)
-                temp_est_flat = flatten(temp_est)
+                final_estimators.append(stat.spat_estimator[-1][-1][-1])
             else:
-                spat_est_flat = spat_est
-                temp_est_flat = temp_est
+                final_estimators.append(stat.spat_estimator[-1][-1])
 
-            # Plot spatial and temporal estimators for the full time step.
+        elif parameter_name == "time_step_size":
+            if uses_hc:
+                final_estimators.append(stat.temp_estimator[-1][-1][-1])
+            else:
+                final_estimators.append(stat.temp_estimator[-1][-1])
 
-            # Combine spatial and temporal estimators.
-            disc_est_flat = np.array(spat_est_flat) + np.array(temp_est_flat)
-            ax.plot(
-                range(tot_nl_iterations, tot_nl_iterations + len(disc_est_flat)),
-                disc_est_flat,
-                "o-",
-                color=color,
-                markersize=4,
-                fillstyle="none",
-                markerfacecolor=color,
-                label=rf"{ref_fac} $\eta_{{disc}}$" if i == 0 else "",
-            )
-            # Update number of nl iterations.
-            tot_nl_iterations += len(spat_est_flat)
+    ax.plot(
+        parameters,
+        final_estimators,
+        "o-",
+        markersize=4,
+        fillstyle="none",
+    )
 
     # Set y scale to log
     ax.set_yscale("log")
+    ax.set_xscale("log")
 
-    # Add labels and title
+    if parameter_name == "refinement_factor":
+        x_label = "Refinement Factor"
+        y_label = r"$\eta_{\mathrm{spat}}$"
+        title = "Convergence of Spatial Error Estimator"
+    elif parameter_name == "time_step_size":
+        x_label = "Time Step Size (s)"
+        y_label = r"$\eta_{\mathrm{temp}}$"
+        title = "Convergence of Temporal Error Estimator"
+    # Add labels and title.
     ax.tick_params(axis="both", labelsize=12)
-    ax.set_xlabel(
-        "Nonlinear iteration",
-        fontsize=14,
-        fontweight="bold",
-    )
-    ax.set_ylabel(
-        "Error estimate (log scale)",
-        fontsize=14,
-        fontweight="bold",
-    )
-    if title is None:
-        title = "Spatial Convergence of Error Estimators"
-    ax.set_title(
-        title,
-        fontsize=16,
-        fontweight="bold",
-    )
+    ax.set_xlabel(x_label, fontsize=14, fontweight="bold")
+    ax.set_ylabel(y_label, fontsize=14, fontweight="bold")
+    ax.set_title(title, fontsize=16, fontweight="bold")
 
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
     # Add legend
-    handles, labels = ax.get_legend_handles_labels()
-    by_label = dict(zip(labels, handles))
-    ax.legend(
-        by_label.values(),
-        by_label.keys(),
-        loc="best",
-        ncol=2,
-        prop={"size": 14, "weight": "bold"},
-    )
+    # handles, labels = ax.get_legend_handles_labels()
+    # by_label = dict(zip(labels, handles))
+    # ax.legend(
+    #     by_label.values(),
+    #     by_label.keys(),
+    #     loc="best",
+    #     ncol=2,
+    #     prop={"size": 14, "weight": "bold"},
+    # )
 
     fig.tight_layout()
     return fig

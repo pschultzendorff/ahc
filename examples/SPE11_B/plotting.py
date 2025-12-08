@@ -1,13 +1,11 @@
 import pathlib
 import sys
 
-import matplotlib.pyplot as plt
-import numpy as np
 from run import generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import plot_nl_iterations, plot_spatial_convergence, read_data
+from utils import plot_convergence, plot_nl_iterations, read_data
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
@@ -57,12 +55,12 @@ if __name__ == "__main__":
         data_3,
         "refinement factor",
     )
-    fig3a = plot_spatial_convergence(
-        list(data_3.values())[::4], [5.0, 1.0, 0.5], combine_disc_est=True
-    )
-    fig3b = plot_spatial_convergence(
-        list(data_3.values())[3::4], [5.0, 1.0, 0.5], combine_disc_est=True
-    )
+    # fig3a = plot_spatial_convergence(
+    #     list(data_3.values())[::4], [5.0, 1.0, 0.5], combine_disc_est=True
+    # )
+    # fig3b = plot_spatial_convergence(
+    #     list(data_3.values())[3::4], [5.0, 1.0, 0.5], combine_disc_est=True
+    # )
 
     data_4 = {}
     for config in configs_varying_ref_init_s_09:
@@ -78,8 +76,8 @@ if __name__ == "__main__":
     # fig1a.savefig(dirname / "estimators_rp_model_s_init_08.png")
     fig2.savefig(dirname / "nl_iters_rp_model_s_init_09.png")
     fig3.savefig(dirname / "nl_iters_ref_fac_s_init_08.png")
-    fig3a.savefig(dirname / "ahc_spatial_convergence_s_init_08.png")
-    fig3b.savefig(dirname / "newtonappleyard_spatial_convergence_s_init_08.png")
+    # fig3a.savefig(dirname / "ahc_spatial_convergence_s_init_08.png")
+    # fig3b.savefig(dirname / "newtonappleyard_spatial_convergence_s_init_08.png")
     fig4.savefig(dirname / "nl_iters_ref_fac_s_init_09.png")
     # fig5 = plot_estimators(data["AHC_0.1_0.2"], combine_disc_est=True)
     # fig5.savefig(dirname / "estimators_ahc_0.1.png")

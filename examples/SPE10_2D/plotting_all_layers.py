@@ -47,7 +47,7 @@ def plot_statistics(
         num_time_steps[solver_label][layer] = len(stats.time_steps)
 
         # Forgot to save global energy norm for adaptive Newton.
-        if not solver.startswith("Newton"):
+        if solver.startswith("AHC"):
             relative_errors[solver_label][layer] = calc_relative_error(stats)
 
     # Ensure solvers and layers are sorted correctly.
@@ -126,7 +126,8 @@ def plot_statistics(
         else:
             ax.set_ylabel(r"$\eta_{\mathrm{tot}}$", fontsize=16, fontweight="bold")
 
-        ax.legend(loc="lower left", framealpha=0.7, fontsize=14)
+        if data_list is not relative_errors:
+            ax.legend(loc="lower left", framealpha=0.7, fontsize=14)
 
         fig.tight_layout()
         fig_list.append(fig)

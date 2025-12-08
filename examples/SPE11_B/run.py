@@ -241,10 +241,10 @@ def run_simulation(
 
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
-    ("AHC", 0.001),
-    ("HC", 0.1),
-    ("Newton", 0.1),
-    ("NewtonAppleyard", 0.1),
+    ("AHC", 0.01),
+    # ("HC", 0.1),
+    # ("Newton", 0.1),
+    # ("NewtonAppleyard", 0.1),
 ]
 refinement_factors: list[float] = [10, 3, 0.5]  # , 0.5]
 
