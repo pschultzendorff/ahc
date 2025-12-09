@@ -128,7 +128,7 @@ default_solver_params = {
     # SPE11 parameters:
     "spe11_case": "B",
     "spe11_heterogeneous_cap_pressure": False,
-    "spe11_entry_pressure": 100.0,  # [Pa]
+    "spe11_entry_pressure": 30.0,  # [Pa]
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
 }
@@ -246,7 +246,7 @@ solvers_and_ratios: list[tuple[str, float]] = [
     # ("Newton", 0.1),
     # ("NewtonAppleyard", 0.1),
 ]
-refinement_factors: list[float] = [10, 3, 0.5]  # , 0.5]
+# refinement_factors: list[float] = [10, 1, 0.5]  # , 0.5]
 
 rp_models: dict[str, Any] = {
     "linear": {"model": "linear", "limit": True},
@@ -311,7 +311,7 @@ def generate_configs() -> list[SimulationConfig]:
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        refinement_factor=refinement_factors[0],
+                        refinement_factor=1.0,
                         init_s=init_s,
                         rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
@@ -322,6 +322,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
+        continue
         for refinement_factor in refinement_factors:
             # Highest resolution at init_s = 0.9 takes too long, mostly due to the fact
             # that adaptive Newton only makes sense for small-sized updates to produce
