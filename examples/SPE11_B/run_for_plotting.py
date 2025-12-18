@@ -65,8 +65,8 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 # region RUN
 
 time_manager_params = {
-    "schedule": np.array([0.0, 3000.0 * pp.DAY]),
-    "dt_init": 30.0 * pp.DAY,
+    "schedule": np.array([0.0, 1000.0 * pp.DAY]),
+    "dt_init": 20.0 * pp.DAY,
     "constant_dt": True,
 }
 
@@ -74,9 +74,9 @@ if __name__ == "__main__":
     config = SimulationConfig(
         file_name="plotting",
         folder_name=dirname / "plotting",
-        solver_name="AHC",  # NewtonAppleyard requires too many time steps
-        adaptive_error_ratio=0.01,  # Disregarded
-        refinement_factor=3.0,
+        solver_name="HC",  # NewtonAppleyard requires too many time steps
+        adaptive_error_ratio=0.0,  # Disregarded
+        refinement_factor=1.0,
         init_s=0.8,
         rp_model_1=rp_models["linear"],
         rp_model_2=rp_models["Brooks-Corey_nb_4"],

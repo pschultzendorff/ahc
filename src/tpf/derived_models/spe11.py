@@ -12,6 +12,7 @@ for the model.
 
 """
 
+import copy
 import logging
 import pathlib
 from typing import Any
@@ -22,6 +23,7 @@ import porepy as pp
 import requests
 from numpy.typing import ArrayLike
 from porepy.fracs.fracture_importer import dfm_from_gmsh
+from porepy.grids.partition import extract_subgrid
 from porepy.viz.exporter import DataInput
 
 from tpf.derived_models.fluid_values import co2_reservoir as _co2_reservoir
@@ -66,7 +68,7 @@ case_A: dict[str, Any] = {
         "facies 4": 2e-9,
         "facies 5": 4e-9,
         "facies 6": 1e-8,
-        "facies 7": 1e-30,  # Epsilon to avoid division by zero when calculating face transmissibilities.
+        "facies 7": 0.0,
     },
     "POROSITY": {  # Porosity in [-]
         "facies 1": 0.44,
@@ -75,7 +77,7 @@ case_A: dict[str, Any] = {
         "facies 4": 0.45,
         "facies 5": 0.43,
         "facies 6": 0.46,
-        "facies 7": 1e-20,  # Epsilon to avoid ill-defined problem.
+        "facies 7": 0.0,
     },
     "ENTRY_PRESSURE": {  # Entry pressures in [Pa]
         "facies 1": 1500.0,
@@ -111,7 +113,7 @@ case_B: dict[str, Any] = {
         "facies 4": 5e-13,
         "facies 5": 1e-12,
         "facies 6": 2e-12,
-        "facies 7": 1e-30,  # Epsilon to avoid division by zero when calculating face transmissibilities.
+        "facies 7": 0,
     },
     "POROSITY": {  # Porosity in [-]
         "facies 1": 0.1,
@@ -120,7 +122,7 @@ case_B: dict[str, Any] = {
         "facies 4": 0.2,
         "facies 5": 0.25,
         "facies 6": 0.35,
-        "facies 7": 1e-20,  # Epsilon to avoid ill-defined problem.
+        "facies 7": 0,
     },
     "REFINEMENT_FACTOR_BASE": 4000.0,
     "SCALE_FACTOR_X": 3000.0,
@@ -625,17 +627,36 @@ class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):
 
     def set_geometry(self) -> None:
         self.set_domain()
-        self.mdg = load_spe11_data(
+        # Load full domain including inactive cells, i.e., areas with porosity zero.
+        self.extended_domain = load_spe11_data(
             DATA_DIR,
             self.spe11_params,
             self.params["meshing_arguments"].get("spe11_refinement_factor", 10.0),
         )
+        extended_domain_g = self.extended_domain.subdomains()[0]
+
+        # Extract subgrid corresponding to the active cells.
+        self.active_cells = np.nonzero(self.porosity(extended_domain_g))[0]
+        active_g, _, _ = extract_subgrid(extended_domain_g, self.active_cells)
+
+        # Copy facies tags.
+        for key, value in extended_domain_g.tags.items():
+            if key.startswith("facies"):
+                active_g.tags[key] = value[self.active_cells]  # type: ignore[index]
+
+        # Set subgrid as domain.
+        self.mdg = copy.deepcopy(self.extended_domain)
+        self.mdg.remove_subdomain(self.mdg.subdomains()[0])
+        self.mdg.add_subdomains(active_g)
         self.nd: int = self.mdg.dim_max()
-        g: pp.Grid = self.mdg.subdomains()[0]
 
         # Check that the domain size is correct.
-        height: float = np.max(g.nodes[1, :]) - np.min(g.nodes[1, :])
-        width: float = np.max(g.nodes[0, :]) - np.min(g.nodes[0, :])
+        height: float = np.max(extended_domain_g.nodes[1, :]) - np.min(
+            extended_domain_g.nodes[1, :]
+        )
+        width: float = np.max(extended_domain_g.nodes[0, :]) - np.min(
+            extended_domain_g.nodes[0, :]
+        )
         assert np.isclose(height, self.spe11_params["HEIGHT"])
         assert np.isclose(width, self.spe11_params["WIDTH"])
 
@@ -726,6 +747,28 @@ class SolutionStrategySPE11(TPFProtocol):
             self.iteration_exporter.add_constant_data(data)  # type: ignore
 
 
+class DataSavingEstSPE11:
+    def _data_to_export(
+        self, time_step_index: int | None = None, iterate_index: int | None = None
+    ) -> list[DataInput]:
+        data = super()._data_to_export(  # type: ignore
+            time_step_index, iterate_index
+        )
+        # Add zero values on inactive cells for proper visualization.
+        extended_domain_g = self.extended_domain.subdomains()[0]
+        for grid, name, array in data:
+            full_array = np.zeros(extended_domain_g.num_cells)
+            full_array[self.active_cells] = array  # type: ignore[index]
+            array = full_array
+            # Update data in place.
+            data[data.index((grid, name, array))] = (
+                extended_domain_g,
+                name,
+                array,
+            )
+        return data
+
+
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
@@ -735,4 +778,5 @@ class SPE11Mixin(
     ModifiedBoundarySPE11,
     SolutionStrategySPE11,
     ModelGeometrySPE11,
+    DataSavingEstSPE11,
 ): ...  # type: ignore

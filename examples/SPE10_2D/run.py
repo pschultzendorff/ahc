@@ -249,8 +249,6 @@ def run_simulation(
         model = model_class(solver_params)
         pp.run_time_dependent_model(model=model, params=solver_params)
     except Exception as e:
-        with (config.folder_name / "failure.txt").open("w") as f:
-            f.write(str(e))
         logger.error(f"Run failed with error: {e}.")
 
 

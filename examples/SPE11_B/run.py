@@ -231,9 +231,6 @@ def run_simulation(
         pp.run_time_dependent_model(model=model, params=solver_params)
 
     except Exception as e:
-        config.folder_name.mkdir(parents=True, exist_ok=True)
-        with (config.folder_name / "failure.txt").open("w") as f:
-            f.write(str(e))
         logger.error(f"Run failed with error: {e}.")
 
 
@@ -242,11 +239,11 @@ def run_simulation(
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
     ("AHC", 0.01),
-    # ("HC", 0.1),
-    # ("Newton", 0.1),
-    # ("NewtonAppleyard", 0.1),
+    ("HC", 0.1),
+    ("Newton", 0.1),
+    ("NewtonAppleyard", 0.1),
 ]
-# refinement_factors: list[float] = [10, 1, 0.5]  # , 0.5]
+refinement_factors: list[float] = [10, 5, 0.5]  # , 0.5]
 
 rp_models: dict[str, Any] = {
     "linear": {"model": "linear", "limit": True},
@@ -294,6 +291,7 @@ def generate_configs() -> list[SimulationConfig]:
     configs = []
     # Varying rel. perm. models at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
+        continue
         for rp_model_name, rp_model in rp_models.items():
             if rp_model_name == "linear":
                 continue
@@ -322,7 +320,6 @@ def generate_configs() -> list[SimulationConfig]:
 
     # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
-        continue
         for refinement_factor in refinement_factors:
             # Highest resolution at init_s = 0.9 takes too long, mostly due to the fact
             # that adaptive Newton only makes sense for small-sized updates to produce

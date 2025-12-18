@@ -199,18 +199,22 @@ def flatten(xx: list[list]) -> list:
     return [x for sublist in xx for x in sublist]
 
 
-def read_data(config: SimulationConfig) -> SimulationStatistics:
+def read_data(
+    config: SimulationConfig,
+    expected_final_time: float,
+) -> SimulationStatistics:
     with open(config.folder_name / "solver_statistics.json", "r") as f:
         data: dict[str, Any] = json.load(f)
 
-    # Check if the solver failed at some time step and return reduced statistics.
-    if "failure" in [f.stem for f in config.folder_name.iterdir()]:
-        final_time = list(data.values())[-1]["current time"]
-        return SimulationStatistics(converged=False, final_time=final_time)
-
-    # If not we can read the data.
     stats = SimulationStatistics()
 
+    # Check if the simulation reached the final time.
+    stats.final_time = list(data.values())[-1]["current time"]
+    if not np.isclose(stats.final_time, expected_final_time):
+        stats.converged = False
+        return stats
+
+    # If yes, we can read the data.
     for time_step in list(data.values())[1:]:
         # Treat different solvers.
         if config.solver_name.startswith("AHC") or config.solver_name.startswith("HC"):
@@ -322,10 +326,10 @@ def plot_nl_iterations(
         key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else x,
     )
 
-    # Transform data to two arrays for iterations and annotations.
-    iterations = np.empty((len(solvers), len(x_ticks)))
+    # Transform data to arrays for nl iterations, annotations, and convergence status.
+    nl_iterations = np.empty((len(solvers), len(x_ticks)))
     annotations = np.empty((len(solvers), len(x_ticks)), dtype="<U25")
-
+    converged = np.empty((len(solvers), len(x_ticks)), dtype=bool)
     final_times = np.empty((len(solvers), len(x_ticks)))
 
     for case, stat in data.items():
@@ -336,7 +340,7 @@ def plot_nl_iterations(
         if solver_name == "HC":
             # Standard HC solver does not have an adaptive error ratio.
             i = solvers.index(solver_name)
-        elif solver_name.startswith("AHC"):
+        elif solver_name == "AHC":
             i = solvers.index(
                 f"{solver_name}\n" + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio}$"
             )
@@ -353,12 +357,23 @@ def plot_nl_iterations(
             if solver_name.startswith("Newton")
             else sum(flatten(stat.timestep_nl_iters))
         )
+        nl_iterations[i, j] = tot_nl_iters
 
-        iterations[i, j] = tot_nl_iters
-        annotations[i, j] = f"{tot_nl_iters}\n({len(stat.time_steps)})"
-        final_times[i, j] = stat.final_time
+        # For HC and AHC, show nl iters, hc iters, final beta, and time steps.
+        if solver_name in ["HC", "AHC"]:
+            tot_hc_iters = len(flatten(stat.timestep_nl_iters))
+            final_lambda = stat.lambdas[-1][-1]
+            annotations[i, j] = (
+                f"{tot_nl_iters}/{tot_hc_iters}/{final_lambda:.3f}\n"
+                + f"({len(stat.time_steps)})"
+            )
+        # For Newton, show only nl iters and time steps.
+        else:
+            annotations[i, j] = f"{tot_nl_iters}\n({len(stat.time_steps)})"
 
-    mask = iterations == 0
+        converged[i, j] = stat.converged
+        if not stat.converged:
+            final_times[i, j] = stat.final_time
 
     # Create heatmap figure
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -368,8 +383,8 @@ def plot_nl_iterations(
     cmap.set_bad(color="red")
 
     sns.heatmap(
-        iterations,
-        mask=mask,
+        nl_iterations,
+        mask=np.logical_not(converged),
         annot=annotations,
         fmt="s",
         cmap=cmap,
@@ -382,9 +397,9 @@ def plot_nl_iterations(
     )
 
     # Annotate failed simulations
-    for i in range(mask.shape[0]):
-        for j in range(mask.shape[1]):
-            if mask[i, j]:
+    for i in range(converged.shape[0]):
+        for j in range(converged.shape[1]):
+            if not converged[i, j]:
                 ax.text(
                     j + 0.5,
                     i + 0.5,
@@ -402,7 +417,11 @@ def plot_nl_iterations(
     ax.set_xlabel(varying_param_name, fontsize=12, fontweight="bold")
     ax.set_ylabel("Solver & adaptive error ratio", fontsize=12, fontweight="bold")
     ax.set_title(
-        title or f"#NL iterations (#time steps) by solver and {varying_param_name}",
+        title
+        or r"#NL iters/#HC iters/final $\beta$"
+        + "\n"
+        + "(#time steps)\n"
+        + f"by solver and {varying_param_name}",
         fontsize=14,
         fontweight="bold",
     )

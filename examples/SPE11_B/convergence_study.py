@@ -102,11 +102,10 @@ if __name__ == "__main__":
     configs = generate_configs()
 
     for config in configs:
-        continue
         if "temporal" in config.folder_name.parent.name:
             time_step_size = float(config.folder_name.name.split("_")[1])
         else:
-            time_step_size = 30.0  # Default for spatial study.
+            time_step_size = 20.0  # Default for spatial study.
         time_manager_params = {
             "schedule": np.array([0.0, time_step_size]),
             "dt_init": time_step_size,
