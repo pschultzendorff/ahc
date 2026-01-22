@@ -80,13 +80,16 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 
 if __name__ == "__main__":
+    results_dir = dirname / "results"
+    results_dir.mkdir(exist_ok=True)
+
     spe10_layer: int = 55
 
     for init_s in [0.2, 0.3]:
         # Linear
         config = SimulationConfig(
             file_name="linear",
-            folder_name=dirname / "linear_vs_nonlinear" / f"linear_{init_s}",
+            folder_name=results_dir / "linear_vs_nonlinear" / f"linear_{init_s}",
             solver_name="AHC",
             adaptive_error_ratio=1e-4,
             init_s=init_s,
@@ -101,7 +104,7 @@ if __name__ == "__main__":
         # Nonlinear
         config = SimulationConfig(
             file_name="nonlinear",
-            folder_name=dirname / "linear_vs_nonlinear" / f"nonlinear_{init_s}",
+            folder_name=results_dir / "linear_vs_nonlinear" / f"nonlinear_{init_s}",
             solver_name="AHC",
             adaptive_error_ratio=1e-4,
             init_s=init_s,
@@ -116,7 +119,7 @@ if __name__ == "__main__":
         # Nonlinear but stop at the first homotopy step
         config = SimulationConfig(
             file_name="nonlinear_stop_early",
-            folder_name=dirname
+            folder_name=results_dir
             / "linear_vs_nonlinear"
             / f"nonlinear_stop_early_{init_s}",
             solver_name="AHC",

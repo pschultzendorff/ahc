@@ -75,13 +75,16 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
+    results_dir = dirname / "results"
+    results_dir.mkdir(exist_ok=True)
+
     configs = []
 
     # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3.
     for spe10_layer in range(85):
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             folder_name = (
-                dirname
+                results_dir
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
                 / f"layer_{spe10_layer:02d}"
             )

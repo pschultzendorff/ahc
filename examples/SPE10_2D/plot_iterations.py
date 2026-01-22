@@ -93,6 +93,9 @@ time_manager_params = {
 
 def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
+    results_dir = dirname / "results"
+    results_dir.mkdir(exist_ok=True)
+
     configs = []
 
     # # Varying init_s for the Brooks-Corey model.
@@ -106,7 +109,7 @@ def generate_configs() -> list[SimulationConfig]:
                 continue
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
-                dirname
+                results_dir
                 / "iteration_plotting"
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
                 / file_name

@@ -5,10 +5,11 @@ from collections import defaultdict
 import matplotlib
 import matplotlib.pyplot as plt
 from run_all_layers import generate_configs
+from run import default_time_manager_params
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationStatistics, calc_relative_error, flatten, read_data
+from utils import SimulationStatistics, calc_relative_error, flatten, read_data, 
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
@@ -139,15 +140,20 @@ def plot_statistics(
 # endregion
 
 if __name__ == "__main__":
+    EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]
+
     configs = generate_configs()
     data = {}
     for config in configs:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.spe10_layer}"
-        data[key] = read_data(config)
+        data[key] = read_data(config, EXPECTED_FINAL_TIME)
     fig1, fig2, fig3 = plot_statistics(
         data,
     )
 
-    fig1.savefig(dirname / "num_iterations_per_layer.png", dpi=300)
-    fig2.savefig(dirname / "num_time_steps_per_layer.png", dpi=300)
-    fig3.savefig(dirname / "relative_error_per_layer.png", dpi=300)
+    fig_dir = dirname / "figures"
+    fig_dir.mkdir(exist_ok=True)
+
+    fig1.savefig(fig_dir / "num_iterations_per_layer.png", dpi=300)
+    fig2.savefig(fig_dir / "num_time_steps_per_layer.png", dpi=300)
+    fig3.savefig(fig_dir / "relative_error_per_layer.png", dpi=300)

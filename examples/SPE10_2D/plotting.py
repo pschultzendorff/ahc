@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 import porepy as pp
-from run import generate_configs
+from run import default_time_manager_params, generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -11,7 +11,7 @@ from utils import calc_relative_error, plot_nl_iterations, read_data
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
-EXPECTED_FINAL_TIME = 30.0 * pp.DAY
+EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]
 
 if __name__ == "__main__":
     configs = generate_configs()
@@ -56,16 +56,22 @@ if __name__ == "__main__":
     for config in configs_viscous_and_cap_varying_cap_init_s_03:
         key = (
             f"{config.solver_name}_{config.adaptive_error_ratio}_"
-            + f"{config.cp_model_2['model']} $nb = {config.cp_model_2['n_b']}$"
-            + f" & {config.rp_model_2['model']}"
+            + f"Br.-C. $nb={config.cp_model_2['n_b']}$\n"
         )
         if config.rp_model_2["model"] == "Corey":
-            key += f"$p = {config.rp_model_2['power']}$"
+            key += f"C. $p={config.rp_model_2['power']}$"
+        else:
+            key += f"Br.-C. $nb={config.rp_model_2['n_b']}$"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_4[key] = statistics
         if config.solver_name == "AHC":
             rel_errors[f"fig_4_{key}"] = f"{calc_relative_error(statistics):.2f}"
-    fig4 = plot_nl_iterations(data_4, "cap. press. model & rel. perm. model")
+    fig4 = plot_nl_iterations(
+        data_4,
+        "cap. press. model & rel. perm. model",
+        tight_layout=True,
+        rotate_x_labels=True,
+    )
     data_5 = {}
     for config in configs_viscous_and_cap_varying_init_s:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
@@ -86,7 +92,7 @@ if __name__ == "__main__":
     fig_dir = dirname / "figures"
     fig_dir.mkdir(exist_ok=True)
 
-    with (fig_dir / "relative_errors").open("w") as f:
+    with (fig_dir / "relative_errors.txt").open("w") as f:
         json.dump(rel_errors, f, indent=2)
 
     fig1.savefig(fig_dir / "nl_iters_viscous_varying_rp_init_s_02.png")

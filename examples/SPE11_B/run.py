@@ -42,7 +42,7 @@ import numpy as np
 import porepy as pp
 from tpf.derived_models.spe11 import SPE11Mixin, case_B
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
-from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
+from tpf.models.homotopy_continuation import TwoPhaseFlowHC
 from tpf.models.protocol import TPFProtocol
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
@@ -101,7 +101,7 @@ class InitialConditionsMixin(TPFProtocol):
 class SPE11HC(
     InitialConditionsMixin,
     SPE11Mixin,
-    TwoPhaseFlowAHC,
+    TwoPhaseFlowHC,
 ):  # type: ignore
     ...
 
@@ -208,10 +208,13 @@ def run_simulation(
 
     solver_params.update(
         {
+            # Meshing and model:
             "meshing_arguments": {"spe11_refinement_factor": config.refinement_factor},
             "rel_perm_constants": rel_perm_constants,
             "cap_press_constants": cap_press_constants,
             "spe11_initial_saturation": config.init_s,
+            "spe11_entry_pressure": config.spe11_entry_pressure,
+            # Output:
             "folder_name": config.folder_name,
             "file_name": config.file_name,
             "solver_statistics_file_name": config.folder_name
@@ -243,7 +246,7 @@ solvers_and_ratios: list[tuple[str, float]] = [
     ("Newton", 0.1),
     ("NewtonAppleyard", 0.1),
 ]
-refinement_factors: list[float] = [10, 5, 0.5]  # , 0.5]
+refinement_factors: list[float] = [10, 5, 1]  # , 0.5]
 
 rp_models: dict[str, Any] = {
     "linear": {"model": "linear", "limit": True},
@@ -285,22 +288,24 @@ cp_models: dict[str, Any] = {
     },
 }
 
+results_dir = dirname / "results"
+results_dir.mkdir(exist_ok=True)
+
 
 def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
     configs = []
     # Varying rel. perm. models at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
-        continue
         for rp_model_name, rp_model in rp_models.items():
             if rp_model_name == "linear":
                 continue
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 folder_name = (
-                    dirname
+                    results_dir
                     / f"{solver_name}_{adaptive_error_ratio:.3f}"
                     / "varying_rp"
-                    / f"init_s_{init_s}"
+                    / f"init_s_{init_s}"  # _ref_fac_{refinement_factors[1]:.2f}"
                     / rp_model_name
                 )
                 configs.append(
@@ -309,7 +314,7 @@ def generate_configs() -> list[SimulationConfig]:
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        refinement_factor=1.0,
+                        refinement_factor=refinement_factors[2],
                         init_s=init_s,
                         rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
@@ -321,14 +326,10 @@ def generate_configs() -> list[SimulationConfig]:
     # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
     for init_s in [0.8, 0.9]:
         for refinement_factor in refinement_factors:
-            # Highest resolution at init_s = 0.9 takes too long, mostly due to the fact
-            # that adaptive Newton only makes sense for small-sized updates to produce
-            # physical solutions. But setting ``hc_nl_convergence_tol`` low makes AHC
-            # require a lot of time steps.
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 file_name = f"ref_fac_{refinement_factor:.2f}"
                 folder_name = (
-                    dirname
+                    results_dir
                     / f"{solver_name}_{adaptive_error_ratio:.3f}"
                     / "varying_refinement"
                     / f"init_s_{init_s}"

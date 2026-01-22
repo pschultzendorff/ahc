@@ -43,7 +43,7 @@ import numpy as np
 import porepy as pp
 from tpf.derived_models.spe11 import SPE11Mixin, case_B
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
-from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
+from tpf.models.homotopy_continuation import TwoPhaseFlowHC
 from tpf.models.phase import FluidPhase
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
@@ -115,7 +115,7 @@ class InitialConditionsMixin(TPFProtocol):
 class SPE11HC(
     InitialConditionsMixin,
     SPE11Mixin,
-    TwoPhaseFlowAHC,
+    TwoPhaseFlowHC,
 ):  # type: ignore
     ...
 

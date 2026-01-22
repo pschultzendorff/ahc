@@ -42,6 +42,7 @@ class SimulationConfig:
     spe10_layer: int = 0
     # Only for SPE11
     refinement_factor: float = 1.0
+    spe11_entry_pressure: float = 30 * pp.PASCAL
 
 
 def setup_params(
@@ -293,6 +294,7 @@ def plot_nl_iterations(
     data: dict[str, SimulationStatistics],
     varying_param_name: str,
     title: str | None = None,
+    **kwargs,
 ):
     """Create a heatmap showing nonlinear iterations for different solvers and parameter values.
 
@@ -417,16 +419,16 @@ def plot_nl_iterations(
     ax.set_xlabel(varying_param_name, fontsize=12, fontweight="bold")
     ax.set_ylabel("Solver & adaptive error ratio", fontsize=12, fontweight="bold")
     ax.set_title(
-        title
-        or r"#NL iters/#HC iters/final $\beta$"
-        + "\n"
-        + "(#time steps)\n"
-        + f"by solver and {varying_param_name}",
+        title or r"#NL iters/#HC iters/final $\beta$" + "\n" + "(#time steps)\n",
+        # + f"by solver and {varying_param_name}",
         fontsize=14,
         fontweight="bold",
     )
 
-    fig.tight_layout()
+    if kwargs.get("tight_layout", True):
+        fig.tight_layout()
+    if kwargs.get("rotate_x_labels", False):
+        ax.tick_params(axis="x", labelrotation=45)
     return fig
 
 
@@ -570,8 +572,9 @@ def plot_estimators(
 
     # Set y scale to log
     ax.set_yscale("log")
-    ax2.set_yscale("log")
-    ax2.set_ylim(ax.get_ylim())
+    if uses_hc:
+        ax2.set_yscale("log")
+        ax2.set_ylim(ax.get_ylim())
 
     # Add labels and title
     # Set ticks to integers only

@@ -54,7 +54,7 @@ import numpy as np
 import porepy as pp
 from tpf.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
-from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
+from tpf.models.homotopy_continuation import TwoPhaseFlowHC
 from tpf.models.protocol import TPFProtocol
 from tpf.viz.iteration_exporting import IterationExportingMixin
 
@@ -114,7 +114,7 @@ class InitialConditionsMixin(TPFProtocol):
 class SPE10HC(
     InitialConditionsMixin,
     SPE10Mixin,
-    TwoPhaseFlowAHC,
+    TwoPhaseFlowHC,
 ):  # type: ignore
     ...
 
@@ -311,6 +311,9 @@ cp_models = {
 
 def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
+    results_dir = dirname / "results"
+    results_dir.mkdir(exist_ok=True)
+
     configs = []
 
     # region VISCOUS
@@ -323,7 +326,7 @@ def generate_configs() -> list[SimulationConfig]:
                 continue
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 folder_name = (
-                    dirname
+                    results_dir
                     / f"{solver_name}_{adaptive_error_ratio:.3f}"
                     / "viscous"
                     / "varying_rp"
@@ -350,7 +353,7 @@ def generate_configs() -> list[SimulationConfig]:
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
-                dirname
+                results_dir
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
                 / "viscous"
                 / "varying_init_s"
@@ -383,7 +386,7 @@ def generate_configs() -> list[SimulationConfig]:
             continue
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             folder_name = (
-                dirname
+                results_dir
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
                 / "viscous_and_capillary"
                 / "varying_rp"
@@ -414,7 +417,7 @@ def generate_configs() -> list[SimulationConfig]:
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (
-                dirname
+                results_dir
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
                 / "viscous_and_capillary"
                 / "varying_init_s"
@@ -440,7 +443,7 @@ def generate_configs() -> list[SimulationConfig]:
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
             folder_name = (
-                dirname
+                results_dir
                 / f"{solver_name}_{adaptive_error_ratio:.3f}"
                 / "viscous_and_capillary"
                 / "varying_entry_pressure"
