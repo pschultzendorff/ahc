@@ -101,7 +101,7 @@ case_B: dict[str, Any] = {
     "INITIAL_PRESSURE": RESERVOIR_PRESSURE,  # [Pa], specified only in the center of well 1. Without
     # calculating an equilibrium, we just assume this holds for the full domain.
     "INITIAL_SATURATION": 0.9,  # [-], initial saturation. Domain filled with water.
-    "INJECTION_RATE": 0.035 / _co2_reservoir["density"],  # 0.035 kg/s
+    "INJECTION_RATE": 0.07 / _co2_reservoir["density"],  # 0.035 kg/s
     "WELL_1_POS": (2700, 300),  # [m]
     "WELL_2_POS": (5100, 700),  # [m]
     "WELL_SIZE": 0.2,  # [m]
@@ -733,40 +733,70 @@ class SolutionStrategySPE11(TPFProtocol):
     def add_constant_spe11_data(self) -> None:
         """Save the SPE11 data to the exporter."""
         data: list[DataInput] = []
+
+        # Add zero values on inactive cells for proper visualization.
+        extended_domain_g = self.extended_domain.subdomains()[0]
+        full_array = np.zeros(extended_domain_g.num_cells)
+
         for dim, perm in self.permeability(self.g).items():  # type: ignore
-            data.append((self.g, "permeability_" + dim, perm))
-        data.append((self.g, "porosity", self.porosity(self.g)))
+            extended_perm = full_array.copy()
+            extended_perm[self.active_cells] = perm  # type: ignore[index]
+            data.append((extended_domain_g, "permeability_" + dim, extended_perm))
+
+        extended_porosity = full_array.copy()
+        extended_porosity[self.active_cells] = self.porosity(self.g)  # type: ignore[index]
+        data.append((extended_domain_g, "porosity", extended_porosity))
+
         # Entry pressure is only a distribution if it is heterogeneous.
         if self.params["spe11_heterogeneous_cap_pressure"]:
-            data.append((self.g, "entry_pressure", self.entry_pressure_np(self.g)))  # type: ignore
-        self.exporter.add_constant_data(data)
+            extended_entry_pressure = full_array.copy()
+            extended_entry_pressure[self.active_cells] = self.entry_pressure_np(  # type: ignore
+                self.g
+            )
+            data.append((extended_domain_g, "entry_pressure", extended_entry_pressure))  # type: ignore
 
+        self.exporter.add_constant_data(data)
         # For convenience, add the porosity and permeability to the iteration exporter
         # if it exists.
         if hasattr(self, "iteration_exporter"):
             self.iteration_exporter.add_constant_data(data)  # type: ignore
 
 
-class DataSavingEstSPE11:
+# Protocol is subclassed just to ensure correct method resolution order.
+class DataSavingEstSPE11(SPE11Protocol):
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
         data = super()._data_to_export(  # type: ignore
             time_step_index, iterate_index
         )
+        updated_data = []
+
         # Add zero values on inactive cells for proper visualization.
         extended_domain_g = self.extended_domain.subdomains()[0]
-        for grid, name, array in data:
+        for _, name, array in data:
             full_array = np.zeros(extended_domain_g.num_cells)
             full_array[self.active_cells] = array  # type: ignore[index]
             array = full_array
-            # Update data in place.
-            data[data.index((grid, name, array))] = (
-                extended_domain_g,
-                name,
-                array,
+            updated_data.append((extended_domain_g, name, array))
+        return updated_data
+
+    def initialize_data_saving(self) -> None:
+        self.exporter = pp.Exporter(
+            self.extended_domain,
+            self.params["file_name"],
+            folder_name=self.params["folder_name"],
+            export_constants_separately=self.params.get(
+                "export_constants_separately", False
+            ),
+            length_scale=self.units.m,
+        )
+
+        if "solver_statistics_file_name" in self.params:
+            self.nonlinear_solver_statistics.path = (
+                pathlib.Path(self.params["folder_name"])
+                / self.params["solver_statistics_file_name"]
             )
-        return data
 
 
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy

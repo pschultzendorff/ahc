@@ -404,8 +404,6 @@ class EstimatesHCMixin(
 
         """
         # Retrieve flux w.r.t. goal rel. perm. and equilibrated flux coeffs.
-        # TODO Could be made more efficient by just storing the Newton update times
-        # derivative of the fluxes.
         fv_coeffs = pp.get_solution_values(
             f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
         )
@@ -592,7 +590,7 @@ class EstimatesHCMixin(
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class SolutionStrategyAHC(
+class SolutionStrategyHC(
     HCProtocol, EstimatesProtocol, ReconstructionProtocol, SolutionStrategyTPF
 ):  # type: ignore
     def __init__(self, params=None) -> None:
@@ -1061,11 +1059,6 @@ class SolutionStrategyAHC(
             self, nonlinear_increment, residual, reference_residual, nl_params
         )
 
-        # Switch to goal rel. perm. to evaluate the spatial discretization
-        # estimators.
-        self.hc_toggle_fl = 0.0
-        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
-
         # NOTE The following does not need to be evaluated when hc_params["hc_adaptive"]
         # is False. However, to compare HC and apdative HC, we still evaluate it.
         hc_est: float = self.global_hc_est()
@@ -1081,10 +1074,6 @@ class SolutionStrategyAHC(
             hc_est=hc_est,
             lin_est=lin_est,
         )
-
-        # Switch rel. perm. back.
-        self.hc_toggle_fl = 1.0
-        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
         # Adaptive stopping criterion.
         if not diverged and nl_params["hc_adaptive"]:
@@ -1220,14 +1209,14 @@ class DataSavingHC(DataSavingEst):
         return data
 
 
-class TwoPhaseFlowAHC(
+class TwoPhaseFlowHC(
     # HC constitutive laws mixins:
     RelativePermeabilityHC,
     CapillaryPressureHC,
     # DarcyFluxesHC,
     # Adaptive HC mixins:
     EstimatesHCMixin,
-    SolutionStrategyAHC,
+    SolutionStrategyHC,
     DataSavingHC,
     # Estimator mixins:
     ErrorEstimateMixin,

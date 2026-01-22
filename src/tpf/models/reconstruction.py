@@ -878,7 +878,7 @@ class EquationsRecMixin(TPFProtocol):
         flux_w_equil = pp.ad.TimeDependentDenseArray(WETTING_FLUX + "_equil", [self.g])
 
         flux_t_equil_mismatch = div @ flux_t_equil - source_ad_t
-        flux_w_equil_mismatch = (
+        flux_w_equil_mismatch = (  # This will not be exact as dt_s is for the current time step, not for the previous one.
             porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
             + div @ flux_w_equil
             - source_ad_w

@@ -412,6 +412,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
         s_p0: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
+        porosity: np.ndarray = self.porosity(self.g)
 
         def integrand(
             x: np.ndarray,
@@ -419,12 +420,15 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
             s_p2 = self.eval_saturation(q_p2)
 
-            # Time integral by diving by time step size. In :meth:`global_sp_est`, the
-            # previous time step value is added.
+            # Time derivative by dividing by time step size. In :meth:`global_sp_est`,
+            # the previous time step value is added and the sum is integrated in time by
+            # multiplying with the time step size.
             # ``s_p2`` has shape (num_quad_points_per_element, num_cells), while
-            # ``s_p0`` has shape (num_cells,). Since the latter is cellwise
-            # constant, we can broadcast.
-            return (s_p0[None, ...] - s_p2) ** 2 / self.time_manager.dt
+            # ``s_p0`` and ``porosity`` have shape (num_cells,). Since the latter are
+            # cellwise constant, we can broadcast.
+            return (
+                porosity[None, ...] * (s_p0[None, ...] - s_p2) / self.time_manager.dt
+            ) ** 2
 
         integral: Integral = self.quadrature_est.integrate(
             integrand,
