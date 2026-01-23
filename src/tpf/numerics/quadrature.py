@@ -377,11 +377,10 @@ class TrapezoidRule(BaseScheme):
 
 
 class SimpsonsRule(BaseScheme):
-    """
-    Simpson's rule for 1D-intervals.
-    """
+    """Simpson's rule for 1D-intervals."""
 
-    # TODO: Implement SimpsonsRule
+    def __init__(self, degree: int = 2) -> None:
+        raise NotImplementedError("SimpsonsRule is not implemented.")
 
 
 # TODO Unify GaussLegendreQuadrature1D, GaussLegendreQuadrature2D, and
@@ -714,19 +713,18 @@ class GaussLegendreQuadrature3D(BaseScheme):
 
 
 class GaussJacobiQuadrature(BaseScheme):
-    ...
-    # TODO
+    def __init__(self, degree: int = 2) -> None:
+        raise NotImplementedError("GaussJacobiQuadrature is not implemented.")
 
 
 class TriangleQuadrature(BaseScheme):
-    r"""... rule for triangles.
-
-    FIXME Should we even allow for different reference triangles? This would also
-    require to change the points etc!
+    r"""Quadrature rule for triangles.
 
     https://mathsfromnothing.au/triangle-quadrature-rules/
 
-    The reference triangle is :math:`\{(x,y) | 0 \leq x + y \leq 1\}` with area 1/2.
+    The default reference triangle is :math:`\{(x,y) | 0 \leq x + y \leq 1\}` with area
+    1/2. The reference triangle can be changed, but this should only be done if the user
+    knows what to do.
 
     """
 
@@ -960,8 +958,8 @@ class TriangleQuadrature(BaseScheme):
 
 
 class MonteCarloQuadrature(BaseScheme):
-    ...
-    # TODO
+    def __init__(self, degree: int = 2) -> None:
+        raise NotImplementedError("MonteCarloQuadrature is not implemented.")
 
 
 def get_quadpy_elements(
@@ -980,8 +978,13 @@ def get_quadpy_elements(
             ``(2, num_cells)``.
 
     """
+
+    if sd.dim == 1:
+        # NOTE: If this ever gets implemented, quadpy needs a different formatting for
+        # line segments for some reason.
+        raise NotImplementedError("Not implemented for 1D domains.")
+
     nodes_per_cell: int = sd.dim + 1 if grid_type == "simplex" else sd.dim * 2
-    # Renaming variables
     num_cells = sd.num_cells
 
     # Getting node coordinates for each cell
@@ -989,25 +992,9 @@ def get_quadpy_elements(
     nodes_coor_cell = sd.nodes[:, nodes_of_cell]
 
     # Stacking node coordinates
-    # cnc_stckd = np.empty([num_cells, nodes_per_cell * sd.dim])
-    # col = 0
-    # for vertex in range(nodes_per_cell):
-    #     for dim in range(sd.dim):
-    #         cnc_stckd[:, col] = nodes_coor_cell[dim][:, vertex]
-    #         col += 1
-
-    # # Reshaping to please quadpy format i.e., (corners, num_cells, dim)
-    # elelemt_coords: np.ndarray = np.reshape(cnc_stckd, np.array([num_cells, nodes_per_cell, sd.dim]))
-    # elements: np.ndarray = np.swapaxes(elelemt_coords, 0, 1)
-    # Stacking node coordinates
     elements: np.ndarray = np.empty([nodes_per_cell, num_cells, sd.dim])
     for vertex in range(nodes_per_cell):
         for dim in range(sd.dim):
             elements[vertex, :, dim] = nodes_coor_cell[dim][:, vertex]
-
-    # For some reason, quadpy needs a different formatting for line segments
-    if sd.dim == 1:
-        # TODO Swapaxes here?
-        elements = elements.reshape(sd.dim + 1, num_cells)
 
     return elements

@@ -36,36 +36,35 @@ def domain(request: pytest.FixtureRequest) -> np.ndarray:
 
     """
     size, dim = request.param
-    # The PorePy gridding functions we use in ``grid`` requires only the upper bound of
-    # the unit square/cube. However, the 1D grid requires both, so we pass both.
+    # The PorePy gridding functions we use in ``pp_grid`` require only the upper bound
+    # of the unit square/cube. However, the 1D grid requires both, so we pass both.
     return np.repeat(np.array([0, size])[None, ...], dim, axis=0)
 
 
 @pytest.fixture(scope="class")
-def grid(
-    domain: np.ndarray, request: pytest.FixtureRequest
-) -> tuple[np.ndarray, np.ndarray]:
-    """Create given number of elements on ``domain``. Return elements in ``quadpy``
-    format and cell volumes as ``np.ndarray``.
+def grid_params(request) -> tuple[int, str]:
+    """Shared params for :meth:`pp_grid` and :meth:`np_grid`."""
+    return request.param
+
+
+@pytest.fixture(scope="class")
+def pp_grid(domain: np.ndarray, grid_params: tuple[int, str]) -> pp.Grid | None:
+    """Create grid with given number of elements on ``domain``.
 
     Parameters:
         domain: _description_
-        request: _description_
+        grid_params: _description_
 
     Returns:
-        elements: Elements in ``quadpy`` format.
-        volumes: Cell volumes.
+        grid: A PorePy grid.
 
     """
     dim: int = domain.shape[0]
-    num_elements, grid_type = request.param
+    num_elements, grid_type = grid_params
     if dim == 1:
-        points: np.ndarray = np.linspace(domain[0, 0], domain[0, 1], num_elements + 1)
-        elements: np.ndarray = np.stack((points[:-1], points[1:]), 0)[..., None]
-        volumes: np.ndarray = elements[1, ...] - elements[0, ...]
+        # Handled by ``np_grid``.
+        return None
     elif dim >= 2:
-        # For 2D and 3D grids, we use Porepy's grid generation. This makes both grid
-        # generation and computation of the cell volumes easy.
         if grid_type == "cartesian":
             grid: pp.Grid = pp.CartGrid(np.array([num_elements] * dim), domain[..., 1])
         elif grid_type == "simplex":
@@ -77,13 +76,41 @@ def grid(
                 grid = pp.StructuredTetrahedralGrid(
                     np.array([num_elements] * dim), domain[..., 1]
                 )
+    return grid
+
+
+@pytest.fixture(scope="class")
+def np_grid(
+    domain: np.ndarray, pp_grid: pp.Grid, grid_params: tuple[int, str]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Create given number of elements on ``domain``. Return elements in ``quadpy``
+    format and cell volumes as ``np.ndarray``.
+
+    Parameters:
+        domain: _description_
+        grid_params: _description_
+
+    Returns:
+        elements: Elements in ``quadpy`` format.
+        volumes: Cell volumes.
+
+    """
+    dim: int = domain.shape[0]
+    num_elements, grid_type = grid_params
+    if dim == 1:
+        points: np.ndarray = np.linspace(domain[0, 0], domain[0, 1], num_elements + 1)
+        elements: np.ndarray = np.stack((points[:-1], points[1:]), 0)[..., None]
+        volumes: np.ndarray = elements[1, ...] - elements[0, ...]
+    elif dim >= 2:
+        # For 2D and 3D grids, we use Porepy's grid generation. This makes both grid
+        # generation and computation of the cell volumes easy.
 
         # Extract grid elements in quadpy shape and volumes calculated by PorePy.
         # NOTE ``get_quadpy_elements`` is not implemented yet for 3D grids. The
         # corresponding tests are skipped.
-        elements = get_quadpy_elements(grid, grid_type=grid_type)
-        grid.compute_geometry()
-        volumes = grid.cell_volumes
+        elements = get_quadpy_elements(pp_grid, grid_type=grid_type)
+        pp_grid.compute_geometry()
+        volumes = pp_grid.cell_volumes
     return elements, volumes.flatten()
 
 
@@ -206,15 +233,17 @@ def x_times_y_times_z_exact(domain: np.ndarray) -> float:
 )
 # Pass an empty string for grid type, as this does not matter on a 1D domain.
 @pytest.mark.parametrize(
-    "grid", list(itertools.product([30, 100, 500, 800], [""])), indirect=True
+    "grid_params",
+    list(itertools.product([30, 100, 500, 800], [""])),
+    indirect=True,
 )
 class TestTrapezoidRule:
     @pytest.fixture(scope="class")
-    def quad(self, grid: tuple[np.ndarray, np.ndarray]) -> TrapezoidRule:
+    def quad(self, np_grid: tuple[np.ndarray, np.ndarray]) -> TrapezoidRule:
         quad_instance = TrapezoidRule()
         # Precalulcate integration points and volumes to save some computation time when
         # reused for different tests.
-        elements, _ = grid
+        elements, _ = np_grid
         quad_instance.points = quad_instance.transform(elements)
         quad_instance.volumes = quad_instance.calc_volumes(elements)
         return quad_instance
@@ -224,10 +253,10 @@ class TestTrapezoidRule:
         quad: TrapezoidRule,
         sin_x_exact: float,
         domain: np.ndarray,
-        grid: tuple[np.ndarray, np.ndarray],
+        np_grid: tuple[np.ndarray, np.ndarray],
     ) -> None:
-        if (domain[0, 1] == 51.234 and grid[0].shape[1] in [30, 100]) or (
-            domain[0, 1] == 5 and grid[0].shape[1] == 30
+        if (domain[0, 1] == 51.234 and np_grid[0].shape[1] in [30, 100]) or (
+            domain[0, 1] == 5 and np_grid[0].shape[1] == 30
         ):
             pytest.skip("Too few grid points to approximate the integral.")
 
@@ -237,16 +266,16 @@ class TestTrapezoidRule:
     def test_transform(
         self,
         quad: TrapezoidRule,
-        grid: tuple[np.ndarray, np.ndarray],
+        np_grid: tuple[np.ndarray, np.ndarray],
     ) -> None:
-        elements, _ = grid
+        elements, _ = np_grid
         integration_points: np.ndarray = quad.transform(elements)
         assert pytest.approx(integration_points) == elements
 
     def test_volume(
-        self, quad: TrapezoidRule, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: TrapezoidRule, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
-        _, volumes = grid
+        _, volumes = np_grid
         assert pytest.approx(quad.volumes) == volumes
 
     def test_reference_points(
@@ -281,7 +310,7 @@ class TestTrapezoidRule:
     "domain", [(1, 2), (5, 2), (18.9, 2), (51.234, 2)], indirect=True
 )
 @pytest.mark.parametrize(
-    "grid",
+    "grid_params",
     list(itertools.product([30, 75, 140], ["simplex"])),
     indirect=True,
     scope="class",
@@ -289,12 +318,12 @@ class TestTrapezoidRule:
 class TestTriangleQuadrature:
     @pytest.fixture(scope="class")
     def quad(
-        self, degree: int, grid: tuple[np.ndarray, np.ndarray]
+        self, degree: int, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> TriangleQuadrature:
         quad_instance = TriangleQuadrature(degree=degree)
         # Precalulcate integration points and volumes to save some computation time when
         # reused for different tests.
-        elements, _ = grid
+        elements, _ = np_grid
         quad_instance.points = quad_instance.transform(elements)
         quad_instance.volumes = quad_instance.calc_volumes(elements)
         return quad_instance
@@ -315,7 +344,7 @@ class TestTriangleQuadrature:
     # TODO Implement tests for different reference elements.
     @pytest.mark.skip("Test not implemented.")
     def test_transform(
-        self, quad: TriangleQuadrature, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: TriangleQuadrature, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
         pass
 
@@ -329,9 +358,9 @@ class TestTriangleQuadrature:
         pass
 
     def test_volume(
-        self, quad: TriangleQuadrature, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: TriangleQuadrature, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
-        _, volumes = grid
+        _, volumes = np_grid
         assert pytest.approx(quad.volumes) == volumes
 
     def test_reference_points(
@@ -362,17 +391,19 @@ class TestTriangleQuadrature:
     "domain", [(1, 1), (5, 1), (18.9, 1), (51.234, 1)], indirect=True
 )
 @pytest.mark.parametrize(
-    "grid", list(itertools.product([30, 100, 500, 800], ["cartesian"])), indirect=True
+    "grid_params",
+    list(itertools.product([30, 100, 500, 800], ["cartesian"])),
+    indirect=True,
 )
 class TestGaussLegendreQuadrature1D:
     @pytest.fixture(scope="class")
     def quad(
-        self, degree: int, grid: tuple[np.ndarray, np.ndarray]
+        self, degree: int, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> GaussLegendreQuadrature1D:
         quad_instance = GaussLegendreQuadrature1D(degree=degree)
         # Precalulcate integration points and volumes to save some computation time when
         # reused for different tests.
-        elements, _ = grid
+        elements, _ = np_grid
         quad_instance.points = quad_instance.transform(elements)
         quad_instance.volumes = quad_instance.calc_volumes(elements)
         return quad_instance
@@ -381,15 +412,15 @@ class TestGaussLegendreQuadrature1D:
         self,
         quad: GaussLegendreQuadrature1D,
         sin_x_exact: float,
-        grid: tuple[np.ndarray, np.ndarray],
+        np_grid: tuple[np.ndarray, np.ndarray],
         domain: np.ndarray,
         degree: int,
     ) -> None:
         # Skip cases with too few grid points to approximate the integral.
         if (
-            (domain[0, 1] == 51.234 and grid[0].shape[1] == 30 and degree in [2, 3])
-            or (domain[0, 1] == 18.9 and grid[0].shape[1] == 30 and degree == 2)
-            or (domain[0, 1] == 51.234 and grid[0].shape[1] == 100 and degree == 2)
+            (domain[0, 1] == 51.234 and np_grid[0].shape[1] == 30 and degree in [2, 3])
+            or (domain[0, 1] == 18.9 and np_grid[0].shape[1] == 30 and degree == 2)
+            or (domain[0, 1] == 51.234 and np_grid[0].shape[1] == 100 and degree == 2)
         ):
             pytest.skip("Too few grid points to approximate the integral.")
         integral = quad.integrate(sin_x, recalc_points=False, recalc_volumes=False)
@@ -398,14 +429,14 @@ class TestGaussLegendreQuadrature1D:
     # TODO Implement tests for different reference elements.
     @pytest.mark.skip("Test not implemented.")
     def test_transform(
-        self, quad: GaussLegendreQuadrature1D, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: GaussLegendreQuadrature1D, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
         pass
 
     def test_volume(
-        self, quad: GaussLegendreQuadrature1D, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: GaussLegendreQuadrature1D, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
-        _, volumes = grid
+        _, volumes = np_grid
         assert pytest.approx(quad.volumes) == volumes
 
     def test_reference_points(
@@ -480,17 +511,19 @@ class TestGaussLegendreQuadrature1D:
     "domain", [(1, 2), (5, 2), (18.9, 2), (51.234, 2)], indirect=True
 )
 @pytest.mark.parametrize(
-    "grid", list(itertools.product([30, 75, 140], ["cartesian"])), indirect=True
+    "grid_params",
+    list(itertools.product([30, 75, 140], ["cartesian"])),
+    indirect=True,
 )
 class TestGaussLegendreQuadrature2D:
     @pytest.fixture(scope="class")
     def quad(
-        self, degree: int, grid: tuple[np.ndarray, np.ndarray]
+        self, degree: int, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> GaussLegendreQuadrature2D:
         quad_instance = GaussLegendreQuadrature2D(degree=degree)
         # Precalulcate integration points and volumes to save some computation time when
         # reused for different tests.
-        elements, _ = grid
+        elements, _ = np_grid
         quad_instance.points = quad_instance.transform(elements)
         quad_instance.volumes = quad_instance.calc_volumes(elements)
         return quad_instance
@@ -506,14 +539,14 @@ class TestGaussLegendreQuadrature2D:
     # TODO Implement tests for different reference elements.
     @pytest.mark.skip("Test not implemented.")
     def test_transform(
-        self, quad: GaussLegendreQuadrature2D, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: GaussLegendreQuadrature2D, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
         pass
 
     def test_volume(
-        self, quad: GaussLegendreQuadrature2D, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: GaussLegendreQuadrature2D, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
-        _, volumes = grid
+        _, volumes = np_grid
         assert pytest.approx(quad.volumes) == volumes
 
     def test_reference_points(
@@ -677,17 +710,17 @@ class TestGaussLegendreQuadrature2D:
     "domain", [(1, 3), (5, 3), (18.9, 3), (51.234, 3)], indirect=True
 )
 @pytest.mark.parametrize(
-    "grid", list(itertools.product([30, 75], ["cartesian"])), indirect=True
+    "grid_params", list(itertools.product([30, 75], ["cartesian"])), indirect=True
 )
 class TestGaussLegendreQuadrature3D:
     @pytest.fixture(scope="class")
     def quad(
-        self, degree: int, grid: tuple[np.ndarray, np.ndarray]
+        self, degree: int, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> GaussLegendreQuadrature3D:
         quad_instance = GaussLegendreQuadrature3D(degree=degree)
         # Precalulcate integration points and volumes to save some computation time when
         # reused for different tests.
-        elements, _ = grid
+        elements, _ = np_grid
         quad_instance.points = quad_instance.transform(elements)
         quad_instance.volumes = quad_instance.calc_volumes(elements)
         return quad_instance
@@ -697,7 +730,7 @@ class TestGaussLegendreQuadrature3D:
         self,
         quad: GaussLegendreQuadrature3D,
         x_times_y_times_z_exact: float,
-        grid: tuple[np.ndarray, np.ndarray],
+        np_grid: tuple[np.ndarray, np.ndarray],
     ) -> None:
         integral = quad.integrate(
             x_times_y_times_z, recalc_points=False, recalc_volumes=False
@@ -707,15 +740,15 @@ class TestGaussLegendreQuadrature3D:
     # TODO Implement tests for different reference elements.
     @pytest.mark.skip("``get_quadpy_elements`` not implemented for 3D grids.")
     def test_transform(
-        self, quad: GaussLegendreQuadrature3D, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: GaussLegendreQuadrature3D, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
         pass
 
     @pytest.mark.skip("``get_quadpy_elements`` not implemented for 3D grids.")
     def test_volume(
-        self, quad: GaussLegendreQuadrature3D, grid: tuple[np.ndarray, np.ndarray]
+        self, quad: GaussLegendreQuadrature3D, np_grid: tuple[np.ndarray, np.ndarray]
     ) -> None:
-        _, volumes = grid
+        _, volumes = np_grid
         assert pytest.approx(quad.volumes) == volumes
 
     @pytest.mark.skip("``get_quadpy_elements`` not implemented for 3D grids.")
@@ -812,3 +845,20 @@ class TestGaussLegendreQuadrature3D:
                     0.171467764060357,
                 ]
             )
+
+
+@pytest.mark.parametrize(
+    "domain", [(1, 2), (5, 2), (18.9, 2), (51.234, 2)], indirect=True
+)
+@pytest.mark.parametrize(
+    "grid_params",
+    list(itertools.product([30, 75, 140], ["simplex", "cartesian"])),
+    indirect=True,
+    scope="class",
+)
+def test_get_quadpy_elements(pp_grid: pp.Grid) -> None:
+    """Test that quadpy elements have the right shape."""
+    grid_type = "cartesian" if "cart" in pp_grid.name.lower() else "simplex"
+    quadpy_elements = get_quadpy_elements(pp_grid, grid_type)
+    num_nodes_per_cell = 4 if grid_type == "cartesian" else 3
+    assert quadpy_elements.shape == (num_nodes_per_cell, pp_grid.num_cells, pp_grid.dim)
