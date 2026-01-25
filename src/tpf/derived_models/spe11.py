@@ -14,6 +14,7 @@ for the model.
 
 import copy
 import logging
+import math
 import pathlib
 from typing import Any
 
@@ -59,7 +60,10 @@ case_A: dict[str, Any] = {
     "INJECTION_RATE": 1.7e-7 / _co2_surface["density"],  # 1.7x10^- 7kg/s
     "WELL_SIZE": 0.02,  # [m]
     "WELL_1_POS": (0.9, 0.3),  # [m]
-    "WELL_2_POS": (1.7, 0.68),  # [m], slightly lower so it's fully inside facies 4.
+    "WELL_2_POS": (
+        1.7,
+        0.66,
+    ),  # [m], lower than in the benchmark so it's approx. in the center of facies 4.
     "MAX_CAP_PRESS": 9.5e4,  # [Pa], upper limit on capillary pressure.
     "PERMEABILITY": {  # Permeability in [m^2]
         "facies 1": 4e-11,
@@ -103,7 +107,7 @@ case_B: dict[str, Any] = {
     "INITIAL_SATURATION": 0.9,  # [-], initial saturation. Domain filled with water.
     "INJECTION_RATE": 0.07 / _co2_reservoir["density"],  # 0.035 kg/s
     "WELL_1_POS": (2700, 300),  # [m]
-    "WELL_2_POS": (5100, 700),  # [m]
+    "WELL_2_POS": (5100, 660),  # [m]
     "WELL_SIZE": 0.2,  # [m]
     "MAX_CAP_PRESS": 3e7,  # [Pa], upper limit on capillary pressure.
     "PERMEABILITY": {  # Permeability in [m^2]
@@ -195,7 +199,12 @@ def write_refinement_factor(
 
 
 def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
-    """Add the well positions in the SPE11 geometric information."""
+    """Add the well positions in the SPE11 geometric information.
+
+    Note: The line numbers are hardcoded and should only changed with care. If something
+        is added or removed, they have to be changed.
+
+    """
     # Data is written to the `spe11a.geo` file and upscaled to case B size if necessary.
     # All positions are therefore in case A scale.
 
@@ -209,65 +218,117 @@ def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
     well_size_x = case["WELL_SIZE"] / scale_factor_x
     well_size_y = case["WELL_SIZE"] / scale_factor_y
 
+    NUM_SQUARES: int = 4
+
+    # Additional range
     with geo_file.open("r+") as f:
         lines: list[str] = f.readlines()
-        # Add well positions.
-        well_1_pts: list[str] = [
-            f"Point(288) = {{{well_1_pos_x - well_size_x / 2}, {well_1_pos_y - well_size_y / 2}, 0, cl__1}};\n",
-            f"Point(289) = {{{well_1_pos_x + well_size_x / 2}, {well_1_pos_y - well_size_y / 2}, 0, cl__1}};\n",
-            f"Point(290) = {{{well_1_pos_x - well_size_x / 2}, {well_1_pos_y + well_size_y / 2}, 0, cl__1}};\n",
-            f"Point(291) = {{{well_1_pos_x + well_size_x / 2}, {well_1_pos_y + well_size_y / 2}, 0, cl__1}};\n",
-        ]
-        well_2_pts: list[str] = [
-            f"Point(292) = {{{well_2_pos_x - well_size_x / 2}, {well_2_pos_y - well_size_y / 2}, 0, cl__1}};\n",
-            f"Point(293) = {{{well_2_pos_x + well_size_x / 2}, {well_2_pos_y - well_size_y / 2}, 0, cl__1}};\n",
-            f"Point(294) = {{{well_2_pos_x - well_size_x / 2}, {well_2_pos_y + well_size_y / 2}, 0, cl__1}};\n",
-            f"Point(295) = {{{well_2_pos_x + well_size_x / 2}, {well_2_pos_y + well_size_y / 2}, 0, cl__1}};\n",
-        ]
-        well_1_lns: list[str] = [
-            "Line(319) = {288, 290};\n",
-            "Line(320) = {290, 291};\n",
-            "Line(321) = {291, 289};\n",
-            "Line(322) = {289, 288};\n",
-        ]
-        well_2_lns: list[str] = [
-            "Line(323) = {292, 294};\n",
-            "Line(324) = {294, 295};\n",
-            "Line(325) = {295, 293};\n",
-            "Line(326) = {293, 292};\n",
-        ]
-        surfaces: list[str] = [
-            "Line Loop(33) = {319, 320, 321, 322};\n",
-            "Line Loop(34) = {323, 324, 325, 326};\n",
-            "Line Loop(35) = {-319, -320, -321, -322};\n",
-            "Line Loop(36) = {-323, -324, -325, -326};\n",
-            "Plane Surface(35) = {35};\n",
-            "Plane Surface(36) = {36};\n",
-        ]
-        for i, line in enumerate(well_1_pts):
-            lines.insert(325 + i, line)
-        for i, line in enumerate(well_2_pts):
-            lines.insert(329 + i, line)
-        for i, line in enumerate(well_1_lns):
-            lines.insert(651 + i, line)
-        for i, line in enumerate(well_2_lns):
-            lines.insert(655 + i, line)
-        for i, line in enumerate(surfaces):
-            lines.insert(659 + i, line)
+        pts_lines = lines[:325].copy()
+        lns_lines = lines[325:643].copy()
+        surface_lines = lines[643:].copy()
 
-        # Add holes in surfaces.
-        lines[682] = "Plane Surface(2) = {2, 33};\n"
-        lines[708] = "Plane Surface(11) = {11, 34};\n"
+        # NOTE The following is done already now, so we don't have to keep track of line
+        # counts when we add lines to ``surface_lines``
 
-        # Fill holes again.
-        lines[691] = 'Physical Surface("Facies 5", 5) = {2, 3, 4, 5, 6, 35};\n'
-        lines[719] = (
-            'Physical Surface("Facies 4", 4) = {10, 11, 12, 13, 14, 15, 22, 36};\n'
+        # Remove larges squares (to be defined later) from existing surfaces.
+        surface_lines[17] = (
+            "Plane Surface(2) = {2, " + f"{300 + NUM_SQUARES * 100 + 20}" + "};\n"
+        )
+        surface_lines[43] = (
+            "Plane Surface(11) = {11, " + f"{300 + NUM_SQUARES * 100 + 21}" + "};\n"
         )
 
+        # Add all squares as physical surfaces.
+        surface_lines[26] = (
+            'Physical Surface("Facies 5", 5) = {2, 3, 4, 5, 6, '
+            + ", ".join([f"{400 + i * 100 + 22}" for i in range(NUM_SQUARES)])
+            + "};\n"
+        )
+        surface_lines[54] = (
+            'Physical Surface("Facies 4", 4) = {10, 11, 12, 13, 14, 15, 22, '
+            + ", ".join([f"{400 + i * 100 + 23}" for i in range(NUM_SQUARES)])
+            + "};\n"
+        )
+
+        well_1_pts: list[str] = []
+        well_2_pts: list[str] = []
+        well_1_lns: list[str] = []
+        well_2_lns: list[str] = []
+
+        # Add wells plus 3 boxes of increasing size around the wells to ensure
+        # well-conditioned cells. Without the boxes, the large size difference between
+        # the wells and other features can create ill-conditioned cells.
+        for i in range(NUM_SQUARES):
+            # Base entity ID > 400 to avoid collisions with existing entities.
+            base_id = 400 + 100 * i
+
+            # Four corner points per square.
+            well_1_pts: list[str] = [
+                f"Point({base_id}) = {{{well_1_pos_x - well_size_x * (2 ** (i - 1))}, {well_1_pos_y - well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+                f"Point({base_id + 1}) = {{{well_1_pos_x + well_size_x * (2 ** (i - 1))}, {well_1_pos_y - well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+                f"Point({base_id + 2}) = {{{well_1_pos_x - well_size_x * (2 ** (i - 1))}, {well_1_pos_y + well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+                f"Point({base_id + 3}) = {{{well_1_pos_x + well_size_x * (2 ** (i - 1))}, {well_1_pos_y + well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+            ]
+            well_2_pts: list[str] = [
+                f"Point({base_id + 4}) = {{{well_2_pos_x - well_size_x * (2 ** (i - 1))}, {well_2_pos_y - well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+                f"Point({base_id + 5}) = {{{well_2_pos_x + well_size_x * (2 ** (i - 1))}, {well_2_pos_y - well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+                f"Point({base_id + 6}) = {{{well_2_pos_x - well_size_x * (2 ** (i - 1))}, {well_2_pos_y + well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+                f"Point({base_id + 7}) = {{{well_2_pos_x + well_size_x * (2 ** (i - 1))}, {well_2_pos_y + well_size_y * (2 ** (i - 1))}, 0, cl__1}};\n",
+            ]
+
+            # Sides of the square.
+            well_1_lns: list[str] = [
+                f"Line({base_id + 10}) = {{{base_id}, {base_id + 2}}};\n",
+                f"Line({base_id + 11}) = {{{base_id + 2}, {base_id + 3}}};\n",
+                f"Line({base_id + 12}) = {{{base_id + 3}, {base_id + 1}}};\n",
+                f"Line({base_id + 13}) = {{{base_id + 1}, {base_id}}};\n",
+            ]
+            well_2_lns: list[str] = [
+                f"Line({base_id + 14}) = {{{base_id + 4}, {base_id + 6}}};\n",
+                f"Line({base_id + 15}) = {{{base_id + 6}, {base_id + 7}}};\n",
+                f"Line({base_id + 16}) = {{{base_id + 7}, {base_id + 5}}};\n",
+                f"Line({base_id + 17}) = {{{base_id + 5}, {base_id + 4}}};\n",
+            ]
+
+            # Squares oriented in both directions.
+            line_loops: list[str] = [
+                f"Line Loop({base_id + 20}) = {{{base_id + 10}, {base_id + 11}, {base_id + 12}, {base_id + 13}}};\n",
+                f"Line Loop({base_id + 21}) = {{{base_id + 14}, {base_id + 15}, {base_id + 16}, {base_id + 17}}};\n",
+                f"Line Loop({base_id + 22}) = {{-{base_id + 10}, -{base_id + 11}, -{base_id + 12}, -{base_id + 13}}};\n",
+                f"Line Loop({base_id + 23}) = {{-{base_id + 14}, -{base_id + 15}, -{base_id + 16}, -{base_id + 17}}};\n",
+            ]
+
+            if i == 0:
+                # Add the smallest square.
+                surfaces: list[str] = [
+                    f"Plane Surface({base_id + 22}) = {{{base_id + 22}}};\n",
+                    f"Plane Surface({base_id + 23}) = {{{base_id + 23}}};\n",
+                ]
+            else:
+                # Add square "rings" with the next-smallest square as a hole.
+                surfaces = [
+                    f"Plane Surface({base_id + 22}) = {{{base_id + 22}, {base_id - 100 + 20}}};\n",
+                    f"Plane Surface({base_id + 23}) = {{{base_id + 23}, {base_id - 100 + 21}}};\n",
+                ]
+
+            # Add to existing entities.
+            pts_lines.extend(well_1_pts)
+            pts_lines.extend(well_2_pts)
+            lns_lines.extend(well_1_lns)
+            lns_lines.extend(well_2_lns)
+
+            # Insert add the start of ``surface_lines``, because the later lines refer
+            # to the added entities (see above). Insert in order of the squares, because
+            # the squares refer to each other.
+            # NOTE ``surfaces``, then ``line_loops`` so line loops come FIRST in the
+            # final file. Order is important, because the surfaces refer to the loops.
+            for line in surfaces + line_loops:
+                surface_lines.insert(i * 6, line)
+
         # Replace the current content of the file.
+        new_lines = pts_lines + lns_lines + surface_lines
         f.seek(0)
-        f.write("".join(lines))
+        f.write("".join(new_lines))
         f.truncate()
 
 
@@ -288,9 +349,13 @@ def fix_face_normals(
         # Generate the mesh.
         gmsh.initialize()
         gmsh.option.setNumber("General.Verbosity", 3)
+        # Use Frontal-Delaunay meshing algorithm for high quality elements.
+        gmsh.option.setNumber("Mesh.Algorithm", 6)
         gmsh.merge(str(gmsh_file))
         gmsh.model.mesh.generate(dim=2)
         gmsh.model.mesh.createGeometry()
+
+    gmsh.write(str(out_file))
 
     # Get all entities
     entities: list[tuple[int, int]] = gmsh.model.getEntities(2)
@@ -388,7 +453,9 @@ def load_spe11_data(
     # The well positions always gets written to the case A geo file.
     with (data_dir / GEO_FILE_CASE_A).open("r") as f:
         lines: list[str] = f.readlines()
-        if len(lines) != 757:
+        # NOTE Line number must align with ``write_well_positions``. 823 is valid for
+        # NUM_SQUARES=4.
+        if len(lines) != 823:
             logger.info(
                 "Well positions not included in the .geo file. Adjusting and"
                 + " recomputing mesh ..."
