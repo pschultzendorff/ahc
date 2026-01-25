@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import itertools
 import logging
-import pathlib
 import typing
 from typing import Any
 
@@ -303,72 +302,12 @@ class PressureReconstructionMixin(TPFProtocol):
                     / total_mobility[..., None]
                 )
 
-                # def integrand(
-                #     x: np.ndarray,
-                # ) -> np.ndarray:
-                #     fv_flux = self._evaluate_flux_at_points(
-                #         coeffs_flux,
-                #         x[..., 0],
-                #         x[..., 1],
-                #     )
-                #     return np.sqrt((fv_flux**2).sum(axis=-1))
-
-                # integral: Integral = self.quadrature_est.integrate(
-                #     integrand,
-                #     self.quadpy_elements,
-                #     recalc_points=False,
-                #     recalc_volumes=False,
-                # )
-                # pp.set_solution_values(
-                #     "intermediate_norm_g",
-                #     integral.elementwise.squeeze(),
-                #     self.g_data,
-                #     iterate_index=0,
-                # )
-
             elif pressure_key == COMPLEMENTARY_PRESSURE:
-                # FIXME Old approach. Remove once verified that the new one works
-                # better.
-                # fractional_flow: np.ndarray = pp.get_solution_values(
-                #     "fractional_flow", self.g_data, iterate_index=0
-                # )
-                # coeffs_flux: np.ndarray = pp.get_solution_values(
-                #     f"{WETTING_FLUX}{flux_specifier}_RT0_coeffs",
-                #     self.g_data,
-                #     iterate_index=0,
-                # ) - fractional_flow[..., None] * pp.get_solution_values(
-                #     f"{TOTAL_FLUX}{flux_specifier}_RT0_coeffs",
-                #     self.g_data,
-                #     iterate_index=0,
-                # )
                 coeffs_flux = pp.get_solution_values(
                     f"capillary_flux{specifier}_RT0_coeffs",
                     self.g_data,
                     iterate_index=0,
                 )
-
-                # def integrand(
-                #     x: np.ndarray,
-                # ) -> np.ndarray:
-                #     fv_flux = self._evaluate_flux_at_points(
-                #         coeffs_flux,
-                #         x[..., 0],
-                #         x[..., 1],
-                #     )
-                #     return np.sqrt((fv_flux**2).sum(axis=-1))
-
-                # integral: Integral = self.quadrature_est.integrate(
-                #     integrand,
-                #     self.quadpy_elements,
-                #     recalc_points=False,
-                #     recalc_volumes=False,
-                # )
-                # pp.set_solution_values(
-                #     "intermediate_norm_c",
-                #     integral.elementwise.squeeze(),
-                #     self.g_data,
-                #     iterate_index=0,
-                # )
 
             else:
                 raise ValueError(f"Unknown pressure key: {pressure_key}")
@@ -878,7 +817,8 @@ class EquationsRecMixin(TPFProtocol):
         flux_w_equil = pp.ad.TimeDependentDenseArray(WETTING_FLUX + "_equil", [self.g])
 
         flux_t_equil_mismatch = div @ flux_t_equil - source_ad_t
-        flux_w_equil_mismatch = (  # This will not be exact as dt_s is for the current time step, not for the previous one.
+        flux_w_equil_mismatch = (  # This will not be exact as dt_s is for the current time step, not for the previous one.???
+            # TODO What did I mean by this?
             porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
             + div @ flux_w_equil
             - source_ad_w
@@ -894,6 +834,8 @@ class EquationsRecMixin(TPFProtocol):
         for name, op in [
             (TOTAL_FLUX, flux_t),
             (WETTING_FLUX, flux_w),
+            ("wetting_mobility", phase_mobilities[self.wetting.name]),
+            # ("wetting_mobility", phase_mobilities[self.wetting.name]),
             ("total_mobility", total_mobility),
             # ("fractional_flow", fractional_flow),
             (CAPILLARY_FLUX, capillary_flux),

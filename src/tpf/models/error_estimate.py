@@ -215,20 +215,12 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             raise ValueError("Not implemented for tensor permeability.")
 
         # 2: Get reconstructed pressure coefficients and mobilities
-        if flux_name == TOTAL_FLUX:
-            pressure_keys = [GLOBAL_PRESSURE]
-            phases = [self.wetting, self.nonwetting]
-        elif flux_name == WETTING_FLUX:
-            pressure_keys = (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE)
-            phases = [self.wetting]
-        else:
-            raise ValueError(f"Unknown flux name: {flux_name}")
-
         pressure_coeffs_new = {}
         pressure_coeffs_old = {}
         phase_mobilities_new = {}
         phase_mobilities_old = {}
 
+        pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
         for pressure_key in pressure_keys:
             pressure_coeffs_new[pressure_key] = pp.get_solution_values(
                 f"{pressure_key}_coeffs_rec", self.g_data, iterate_index=0
@@ -237,26 +229,34 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                 f"{pressure_key}_coeffs_rec", self.g_data, time_step_index=0
             )
 
-        for phase in phases:
-            # Non-upwinded mobilities.
-            # TODO These are saved in reconstruction, just use those. Then HC can also
-            # be changed.
-            phase_mobilities_new[phase.name] = (
-                self.rel_perm(  # type: ignore
-                    self.wetting.s,
-                    phase,
-                ).value(self.equation_system)
-                / phase.viscosity
-            )
-            phase_mobilities_old[phase.name] = (
-                self.rel_perm(  # type: ignore
-                    self.wetting.s.previous_timestep(),
-                    phase,
-                ).value(self.equation_system)
-                / phase.viscosity
-            )
+        # 3: Define helper functions to evaluate mobilities from complementary pressure.
+        if flux_name == TOTAL_FLUX:
 
-        # 3: Define helper functions to evaluate fluxes from reconstructed pressures and
+            def evaluate_mobilities_from_pressure(
+                x: np.ndarray, coeffs: np.ndarray
+            ) -> np.ndarray:
+                q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
+                s_p2 = self.eval_saturation(q_p2)
+
+                # Non-upwinded total mobility.
+                return (
+                    self.rel_perm_np(s_p2, self.wetting) / self.wetting.viscosity
+                    + self.rel_perm_np(s_p2, self.nonwetting)
+                    / self.nonwetting.viscosity
+                )
+
+        elif flux_name == WETTING_FLUX:
+
+            def evaluate_mobilities_from_pressure(
+                x: np.ndarray, coeffs: np.ndarray
+            ) -> np.ndarray:
+                q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
+                s_p2 = self.eval_saturation(q_p2)
+
+                # Non-upwinded wetting mobility.
+                return self.rel_perm_np(s_p2, self.wetting) / self.wetting.viscosity
+
+        # 4: Define helper functions to evaluate fluxes from reconstructed pressures and
         # P0 mobilities.
         if flux_name == TOTAL_FLUX:
 
@@ -272,13 +272,12 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                         pressure_coeffs[GLOBAL_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
-                total_mobility = (
-                    phase_mobilities[self.wetting.name]
-                    + phase_mobilities[self.nonwetting.name]
+                total_mobility = evaluate_mobilities_from_pressure(
+                    x, pressure_coeffs[COMPLEMENTARY_PRESSURE]
                 )
                 return (
                     -perm_arr[None, :, None]
-                    * total_mobility[None, :, None]
+                    * total_mobility[..., None]
                     * global_pressure_pot
                 )
 
@@ -299,14 +298,16 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
                         pressure_coeffs[COMPLEMENTARY_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
-                wetting_mobility = phase_mobilities[self.wetting.name]
+                wetting_mobility = evaluate_mobilities_from_pressure(
+                    x, pressure_coeffs[COMPLEMENTARY_PRESSURE]
+                )
 
                 return -perm_arr[None, :, None] * (
-                    wetting_mobility[None, :, None] * global_pressure_pot
+                    wetting_mobility[..., None] * global_pressure_pot
                     + complementary_pressure_pot
                 )
 
-        # 4: Define integrand that computes either the norm or the inner product of the
+        # 5: Define integrand that computes either the norm or the inner product of the
         # flux differences.
         def integrand(
             x: np.ndarray,
@@ -345,7 +346,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
 
                 return (flux_diff_new * flux_diff_old).sum(axis=-1)
 
-        # 5: Finally, integrate in space. Store norm at current time step and inner
+        # 6: Finally, integrate in space. Store norm at current time step and inner
         # product of previous and current time step.
         for specifier in ["_norm", "_inner_product"]:
             # Make mypy happy.
