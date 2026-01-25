@@ -1035,15 +1035,19 @@ class SolutionStrategyRec(  # type: ignore
                 iterate_index=0,
             )
 
-        # Evaluate scaled fluxes required for pressure post-processing.
-        for scalar_name in ["total_mobility", CAPILLARY_FLUX]:
-            scalar_value = self.postproc_ad_ops[scalar_name].value(self.equation_system)
-            pp.set_solution_values(
-                scalar_name,
-                scalar_value,  # type: ignore
-                self.g_data,
-                iterate_index=0,
-            )
+        # Evaluate scaled fluxes required for pressure post-processing. Only if the
+        # post-processed pressures are required.
+        if not self.params.get("disable_spatial_est", False):
+            for scalar_name in ["total_mobility", CAPILLARY_FLUX]:
+                scalar_value = self.postproc_ad_ops[scalar_name].value(
+                    self.equation_system
+                )
+                pp.set_solution_values(
+                    scalar_name,
+                    scalar_value,  # type: ignore
+                    self.g_data,
+                    iterate_index=0,
+                )
 
     def postprocess_solution(
         self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
@@ -1064,14 +1068,15 @@ class SolutionStrategyRec(  # type: ignore
 
         self.extend_fv_fluxes(CAPILLARY_FLUX)
 
-        # Reconstruct pressures.
-        for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
-            self.postprocess_pressure_vohralik(
-                pressure_key, prepare_simulation=prepare_simulation
-            )
-            self.reconstruct_pressure_vohralik(
-                pressure_key, prepare_simulation=prepare_simulation
-            )
+        # Reconstruct pressures if spatial estimator is enabled.
+        if not self.params.get("disable_spatial_est", False):
+            for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
+                self.postprocess_pressure_vohralik(
+                    pressure_key, prepare_simulation=prepare_simulation
+                )
+                self.reconstruct_pressure_vohralik(
+                    pressure_key, prepare_simulation=prepare_simulation
+                )
 
 
 def r2c(array: np.ndarray) -> np.ndarray:

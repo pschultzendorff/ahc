@@ -143,6 +143,8 @@ default_solver_params = {
     "spe10_isotropic_perm": True,
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
+    # Error estimator:
+    "disable_spatial_est": True,
 }
 
 default_time_manager_params = {

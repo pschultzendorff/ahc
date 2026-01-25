@@ -304,12 +304,20 @@ class SolutionStrategyANewtonMixin(
         )
 
         lin_est: float = self.global_lin_est()
+
+        if not self.params.get("disable_spatial_est", False):
+            spatial_est: float = self.global_spatial_est()
+        else:
+            spatial_est = 0.0
+
+        if not self.params.get("disable_temporal_est", False):
+            temp_est: float = self.global_temp_est()
+        else:
+            temp_est = 0.0
+
         self.nonlinear_solver_statistics.log_error(
-            # NOTE The discretization error estimate does not need to be calculated
-            # at this point. After HC convergence is sufficient if we want the code
-            # to be more efficient.
-            spatial_est=self.global_spatial_est(),
-            temp_est=self.global_temp_est(),
+            spatial_est=spatial_est,
+            temp_est=temp_est,
             lin_est=lin_est,
         )
 

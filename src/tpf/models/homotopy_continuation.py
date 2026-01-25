@@ -1033,16 +1033,18 @@ class SolutionStrategyHC(
                 prepare_simulation=prepare_simulation,
             )
 
-        for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
-            self.postprocess_pressure_vohralik(
-                pressure_key,
-                specifier="_wrt_goal_const_laws",
-                prepare_simulation=prepare_simulation,
-            )
-            self.reconstruct_pressure_vohralik(
-                pressure_key,
-                prepare_simulation=prepare_simulation,
-            )
+        # Reconstruct pressures if spatial estimator is enabled.
+        if not self.params.get("disable_spatial_est", False):
+            for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
+                self.postprocess_pressure_vohralik(
+                    pressure_key,
+                    specifier="_wrt_goal_const_laws",
+                    prepare_simulation=prepare_simulation,
+                )
+                self.reconstruct_pressure_vohralik(
+                    pressure_key,
+                    prepare_simulation=prepare_simulation,
+                )
 
     def check_convergence(
         self,
@@ -1063,14 +1065,25 @@ class SolutionStrategyHC(
         # is False. However, to compare HC and apdative HC, we still evaluate it.
         hc_est: float = self.global_hc_est()
         lin_est: float = self.global_lin_est()
+
+        if not self.params.get("disable_spatial_est", False):
+            spatial_est: float = self.global_spatial_est()
+        else:
+            spatial_est = 0.0
+
+        if not self.params.get("disable_temporal_est", False):
+            temp_est: float = self.global_temp_est()
+        else:
+            temp_est = 0.0
+
         self.nonlinear_solver_statistics.log_error(
             # NOTE The discretization error estimate does not need to be calculated
             # at this point. After HC convergence is sufficient if we want the code
             # to be more efficient.
             global_energy_norm=self.global_energy_norm(),
             equilibrated_flux_mismatch=self.equilibrated_flux_mismatch(),
-            spatial_est=self.global_spatial_est(),
-            temp_est=self.global_temp_est(),
+            spatial_est=spatial_est,
+            temp_est=temp_est,
             hc_est=hc_est,
             lin_est=lin_est,
         )
