@@ -58,7 +58,7 @@ from utils import SimulationConfig
 
 
 # Limit number of threads for NREC.
-N_THREADS = "1"
+N_THREADS = "4"
 os.environ["MKL_NUM_THREADS"] = N_THREADS
 os.environ["NUMEXPR_NUM_THREADS"] = N_THREADS
 os.environ["OMP_NUM_THREADS"] = N_THREADS
