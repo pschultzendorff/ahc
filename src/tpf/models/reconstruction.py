@@ -599,6 +599,16 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
         equilibrated_flux: np.ndarray = val + jac @ nonlinear_increment
 
+        np.save(
+            self.params["folder_name"]
+            / (
+                f"{flux_name}_equil"
+                + f"_{self.time_manager.time_index}"
+                + f"_{self.nonlinear_solver_statistics.num_iteration}.npy"
+            ),
+            equilibrated_flux,
+        )
+
         pp.set_solution_values(
             f"{flux_name}_equil",
             equilibrated_flux,
@@ -727,7 +737,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
 
 class EquationsRecMixin(TPFProtocol):
-    def set_equations(self) -> None:
+    def set_equations(self, with_super: bool = True) -> None:
         """Set additional equations needed for reconstructions.
 
         The following equations are set:
@@ -739,7 +749,8 @@ class EquationsRecMixin(TPFProtocol):
         required to post-process pressures into elementwise P2 polynomials.
 
         """
-        super().set_equations()
+        if with_super:
+            super().set_equations()
 
         self.postproc_ad_ops: dict[str, pp.ad.Operator] = {}
 
@@ -796,7 +807,9 @@ class EquationsRecMixin(TPFProtocol):
         flux_w_equil = pp.ad.TimeDependentDenseArray(WETTING_FLUX + "_equil", [self.g])
 
         flux_t_equil_mismatch = div @ flux_t_equil - source_ad_t
-        flux_w_equil_mismatch = (  # This will not be exact as dt_s is for the current time step, not for the previous one.???
+        flux_w_equil_mismatch = (
+            # This will not be exact as dt_s is for the current time step, not for the
+            # previous one???
             # TODO What did I mean by this?
             porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
             + div @ flux_w_equil
@@ -813,13 +826,13 @@ class EquationsRecMixin(TPFProtocol):
         for name, op in [
             (TOTAL_FLUX, flux_t),
             (WETTING_FLUX, flux_w),
-            ("wetting_mobility", phase_mobilities[self.wetting.name]),
+            # ("wetting_mobility", phase_mobilities[self.wetting.name]),
             # ("wetting_mobility", phase_mobilities[self.wetting.name]),
             ("total_mobility", total_mobility),
             # ("fractional_flow", fractional_flow),
             (CAPILLARY_FLUX, capillary_flux),
-            (TOTAL_FLUX + "_equil", flux_t_equil),
-            (WETTING_FLUX + "_equil", flux_w_equil),
+            # (TOTAL_FLUX + "_equil", flux_t_equil),
+            # (WETTING_FLUX + "_equil", flux_w_equil),
             (TOTAL_FLUX + "_equil_mismatch", flux_t_equil_mismatch),
             (WETTING_FLUX + "_equil_mismatch", flux_w_equil_mismatch),
         ]:
@@ -974,6 +987,9 @@ class SolutionStrategyRec(  # type: ignore
                 initialization this must be 0. Default is None.
 
         """
+        # FIXME Just for debugging, remove this later!!!!!!!!
+        EquationsRecMixin.set_equations(self, with_super=False)
+
         # Evaluate and save cellwise constant pressure values.
         self.eval_glob_compl_pressure_on_domain(time_step_index=time_step_index)
 
@@ -1216,7 +1232,8 @@ def compute_pressure_coeffs(
     coeffs = np.zeros((num_cells, 6))
 
     # Loop through all cells and compute the nonconstant coefficients.
-    for ci in prange(num_cells):
+    # for ci in prange(num_cells):
+    for ci in range(num_cells):
         # Local permeability tensor.
         K = perm[:dim, :dim, ci]
         Kxx, Kxy, Kyy = K[0, 0], K[0, 1], K[1, 1]
@@ -1254,7 +1271,8 @@ def linalg_solve_batch(A_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
     """
     n, m, _ = A_batch.shape
     solutions = np.zeros((n, m), dtype=A_batch.dtype)
-    for i in prange(n):
+    # for i in prange(n):
+    for i in range(n):
         solutions[i] = np.linalg.solve(A_batch[i], b_batch[i])
     return solutions
 

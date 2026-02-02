@@ -89,7 +89,7 @@ if __name__ == "__main__":
     spe10_layer: int = 55
 
     for init_s in [0.3]:
-        config = SimulationConfig(
+        config_1 = SimulationConfig(
             file_name="run_1",
             folder_name=results_dir / "mwe_status_bug" / "run_1",
             solver_name="AHC",
@@ -102,12 +102,12 @@ if __name__ == "__main__":
             cp_model_2=copy.deepcopy(cp_models["linear"]),
             spe10_layer=spe10_layer,
         )
-        run.run_simulation(config)
+        run.run_simulation(config_1)
 
         # NOTE Reimport to make sure nothing persists.
         importlib.reload(run)
 
-        config = SimulationConfig(
+        config_2 = SimulationConfig(
             file_name="run_2",
             folder_name=results_dir / "mwe_status_bug" / "run_2",
             solver_name="AHC",
@@ -119,7 +119,76 @@ if __name__ == "__main__":
             cp_model_2=copy.deepcopy(cp_models["linear"]),
             spe10_layer=spe10_layer,
         )
-        run.run_simulation(config)
+        run.run_simulation(config_2)
 
+        # # NOTE Reimport to make sure nothing persists.
+        # importlib.reload(run)
+
+        # config = SimulationConfig(
+        #     file_name="run_3",
+        #     folder_name=results_dir / "mwe_status_bug" / "run_3",
+        #     solver_name="AHC",
+        #     adaptive_error_ratio=1e-4,
+        #     init_s=init_s,
+        #     rp_model_1=copy.deepcopy(rp_models["linear"]),
+        #     rp_model_2=copy.deepcopy(rp_models["Brooks-Corey_nb_4"]),
+        #     cp_model_1=copy.deepcopy(cp_models["None"]),
+        #     cp_model_2=copy.deepcopy(cp_models["linear"]),
+        #     spe10_layer=spe10_layer,
+        # )
+        # run.run_simulation(config)
+
+        # # NOTE Reimport to make sure nothing persists.
+        # importlib.reload(run)
+
+        # config = SimulationConfig(
+        #     file_name="run_4",
+        #     folder_name=results_dir / "mwe_status_bug" / "run_4",
+        #     solver_name="AHC",
+        #     adaptive_error_ratio=1e-4,
+        #     init_s=init_s,
+        #     rp_model_1=copy.deepcopy(rp_models["linear"]),
+        #     rp_model_2=copy.deepcopy(rp_models["Brooks-Corey_nb_4"]),
+        #     cp_model_1=copy.deepcopy(cp_models["None"]),
+        #     cp_model_2=copy.deepcopy(cp_models["linear"]),
+        #     spe10_layer=spe10_layer,
+        # )
+        # run.run_simulation(config)
+
+        # # NOTE Reimport to make sure nothing persists.
+        # importlib.reload(run)
+
+        # config = SimulationConfig(
+        #     file_name="run_5",
+        #     folder_name=results_dir / "mwe_status_bug" / "run_5",
+        #     solver_name="AHC",
+        #     adaptive_error_ratio=1e-4,
+        #     init_s=init_s,
+        #     rp_model_1=copy.deepcopy(rp_models["linear"]),
+        #     rp_model_2=copy.deepcopy(rp_models["Brooks-Corey_nb_4"]),
+        #     cp_model_1=copy.deepcopy(cp_models["None"]),
+        #     cp_model_2=copy.deepcopy(cp_models["linear"]),
+        #     spe10_layer=spe10_layer,
+        # )
+        # run.run_simulation(config)
+
+for newton_step in range(1, 6):
+    total_flux_1 = np.load(
+        config_1.folder_name / f"total_flux_equil_1_{newton_step}.npy"
+    )
+    wetting_flux_1 = np.load(
+        config_1.folder_name / f"wetting_flux_equil_1_{newton_step}.npy"
+    )
+    total_flux_2 = np.load(
+        config_2.folder_name / f"total_flux_equil_1_{newton_step}.npy"
+    )
+    wetting_flux_2 = np.load(
+        config_2.folder_name / f"wetting_flux_equil_1_{newton_step}.npy"
+    )
+
+    if not np.array_equal(total_flux_1, total_flux_2):
+        print(f"Total fluxes are not equal on Newton step {newton_step}")
+    if not np.array_equal(wetting_flux_1, wetting_flux_2):
+        print(f"Wetting fluxes are not equal on Newton step {newton_step}")
 
 # endregion

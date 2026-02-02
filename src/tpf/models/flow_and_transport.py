@@ -451,7 +451,7 @@ class EquationsTPF(TPFProtocol, pp.BalanceEquation):
         return np.full(g.num_cells, self.solid.porosity())
 
     @typing.override
-    def set_equations(self, equation_names: dict[str, str] | None = None) -> None:
+    def set_equations(self) -> None:
         """Define equations."""
         try:
             self.equation_system.remove_equation("Flow equation")
