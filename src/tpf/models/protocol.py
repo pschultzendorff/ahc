@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from numpy.typing import ArrayLike
 

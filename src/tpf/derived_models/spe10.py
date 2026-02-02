@@ -16,7 +16,7 @@ import logging
 import pathlib
 import warnings
 import zipfile
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import porepy as pp
@@ -40,7 +40,6 @@ URL: str = "https://www.spe.org/web/csp/datasets/por_perm_case2a.zip"
 WIDTH: float = 1200 * FEET
 HEIGHT: float = 2200 * FEET
 
-INITIAL_PRESSURE: float = 6000 * PSI  # [psi], initial pressure.
 INITIAL_SATURATION: float = 0.3  # [-], initial saturation.
 
 water: dict[str, Any] = _water.copy()
@@ -62,6 +61,10 @@ PRODUCTION_WELL_SIZE: float = 100 * FEET
 corners is prescribed Dirichlet conditions corresponding to a production well, i.e.,
 fixed BHP."""
 INJECTION_RATE: float = 87.5  # [m^3/day], constant water injection rate.
+
+INITIAL_PRESSURE: float = BHP
+# [psi], initial pressure; not really relevant except for Newton's initial guess.
+
 
 # endregion
 
@@ -320,7 +323,7 @@ class SolutionStrategySPE10(TPFProtocol):
     def add_constant_spe10_data(self) -> None:
         """Save the SPE10 data to the exporter."""
         data: list[DataInput] = []
-        for dim, perm in self.permeability(self.g).items():  # type: ignore
+        for dim, perm in cast(dict, self.permeability(self.g)).items():
             data.append((self.g, "permeability_" + dim, perm))
         data.append((self.g, "porosity", self.porosity(self.g)))
         self.exporter.add_constant_data(data)

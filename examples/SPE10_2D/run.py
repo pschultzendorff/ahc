@@ -255,6 +255,7 @@ def run_simulation(
         pp.run_time_dependent_model(model=model, params=solver_params)
     except Exception as e:
         logger.error(f"Run failed with error: {e}.")
+        raise e
 
     # Save number of grid cells to a file.
     with (config.folder_name / "num_grid_cells.txt").open("w") as f:

@@ -168,7 +168,7 @@ import itertools
 import logging
 import time
 import typing
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import porepy as pp
@@ -324,7 +324,7 @@ class DarcyFluxes(TPFProtocol):
 
         # Gravity terms.
         buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
-        # buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
+        buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
 
         # Finally, we can combine all viscous and buoyancy fluxes multiplied with phase
         # mobilities to the total flux.
@@ -333,7 +333,7 @@ class DarcyFluxes(TPFProtocol):
             mobility_t * viscous_potential_n
             - mobility_w * capillary_potential
             - mobility_w * buoyancy_potential_w
-            # - mobility_n * buoyancy_potential_n
+            - mobility_n * buoyancy_potential_n
         )
         total_flux.set_name("Total volume flux")
         return total_flux

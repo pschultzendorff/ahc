@@ -599,16 +599,6 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
         equilibrated_flux: np.ndarray = val + jac @ nonlinear_increment
 
-        np.save(
-            self.params["folder_name"]
-            / (
-                f"{flux_name}_equil"
-                + f"_{self.time_manager.time_index}"
-                + f"_{self.nonlinear_solver_statistics.num_iteration}.npy"
-            ),
-            equilibrated_flux,
-        )
-
         pp.set_solution_values(
             f"{flux_name}_equil",
             equilibrated_flux,
@@ -670,29 +660,31 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
         if prepare_simulation:
             time_step_index: int | None = 0
+            # Ensure to save zeros at the initialization.
+            coeffs = np.zeros([self.g.num_cells, self.g.dim + 1])
         else:
             time_step_index = None
 
-        # Cell-basis arrays
-        faces_cell = self.faces_cell
-        opp_nodes_coor_cell = self.opp_nodes_coor_cell
-        sign_normals_cell = self.sign_normals
-        vol_cell = self.g.cell_volumes
+            # Cell-basis arrays.
+            faces_cell = self.faces_cell
+            opp_nodes_coor_cell = self.opp_nodes_coor_cell
+            sign_normals_cell = self.sign_normals
+            vol_cell = self.g.cell_volumes
 
-        # Retrieve finite volume fluxes
-        flux = pp.get_solution_values(
-            flux_name + flux_specifier, self.g_data, iterate_index=0
-        )
-
-        # Perform actual reconstruction and obtain coefficients
-        coeffs = np.zeros([self.g.num_cells, self.g.dim + 1])
-        alpha = 1 / (self.g.dim * vol_cell)
-        coeffs[:, 0] = alpha * np.sum(sign_normals_cell * flux[faces_cell], axis=1)
-        for dim in range(self.g.dim):
-            coeffs[:, dim + 1] = -alpha * np.sum(
-                (sign_normals_cell * flux[faces_cell] * opp_nodes_coor_cell[dim]),
-                axis=1,
+            # Retrieve finite volume fluxes.
+            flux = pp.get_solution_values(
+                flux_name + flux_specifier, self.g_data, iterate_index=0
             )
+
+            # Perform actual reconstruction and obtain coefficients
+            coeffs = np.zeros([self.g.num_cells, self.g.dim + 1])
+            alpha = 1 / (self.g.dim * vol_cell)
+            coeffs[:, 0] = alpha * np.sum(sign_normals_cell * flux[faces_cell], axis=1)
+            for dim in range(self.g.dim):
+                coeffs[:, dim + 1] = -alpha * np.sum(
+                    (sign_normals_cell * flux[faces_cell] * opp_nodes_coor_cell[dim]),
+                    axis=1,
+                )
 
         # Store coefficients in the data dictionary.
         pp.set_solution_values(
@@ -737,7 +729,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
 
 
 class EquationsRecMixin(TPFProtocol):
-    def set_equations(self, with_super: bool = True) -> None:
+    def set_equations(self) -> None:
         """Set additional equations needed for reconstructions.
 
         The following equations are set:
@@ -749,8 +741,7 @@ class EquationsRecMixin(TPFProtocol):
         required to post-process pressures into elementwise P2 polynomials.
 
         """
-        if with_super:
-            super().set_equations()
+        super().set_equations()
 
         self.postproc_ad_ops: dict[str, pp.ad.Operator] = {}
 
@@ -781,7 +772,6 @@ class EquationsRecMixin(TPFProtocol):
         # Compute capillary and buoyancy potential.
         capillary_potential = tpfa_cap_press.flux() @ pressure_c
 
-        flux_t = self.total_flux(self.g)
         fractional_flow_upwinded = mobility_w / mobility_t
 
         capillary_flux = fractional_flow_upwinded * mobility_n * capillary_potential
@@ -949,6 +939,18 @@ class SolutionStrategyRec(  # type: ignore
     @typing.override
     def after_nonlinear_convergence(self) -> None:
         super().after_nonlinear_convergence()
+        # Save time step values for equilibrations. Needed in ``adaptive_newton.py``.
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+            flux_values: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
+            )
+            pp.set_solution_values(
+                f"{flux_name}_RT0_coeffs",
+                flux_values,
+                self.g_data,
+                time_step_index=0,
+            )
+
         # Save time step values for pressures, postprocessings, and reconstructions.
         if not self.params.get("disable_spatial_est", False):
             for pressure_key, specifier in itertools.product(
@@ -987,9 +989,6 @@ class SolutionStrategyRec(  # type: ignore
                 initialization this must be 0. Default is None.
 
         """
-        # FIXME Just for debugging, remove this later!!!!!!!!
-        EquationsRecMixin.set_equations(self, with_super=False)
-
         # Evaluate and save cellwise constant pressure values.
         self.eval_glob_compl_pressure_on_domain(time_step_index=time_step_index)
 
@@ -1168,8 +1167,7 @@ def get_sign_normals(g: pp.Grid) -> np.ndarray:
     return sign_normals
 
 
-# NOTE Disable numba to make sure nothing is weirdly optimized.
-# @njit
+@njit
 def evaluate_poly_at_points(
     coeffs: np.ndarray, x: np.ndarray, y: np.ndarray
 ) -> np.ndarray:
@@ -1185,8 +1183,7 @@ def evaluate_poly_at_points(
     )
 
 
-# NOTE Disable numba to make sure nothing is weirdly optimized.
-# @njit
+@njit
 def average_over_entities(
     values: np.ndarray,
     cell_entities_map: np.ndarray,
@@ -1208,8 +1205,7 @@ def average_over_entities(
 # The loop could be parallelized with njit(parallel=True) and prange. However, on a
 # small grids (<16000 cells) the overhead made :meth:`postprocess_pressure_vohralik`
 # slower.
-# NOTE Disable numba to make sure nothing is weirdly optimized.
-# @njit
+@njit
 def compute_pressure_coeffs(
     num_cells: int, dim: int, perm: np.ndarray, flux_coeffs: np.ndarray
 ) -> np.ndarray:
@@ -1232,8 +1228,7 @@ def compute_pressure_coeffs(
     coeffs = np.zeros((num_cells, 6))
 
     # Loop through all cells and compute the nonconstant coefficients.
-    # for ci in prange(num_cells):
-    for ci in range(num_cells):
+    for ci in prange(num_cells):
         # Local permeability tensor.
         K = perm[:dim, :dim, ci]
         Kxx, Kxy, Kyy = K[0, 0], K[0, 1], K[1, 1]
@@ -1255,8 +1250,7 @@ def compute_pressure_coeffs(
 
 # NOTE The loop could be parallelized with njit(parallel=True). However, on a small grid
 # (<16000 cells), the overhead made :meth:`reconstruct_pressure_vohralik` slower.
-# NOTE Disable numba to make sure nothing is weirdly optimized.
-# @njit
+@njit
 def linalg_solve_batch(A_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
     """Solve multiple small dense linear systems in batch mode.
 
@@ -1271,8 +1265,7 @@ def linalg_solve_batch(A_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
     """
     n, m, _ = A_batch.shape
     solutions = np.zeros((n, m), dtype=A_batch.dtype)
-    # for i in prange(n):
-    for i in range(n):
+    for i in prange(n):
         solutions[i] = np.linalg.solve(A_batch[i], b_batch[i])
     return solutions
 

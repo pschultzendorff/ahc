@@ -275,8 +275,12 @@ class SolverStatisticsANewton(SolverStatisticsRec):
 class SolverStatisticsHC(SolverStatisticsTPF):
     hc_lambda_fl: float = 1.0
     """Homotopy continuation lambda."""
-    hc_lambda_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
-    """Homotopy continuation lambda for automatic differentiation."""
+
+    hc_lambda_ad: pp.ad.Scalar = field(default_factory=lambda: pp.ad.Scalar(1.0))
+    # """Homotopy continuation lambda for automatic differentiation."""
+    # # NOTE Use default_factory to avoid sharing the same Scalar across multiple
+    # # instances.
+
     hc_lambdas: list[float] = field(default_factory=list)
     """List of homotopy continuation lambda values for the current time step."""
     hc_num_iteration: int = 0

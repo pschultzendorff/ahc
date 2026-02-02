@@ -161,7 +161,9 @@ def clean_up_after_simulation(config: SimulationConfig) -> None:
         config: The simulation configuration containing the folder name.
 
     """
-    for file in config.folder_name.glob("*.[vtu pvd]*"):
+    for file in list(config.folder_name.glob("*.vtu")) + list(
+        config.folder_name.glob("*.pvd")
+    ):
         try:
             file.unlink()
         except Exception:
@@ -195,6 +197,8 @@ class SimulationStatistics:
     converged: bool = True
     final_time: float = 0.0
 
+    num_grid_cells: int = 1
+
 
 def flatten(xx: list[list]) -> list:
     return [x for sublist in xx for x in sublist]
@@ -208,6 +212,14 @@ def read_data(
         data: dict[str, Any] = json.load(f)
 
     stats = SimulationStatistics()
+
+    # Read number of grid cells, before possibly returning empty statistics (when
+    # failed).
+    try:
+        with (config.folder_name / "num_grid_cells.txt").open("r") as f:
+            stats.num_grid_cells = int(f.readline())
+    except FileNotFoundError:
+        pass
 
     # Check if the simulation reached the final time.
     stats.final_time = list(data.values())[-1]["current time"]
@@ -259,8 +271,6 @@ def read_data(
     # Treat failed time steps.
     time_steps_copy: list[float] = stats.time_steps.copy()
     for i, (ts, next_ts) in enumerate(zip(stats.time_steps[:-1], stats.time_steps[1:])):
-        # TODO Fix this!
-        # QUESTION What is wrong?
         if ts > next_ts:
             time_steps_copy[i] = next_ts
     stats.time_steps = time_steps_copy
@@ -268,26 +278,48 @@ def read_data(
     return stats
 
 
-def calc_relative_error(stats: SimulationStatistics) -> float:
-    if isinstance(stats.energy_norm[-1][-1], float):
-        # Newton solver.
-        total_error = (
-            stats.lin_estimator[-1][-1]
-            + stats.spat_estimator[-1][-1]
-            + stats.temp_estimator[-1][-1]
-        )
-        energy_norm = stats.energy_norm[-1][-1]
-    else:
-        # HC solver.
-        total_error = (
-            stats.hc_estimator[-1][-1][-1]
-            + stats.lin_estimator[-1][-1][-1]
-            + stats.spat_estimator[-1][-1][-1]
-            + stats.temp_estimator[-1][-1][-1]
-        )
-        energy_norm = stats.energy_norm[-1][-1][-1]
+def calc_relative_error(stats: SimulationStatistics) -> dict[str, float]:
+    """Calculate relative errors at the end of the simulation."""
+    # Determine the solver by number of nested loops.
+    solver_type = "Newton" if isinstance(stats.energy_norm[-1][-1], float) else "HC"
 
-    return total_error / energy_norm
+    energy_norm = (
+        stats.energy_norm[-1][-1]
+        if solver_type == "Newton"
+        else stats.energy_norm[-1][-1][-1]
+    )
+    result = {}
+    for error_name in ["total", "lin", "spat", "temp", "hc"]:
+        if error_name == "total":
+            if solver_type == "Newton":
+                result["total"] = (
+                    stats.lin_estimator[-1][-1]
+                    + stats.spat_estimator[-1][-1]
+                    + stats.temp_estimator[-1][-1]
+                ) / energy_norm
+            else:
+                result["total"] = (
+                    stats.hc_estimator[-1][-1][-1]
+                    + stats.lin_estimator[-1][-1][-1]
+                    + stats.spat_estimator[-1][-1][-1]
+                    + stats.temp_estimator[-1][-1][-1]
+                ) / energy_norm
+        elif error_name == "hc":
+            if solver_type == "HC":
+                result[error_name] = (
+                    getattr(stats, "hc_estimator")[-1][-1][-1] / energy_norm
+                )
+        else:
+            if solver_type == "Newton":
+                result[error_name] = (
+                    getattr(stats, error_name + "_estimator")[-1][-1] / energy_norm
+                )
+            else:
+                result[error_name] = (
+                    getattr(stats, error_name + "_estimator")[-1][-1][-1] / energy_norm
+                )
+
+    return result
 
 
 def plot_nl_iterations(
@@ -315,6 +347,9 @@ def plot_nl_iterations(
             solvers.append(
                 f"{solver_name}\n"
                 + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio_str}$"
+                + "\n"
+                # Hardcode adaptive stopping criterion for corrector loop.
+                + r"$\gamma_\mathrm{lin} = 0.1$"
             )
         elif solver_name.startswith("Newton"):
             solvers.append(
@@ -344,7 +379,11 @@ def plot_nl_iterations(
             i = solvers.index(solver_name)
         elif solver_name == "AHC":
             i = solvers.index(
-                f"{solver_name}\n" + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio}$"
+                f"{solver_name}\n"
+                + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio}$"
+                + "\n"
+                # Hardcode adaptive stopping criterion for corrector loop.
+                + r"$\gamma_\mathrm{lin} = 0.1$"
             )
         elif solver_name.startswith("Newton"):
             i = solvers.index(
@@ -353,6 +392,12 @@ def plot_nl_iterations(
             )
 
         j = x_ticks.index(varying_param)
+
+        # Do not read statistics if the solver did not converge.
+        converged[i, j] = stat.converged
+        if not stat.converged:
+            final_times[i, j] = stat.final_time
+            continue
 
         tot_nl_iters = (
             sum(stat.timestep_nl_iters)
@@ -372,10 +417,6 @@ def plot_nl_iterations(
         # For Newton, show only nl iters and time steps.
         else:
             annotations[i, j] = f"{tot_nl_iters}\n({len(stat.time_steps)})"
-
-        converged[i, j] = stat.converged
-        if not stat.converged:
-            final_times[i, j] = stat.final_time
 
     # Create heatmap figure
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -744,7 +785,7 @@ def plot_convergence(
     for stat in stats:
         uses_hc: bool = len(stat.hc_estimator) > 0
 
-        if parameter_name == "refinement_factor":
+        if parameter_name == "num_grid_cells":
             if uses_hc:
                 final_estimators.append(stat.spat_estimator[-1][-1][-1])
             else:
@@ -768,8 +809,8 @@ def plot_convergence(
     ax.set_yscale("log")
     ax.set_xscale("log")
 
-    if parameter_name == "refinement_factor":
-        x_label = "Refinement Factor"
+    if parameter_name == "num_grid_cells":
+        x_label = "Number of Grid Cells"
         y_label = r"$\eta_{\mathrm{spat}}$"
         title = "Convergence of Spatial Error Estimator"
     elif parameter_name == "time_step_size":
