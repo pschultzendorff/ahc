@@ -992,7 +992,7 @@ def get_quadpy_elements(
     nodes_coor_cell = sd.nodes[:, nodes_of_cell]
 
     # Stacking node coordinates
-    elements: np.ndarray = np.empty([nodes_per_cell, num_cells, sd.dim])
+    elements: np.ndarray = np.zeros([nodes_per_cell, num_cells, sd.dim])
     for vertex in range(nodes_per_cell):
         for dim in range(sd.dim):
             elements[vertex, :, dim] = nodes_coor_cell[dim][:, vertex]

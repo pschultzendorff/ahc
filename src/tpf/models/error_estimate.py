@@ -409,26 +409,40 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         return np.stack([flux_x, flux_y], axis=-1)
 
     def local_sp_est(self) -> None:
+        r"""Calculate and store the local saturation-pressure error estimator for each
+        element at the current time step.
+
+        """
+        # Elementwise constant saturation from CCFVM solution.
+        s_p0: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
+
         coeffs: np.ndarray = pp.get_solution_values(
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
-        s_p0: np.ndarray = self.wetting.s.value(self.equation_system)  # type: ignore
+
+        # Porosity and length scale [m] for sclaing in the estimator.
         porosity: np.ndarray = self.porosity(self.g)
+        length_scale: np.ndarray = self.g.cell_volumes ** (1 / self.nd)
 
         def integrand(
             x: np.ndarray,
         ) -> np.ndarray:
+            # Elementwise quadratic saturation evaluated from complementary pressure.
             q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
             s_p2 = self.eval_saturation(q_p2)
 
-            # Time derivative by dividing by time step size. In :meth:`global_sp_est`,
-            # the previous time step value is added and the sum is integrated in time by
-            # multiplying with the time step size.
+            # Dividing by time step size to obtain the discrete time derivative. In
+            # :meth:`global_sp_est`, the previous time step value is added and the sum
+            # is integrated in time by multiplying with the time step size.
+
             # ``s_p2`` has shape (num_quad_points_per_element, num_cells), while
             # ``s_p0`` and ``porosity`` have shape (num_cells,). Since the latter are
             # cellwise constant, we can broadcast.
             return (
-                porosity[None, ...] * (s_p0[None, ...] - s_p2) / self.time_manager.dt
+                length_scale[None, ...]
+                * porosity[None, ...]
+                * (s_p0[None, ...] - s_p2)
+                / self.time_manager.dt
             ) ** 2
 
         integral: Integral = self.quadrature_est.integrate(
@@ -672,10 +686,9 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             )
             global_energies.append(
                 (self.time_manager.dt / 2 * (local_energy_new + local_energy_old).sum())
-                ** (1 / 2)
             )
 
-        global_energy: float = sum(global_energies)
+        global_energy: float = sum(global_energies) ** (1 / 2)
         logger.info(f"Global energy norm: {global_energy}")
         return global_energy
 

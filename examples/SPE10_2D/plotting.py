@@ -31,7 +31,12 @@ if __name__ == "__main__":
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_1[key] = statistics
         if config.solver_name == "AHC":
-            rel_errors[f"fig_1_{key}"] = f"{calc_relative_error(statistics):.2f}"
+            if statistics.converged:
+                rel_errors[f"fig_1_{key}"] = (
+                    f"{calc_relative_error(statistics)['total']:.2f}"
+                )
+            else:
+                rel_errors[f"fig_1_{key}"] = "not converged"
     fig1 = plot_nl_iterations(data_1, "rel. perm. model")
     data_2 = {}
     for config in configs_viscous_varying_rp_init_s_03:
@@ -42,7 +47,12 @@ if __name__ == "__main__":
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_2[key] = statistics
         if config.solver_name == "AHC":
-            rel_errors[f"fig_2_{key}"] = f"{calc_relative_error(statistics):.2f}"
+            if statistics.converged:
+                rel_errors[f"fig_2_{key}"] = (
+                    f"{calc_relative_error(statistics)['total']:.2f}"
+                )
+            else:
+                rel_errors[f"fig_2_{key}"] = "not converged"
     fig2 = plot_nl_iterations(data_2, "rel. perm. model")
     data_3 = {}
     for config in configs_viscous_varying_init_s:
@@ -50,7 +60,12 @@ if __name__ == "__main__":
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_3[key] = statistics
         if config.solver_name == "AHC":
-            rel_errors[f"fig_3_{key}"] = f"{calc_relative_error(statistics):.2f}"
+            if statistics.converged:
+                rel_errors[f"fig_3_{key}"] = (
+                    f"{calc_relative_error(statistics)['total']:.2f}"
+                )
+            else:
+                rel_errors[f"fig_3_{key}"] = "not converged"
     fig3 = plot_nl_iterations(data_3, r"$s_\mathrm{w}^0$")
     data_4 = {}
     for config in configs_viscous_and_cap_varying_cap_init_s_03:
@@ -65,7 +80,12 @@ if __name__ == "__main__":
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_4[key] = statistics
         if config.solver_name == "AHC":
-            rel_errors[f"fig_4_{key}"] = f"{calc_relative_error(statistics):.2f}"
+            if statistics.converged:
+                rel_errors[f"fig_4_{key}"] = (
+                    f"{calc_relative_error(statistics)['total']:.2f}"
+                )
+            else:
+                rel_errors[f"fig_4_{key}"] = "not converged"
     fig4 = plot_nl_iterations(
         data_4,
         "cap. press. model & rel. perm. model",
@@ -78,7 +98,12 @@ if __name__ == "__main__":
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_5[key] = statistics
         if config.solver_name == "AHC":
-            rel_errors[f"fig_5_{key}"] = f"{calc_relative_error(statistics):.2f}"
+            if statistics.converged:
+                rel_errors[f"fig_5_{key}"] = (
+                    f"{calc_relative_error(statistics)['total']:.2f}"
+                )
+            else:
+                rel_errors[f"fig_5_{key}"] = "not converged"
     fig5 = plot_nl_iterations(data_5, r"$s_\mathrm{w}^0$")
     data_6 = {}
     for config in configs_viscous_and_cap_varying_entry_press:
@@ -86,7 +111,12 @@ if __name__ == "__main__":
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_6[key] = statistics
         if config.solver_name == "AHC":
-            rel_errors[f"fig_6_{key}"] = f"{calc_relative_error(statistics):.2f}"
+            if statistics.converged:
+                rel_errors[f"fig_6_{key}"] = (
+                    f"{calc_relative_error(statistics)['total']:.2f}"
+                )
+            else:
+                rel_errors[f"fig_6_{key}"] = "not converged"
     fig6 = plot_nl_iterations(data_6, r"$p_\mathrm{e}$")
 
     fig_dir = dirname / "figures"

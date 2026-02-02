@@ -4,12 +4,13 @@ from collections import defaultdict
 
 import matplotlib
 import matplotlib.pyplot as plt
-from run_all_layers import generate_configs
+import numpy as np
 from run import default_time_manager_params
+from run_all_layers import generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationStatistics, calc_relative_error, flatten, read_data, 
+from utils import SimulationStatistics, calc_relative_error, flatten, read_data
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
@@ -23,7 +24,7 @@ def plot_statistics(
     # Collect num_time_steps and num_iterations per solver and layer.
     num_iterations = defaultdict(lambda: defaultdict(float))
     num_time_steps = defaultdict(lambda: defaultdict(float))
-    relative_errors = defaultdict(lambda: defaultdict(float))
+    relative_errors = {}
 
     for case, stats in data.items():
         solver, adaptive_error_ratio_str, layer = case.split("_")
@@ -47,48 +48,82 @@ def plot_statistics(
         num_iterations[solver_label][layer] = iters
         num_time_steps[solver_label][layer] = len(stats.time_steps)
 
-        # Forgot to save global energy norm for adaptive Newton.
+        # Forgot to save global energy norm for adaptive Newton, thus we use AHC to
+        # calculate the relative errors.
         if solver.startswith("AHC"):
-            relative_errors[solver_label][layer] = calc_relative_error(stats)
+            relative_errors[layer] = calc_relative_error(stats)
 
     # Ensure solvers and layers are sorted correctly.
     solver_labels = list(sorted(num_iterations.keys()))
+    error_keys = list(sorted(relative_errors["0"].keys()))
+    error_keys.remove("spat")
+
+    # Turn into sorted list (solvers) of sorted list (layers) of values.
+    # NOTE A little hacky. turning the sorted into a dict is not expected to maintain
+    # ordering.
     num_iterations = [
-        list(dict(sorted(v.items(), key=lambda item: int(item[0]))).values())
+        [value for __, value in sorted(v.items(), key=lambda item: int(item[0]))]
         for _, v in sorted(num_iterations.items())
     ]
     num_time_steps = [
-        list(dict(sorted(v.items(), key=lambda item: int(item[0]))).values())
+        [value for __, value in sorted(v.items(), key=lambda item: int(item[0]))]
         for _, v in sorted(num_time_steps.items())
     ]
+
+    # Turn into sorted list (errors) of sorted list (layers) of values.
     relative_errors = [
-        list(dict(sorted(v.items(), key=lambda item: int(item[0]))).values())
-        for _, v in sorted(relative_errors.items())
+        [
+            value
+            for __, value in sorted(
+                {k: v[error_key] for k, v in relative_errors.items()}.items(),
+                key=lambda item: int(item[0]),
+            )
+        ]
+        for error_key in error_keys
     ]
 
     fig_list = []
 
     num_layers = len(num_iterations[0])
     layer_indices = range(1, num_layers + 1)
-    colors = [
-        "tab:blue",
-        "tab:orange",
-        "tab:green",
-        "tab:red",
-    ]
-    linestyles = ["-", "--", "-.", ":"]
+    colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:gray"]
+    linestyles = ["-", "--", "-.", ":", (0, (1, 5))]
 
     for data_list in [num_iterations, num_time_steps, relative_errors]:
         fig, ax = plt.subplots(figsize=(10, 5))
-        for i, solver_data in enumerate(data_list):
-            ax.plot(
-                layer_indices,
-                solver_data,
-                label=solver_labels[i],
-                color=colors[i % len(colors)],
-                linestyle=linestyles[i % len(linestyles)],
-                linewidth=2,
-            )
+
+        # Plot either for each error type (relative_errors), or for each solver
+        # (num_iterations and num_time_steps)
+        if data_list is relative_errors:
+            for i, error_type in enumerate(data_list):
+                error_key = error_keys[i]
+                label = (
+                    rf"$\hat{{\eta}}_\mathrm{{{error_key.upper()}}}$"
+                    if error_key == "hc"
+                    else rf"$\hat{{\eta}}_\mathrm{{{error_key}}}$"
+                )
+                ax.plot(
+                    layer_indices,
+                    error_type,
+                    label=label,
+                    color=colors[i % len(colors)],
+                    linestyle=linestyles[i % len(linestyles)],
+                    linewidth=2,
+                )
+        else:
+            for i, solver_data in enumerate(data_list):
+                # Hide failed time steps.
+                solver_data = np.asarray(solver_data, dtype=np.float32)
+                solver_data[solver_data == 0] = np.nan
+
+                ax.plot(
+                    layer_indices,
+                    solver_data,
+                    label=solver_labels[i],
+                    color=colors[i % len(colors)],
+                    linestyle=linestyles[i % len(linestyles)],
+                    linewidth=2,
+                )
 
         # Mark upper and lower layers.
         ax.axvline(x=35.5, color="black", linestyle=":", linewidth=2)
@@ -125,10 +160,9 @@ def plot_statistics(
         elif data_list is num_time_steps:
             ax.set_ylabel("# time steps", fontsize=16, fontweight="bold")
         else:
-            ax.set_ylabel(r"$\eta_{\mathrm{tot}}$", fontsize=16, fontweight="bold")
+            ax.set_ylabel("Relative error estimator", fontsize=16, fontweight="bold")
 
-        if data_list is not relative_errors:
-            ax.legend(loc="lower left", framealpha=0.7, fontsize=14)
+        ax.legend(loc="lower left", framealpha=0.7, fontsize=14)
 
         fig.tight_layout()
         fig_list.append(fig)

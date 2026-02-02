@@ -1,27 +1,5 @@
-r"""Run the SPE11 A example with small time steps for plotting.
-
-
-Model description:
-- Constant CO2 injection in the center.
-- No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
-- Simulation time: 10 days
-- Solid properties:
-    - Porosity: SPE11, case A.
-    - Permeability: SPE11, case A.
-- Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.1.
-    - CO2: From the NIST database, taken at 20°C and atmospheric pressure. Residual
-      saturation is 0.1.
-- Initial values:
-    - Pressure: Atmospheric pressure.
-    - Saturation: Varying between 0.8 and 0.9.
-- Rel. perm. models:
-    - linear
-    - Brooks-Corey
-- Capillary pressure model:
-    - None
-
-"""
+"""Run a dummy model on the SPE11B geometry with different refinement factors to get
+the number of grid cells."""
 
 import logging
 import os
@@ -39,13 +17,6 @@ from utils import SimulationConfig
 
 # region SETUP
 
-
-# Limit number of threads for NREC.
-N_THREADS = "4"
-os.environ["MKL_NUM_THREADS"] = N_THREADS
-os.environ["NUMEXPR_NUM_THREADS"] = N_THREADS
-os.environ["OMP_NUM_THREADS"] = N_THREADS
-os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
 
 # Catch all numpy errors except underflow, which may occur when calculating estimators.
 np.seterr(all="raise")

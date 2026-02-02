@@ -42,6 +42,7 @@ Model description:
 
 """
 
+import copy
 import logging
 import os
 import pathlib
@@ -209,9 +210,11 @@ def run_simulation(
 
     # Build params dictionaries.
     if solver_params is None:
-        solver_params = default_solver_params | updated_solver_params
+        solver_params = copy.deepcopy(default_solver_params) | updated_solver_params
     if time_manager_params is None:
-        time_manager_params = default_time_manager_params | updated_time_manager_params
+        time_manager_params = (
+            copy.deepcopy(default_time_manager_params) | updated_time_manager_params
+        )
 
     # Newton and Appleyard Newton require only one of each constitutive law.
     if config.solver_name.startswith("Newton"):
@@ -252,6 +255,10 @@ def run_simulation(
         pp.run_time_dependent_model(model=model, params=solver_params)
     except Exception as e:
         logger.error(f"Run failed with error: {e}.")
+
+    # Save number of grid cells to a file.
+    with (config.folder_name / "num_grid_cells.txt").open("w") as f:
+        f.write(str(model.g.num_cells))
 
 
 # endregion

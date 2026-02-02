@@ -15,8 +15,7 @@ doi: 10.1007/s10596-013-9356-0.]
 
 import itertools
 import logging
-import typing
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 import porepy as pp

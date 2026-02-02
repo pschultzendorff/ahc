@@ -88,29 +88,14 @@ if __name__ == "__main__":
 
     spe10_layer: int = 55
 
-    for init_s in [0.3]:  # [0.2, 0.3]:
-        # Linear
+    for init_s in [0.3]:
         config = SimulationConfig(
-            file_name="linear",
-            folder_name=results_dir / "linear_vs_nonlinear" / f"linear_{init_s}",
+            file_name="run_1",
+            folder_name=results_dir / "mwe_status_bug" / "run_1",
             solver_name="AHC",
             adaptive_error_ratio=1e-4,
             init_s=init_s,
-            rp_model_1=rp_models["linear"],
-            rp_model_2=rp_models["linear"],
-            cp_model_1=cp_models["None"],
-            cp_model_2=cp_models["None"],
-            spe10_layer=spe10_layer,
-        )
-        # run_simulation(config)
-
-        # Nonlinear
-        config = SimulationConfig(
-            file_name="nonlinear",
-            folder_name=results_dir / "linear_vs_nonlinear" / f"nonlinear_{init_s}",
-            solver_name="AHC",
-            adaptive_error_ratio=1e-4,
-            init_s=init_s,
+            # NOTE deepcopy dictionaries to make sure nothing is changed here.
             rp_model_1=copy.deepcopy(rp_models["linear"]),
             rp_model_2=copy.deepcopy(rp_models["Brooks-Corey_nb_4"]),
             cp_model_1=copy.deepcopy(cp_models["None"]),
@@ -119,11 +104,12 @@ if __name__ == "__main__":
         )
         run.run_simulation(config)
 
+        # NOTE Reimport to make sure nothing persists.
         importlib.reload(run)
 
         config = SimulationConfig(
-            file_name="nonlinear",
-            folder_name=results_dir / "linear_vs_nonlinear" / f"nonlinear_2_{init_s}",
+            file_name="run_2",
+            folder_name=results_dir / "mwe_status_bug" / "run_2",
             solver_name="AHC",
             adaptive_error_ratio=1e-4,
             init_s=init_s,
@@ -134,23 +120,6 @@ if __name__ == "__main__":
             spe10_layer=spe10_layer,
         )
         run.run_simulation(config)
-
-        # Nonlinear but stop at the first homotopy step
-        config = SimulationConfig(
-            file_name="nonlinear_stop_early",
-            folder_name=results_dir
-            / "linear_vs_nonlinear"
-            / f"nonlinear_stop_early_{init_s}",
-            solver_name="AHC",
-            adaptive_error_ratio=1.0,  # Stop early
-            init_s=init_s,
-            rp_model_1=rp_models["linear"],
-            rp_model_2=rp_models["Brooks-Corey_nb_4"],
-            cp_model_1=cp_models["None"],
-            cp_model_2=cp_models["linear"],
-            spe10_layer=spe10_layer,
-        )
-        # run_simulation(config)
 
 
 # endregion

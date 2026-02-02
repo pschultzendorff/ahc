@@ -232,12 +232,10 @@ def run_simulation(
     try:
         model = model_class(solver_params)
         pp.run_time_dependent_model(model=model, params=solver_params)
+
     except Exception as e:
         logger.error(f"Run failed with error: {e}.")
-
-    # Save number of grid cells to a file.
-    with (config.folder_name / "num_grid_cells.txt").open("w") as f:
-        f.write(str(model.g.num_cells))
+        raise e
 
 
 # endregion
@@ -245,9 +243,9 @@ def run_simulation(
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
     ("AHC", 0.01),
-    ("HC", 0.1),
-    ("Newton", 0.1),
-    ("NewtonAppleyard", 0.1),
+    # ("HC", 0.1),
+    # ("Newton", 0.1),
+    # ("NewtonAppleyard", 0.1),
 ]
 refinement_factors: list[float] = [10, 5, 1]  # , 0.5]
 
@@ -271,15 +269,27 @@ rp_models: dict[str, Any] = {
 
 cp_models: dict[str, Any] = {
     "None": {"model": None},
+    "linear": {
+        "model": "linear",
+        "linear_param": 5.0,
+        "limit": True,
+        "max": 1e6 * pp.PASCAL,
+    },
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey",
         "n_b": 4.0,
         "limit": True,
         "max": 1e6 * pp.PASCAL,
     },
+    "Brooks-Corey_nb_2": {
+        "model": "Brooks-Corey",
+        "n_b": 2.0,
+        "limit": True,
+        "max": 1e6 * pp.PASCAL,
+    },
 }
 
-results_dir = dirname / "results"
+results_dir = dirname / "debug"
 results_dir.mkdir(exist_ok=True)
 
 
@@ -287,7 +297,7 @@ def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
     configs = []
     # Varying rel. perm. models at init_s = 0.8 and init_s = 0.9.
-    for init_s in [0.8, 0.9]:
+    for init_s in [0.8]:  # , 0.9]:
         for rp_model_name, rp_model in rp_models.items():
             if rp_model_name == "linear":
                 continue
@@ -305,7 +315,7 @@ def generate_configs() -> list[SimulationConfig]:
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        refinement_factor=refinement_factors[2],
+                        refinement_factor=0.5,
                         init_s=init_s,
                         rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
@@ -315,7 +325,7 @@ def generate_configs() -> list[SimulationConfig]:
                 )
 
     # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
-    for init_s in [0.8, 0.9]:
+    for init_s in []:  # [0.8, 0.9]:
         for refinement_factor in refinement_factors:
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 file_name = f"ref_fac_{refinement_factor:.2f}"
@@ -348,6 +358,6 @@ if __name__ == "__main__":
     configs = generate_configs()
     for config in configs:
         run_simulation(config)
-        clean_up_after_simulation(config)
+        # clean_up_after_simulation(config)
 
 # endregion

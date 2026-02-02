@@ -15,7 +15,7 @@ EXPECTED_FINAL_TIME = 3000.0 * pp.DAY
 if __name__ == "__main__":
     configs = generate_configs()
     configs_varying_rp_init_s_08 = configs[:16]
-    configs_varying_rp_init_s_09 = configs[16:]
+    configs_varying_rp_init_s_09 = configs[16:32]
     configs_varying_ref_init_s_08 = configs[32:44]
     configs_varying_ref_init_s_09 = configs[44:]
     data_1 = {}
@@ -45,22 +45,22 @@ if __name__ == "__main__":
     )
     data_3 = {}
     for config in configs_varying_ref_init_s_08:
-        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
+        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{statistics.num_grid_cells}"
         data_3[key] = statistics
     fig3 = plot_nl_iterations(
         data_3,
-        "refinement factor",
+        "num grid cells",
     )
 
     data_4 = {}
     for config in configs_varying_ref_init_s_09:
-        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.refinement_factor}"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
+        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{statistics.num_grid_cells}"
         data_4[key] = statistics
     fig4 = plot_nl_iterations(
         data_4,
-        "refinement factor",
+        "num grid cells",
     )
 
     fig_dir = dirname / "figures"

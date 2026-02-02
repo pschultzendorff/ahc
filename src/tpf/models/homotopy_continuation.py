@@ -276,7 +276,7 @@ class EstimatesHCMixin(
         at :math:`t^{n-1}`. The time integral is then approximated as
 
         .. math::
-            \frac{\Delta t}{2}
+            \frac{\tau^n}{3}
             \|\mathbf{u}_{\alpha,h,\tau}(t^{n-1}) - \mathbf{u}_{\alpha,h}^{n,i,k}\|_K^2.
 
         Parameters:
@@ -423,7 +423,7 @@ class EstimatesHCMixin(
             recalc_points=False,
             recalc_volumes=False,
         )
-        # To calculate the global estimator, only the estimators fromt the most recent
+        # To calculate the global estimator, only the estimators from the most recent
         # nonlinear iteration are needed. No need to shift anything.
         pp.set_solution_values(
             f"{flux_name}_L_estimator",
@@ -745,19 +745,21 @@ class SolutionStrategyHC(
             )
 
         # Set time step values for reconstructions and estimators.
-        for pressure_key, specifier in itertools.product(
-            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
-            ["", "_coeffs_postproc", "_coeffs_rec"],
-        ):
-            time_step_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}{specifier}", self.g_data, hc_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}{specifier}",
-                time_step_values,
-                self.g_data,
-                time_step_index=0,
-            )
+        if not self.params.get("disable_spatial_est", False):
+            for pressure_key, specifier in itertools.product(
+                (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
+                ["", "_coeffs_postproc", "_coeffs_rec"],
+            ):
+                time_step_values: np.ndarray = pp.get_solution_values(
+                    f"{pressure_key}{specifier}", self.g_data, hc_index=0
+                )
+                pp.set_solution_values(
+                    f"{pressure_key}{specifier}",
+                    time_step_values,
+                    self.g_data,
+                    time_step_index=0,
+                )
+
         # NOTE The local residual, flux, continuation, and linearization error
         # estimators are only needed at the current iteration. We set the time step
         # values for completeness and to avoid extra code in :meth:`_data_to_export`.
@@ -1127,16 +1129,21 @@ class SolutionStrategyHC(
         )
 
         # Reconstructions and estimators.
-        for pressure_key, specifier in itertools.product(
-            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
-            ["", "_coeffs_postproc", "_coeffs_rec"],
-        ):
-            hc_step_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}{specifier}", self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}{specifier}", hc_step_values, self.g_data, hc_index=0
-            )
+        if not self.params.get("disable_spatial_est", False):
+            for pressure_key, specifier in itertools.product(
+                (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
+                ["", "_coeffs_postproc", "_coeffs_rec"],
+            ):
+                hc_step_values: np.ndarray = pp.get_solution_values(
+                    f"{pressure_key}{specifier}", self.g_data, iterate_index=0
+                )
+                pp.set_solution_values(
+                    f"{pressure_key}{specifier}",
+                    hc_step_values,
+                    self.g_data,
+                    hc_index=0,
+                )
+
         for flux_name, specifier in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
             [

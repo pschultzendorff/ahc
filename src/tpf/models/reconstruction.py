@@ -19,7 +19,6 @@ from tpf.models.flow_and_transport import (
 from tpf.models.protocol import ReconstructionProtocol, TPFProtocol
 from tpf.numerics.quadrature import (
     GaussLegendreQuadrature1D,
-    Integral,
     TriangleQuadrature,
     get_quadpy_elements,
 )
@@ -304,7 +303,7 @@ class PressureReconstructionMixin(TPFProtocol):
 
             elif pressure_key == COMPLEMENTARY_PRESSURE:
                 coeffs_flux = pp.get_solution_values(
-                    f"capillary_flux{specifier}_RT0_coeffs",
+                    f"{CAPILLARY_FLUX}{specifier}_RT0_coeffs",
                     self.g_data,
                     iterate_index=0,
                 )
@@ -333,26 +332,6 @@ class PressureReconstructionMixin(TPFProtocol):
             )
             current_p_cc = evaluate_poly_at_points(coeffs, cc_x, cc_y)
             coeffs[:, 5] = actual_p_cc - current_p_cc
-
-            def integrand(x):
-                int_0 = coeffs[:, 0][None, ...] * x[..., 0] ** 2
-                int_1 = coeffs[:, 1][None, ...] * x[..., 0] * x[..., 1]
-                int_2 = coeffs[:, 2][None, ...] * x[..., 0]
-                int_3 = coeffs[:, 3][None, ...] * x[..., 1] ** 2
-                int_4 = coeffs[:, 4][None, ...] * x[..., 1]
-                return int_0 + int_1 + int_2 + int_3 + int_4
-
-            integral: Integral = self.quadrature_rec.integrate(
-                integrand,
-                self.quadpy_elements,
-                recalc_points=False,
-                recalc_volumes=False,
-            )
-
-            # Now, we can compute the constant C, one per cell.
-            coeffs[:, 5] = (
-                actual_p_cc - integral.elementwise.squeeze() / self.g.cell_volumes
-            )
 
         # Store post-processed pressure coeffs.
         pp.set_solution_values(
@@ -486,7 +465,7 @@ class PressureReconstructionMixin(TPFProtocol):
             point_val = np.column_stack(
                 [node_pressure[self.nodes_of_cell], face_pressure[self.faces_of_cell]]
             )
-            point_coo = np.empty([dim, nc, self.POLY_COEFF_COUNT])
+            point_coo = np.zeros([dim, nc, self.POLY_COEFF_COUNT])
             point_coo[0] = np.column_stack([nx, fx])
             point_coo[1] = np.column_stack([ny, fy])
 
@@ -696,7 +675,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
         )
 
         # Perform actual reconstruction and obtain coefficients
-        coeffs = np.empty([self.g.num_cells, self.g.dim + 1])
+        coeffs = np.zeros([self.g.num_cells, self.g.dim + 1])
         alpha = 1 / (self.g.dim * vol_cell)
         coeffs[:, 0] = alpha * np.sum(sign_normals_cell * flux[faces_cell], axis=1)
         for dim in range(self.g.dim):
@@ -958,19 +937,20 @@ class SolutionStrategyRec(  # type: ignore
     def after_nonlinear_convergence(self) -> None:
         super().after_nonlinear_convergence()
         # Save time step values for pressures, postprocessings, and reconstructions.
-        for pressure_key, specifier in itertools.product(
-            (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
-            ["", "_coeffs_postproc", "_coeffs_rec"],
-        ):
-            pressure_values: np.ndarray = pp.get_solution_values(
-                f"{pressure_key}{specifier}", self.g_data, iterate_index=0
-            )
-            pp.set_solution_values(
-                f"{pressure_key}{specifier}",
-                pressure_values,
-                self.g_data,
-                time_step_index=0,
-            )
+        if not self.params.get("disable_spatial_est", False):
+            for pressure_key, specifier in itertools.product(
+                (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE),
+                ["", "_coeffs_postproc", "_coeffs_rec"],
+            ):
+                pressure_values: np.ndarray = pp.get_solution_values(
+                    f"{pressure_key}{specifier}", self.g_data, iterate_index=0
+                )
+                pp.set_solution_values(
+                    f"{pressure_key}{specifier}",
+                    pressure_values,
+                    self.g_data,
+                    time_step_index=0,
+                )
 
     def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
         """Evaluate post-processed pressure and scaled flux variables and save in data
@@ -1066,10 +1046,10 @@ class SolutionStrategyRec(  # type: ignore
                 # Extend equilibrated fluxes.
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")
 
-        self.extend_fv_fluxes(CAPILLARY_FLUX)
-
         # Reconstruct pressures if spatial estimator is enabled.
         if not self.params.get("disable_spatial_est", False):
+            self.extend_fv_fluxes(CAPILLARY_FLUX)
+
             for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
                 self.postprocess_pressure_vohralik(
                     pressure_key, prepare_simulation=prepare_simulation
@@ -1104,7 +1084,7 @@ def get_opposite_side_nodes(g: pp.Grid) -> np.ndarray:
     nodes_of_cell = sps.find(g.cell_nodes().T)[1].reshape(nc, dim + 1)
     nodes_of_face = sps.find(g.face_nodes.T)[1].reshape(nf, dim)
 
-    opposite_nodes = np.empty_like(faces_of_cell)
+    opposite_nodes = np.zeros_like(faces_of_cell)
     for cell in range(nc):
         opposite_nodes[cell] = [
             np.setdiff1d(nodes_of_cell[cell], nodes_of_face[face])[0]
@@ -1172,7 +1152,8 @@ def get_sign_normals(g: pp.Grid) -> np.ndarray:
     return sign_normals
 
 
-@njit
+# NOTE Disable numba to make sure nothing is weirdly optimized.
+# @njit
 def evaluate_poly_at_points(
     coeffs: np.ndarray, x: np.ndarray, y: np.ndarray
 ) -> np.ndarray:
@@ -1188,7 +1169,8 @@ def evaluate_poly_at_points(
     )
 
 
-@njit
+# NOTE Disable numba to make sure nothing is weirdly optimized.
+# @njit
 def average_over_entities(
     values: np.ndarray,
     cell_entities_map: np.ndarray,
@@ -1210,7 +1192,8 @@ def average_over_entities(
 # The loop could be parallelized with njit(parallel=True) and prange. However, on a
 # small grids (<16000 cells) the overhead made :meth:`postprocess_pressure_vohralik`
 # slower.
-@njit
+# NOTE Disable numba to make sure nothing is weirdly optimized.
+# @njit
 def compute_pressure_coeffs(
     num_cells: int, dim: int, perm: np.ndarray, flux_coeffs: np.ndarray
 ) -> np.ndarray:
@@ -1255,7 +1238,8 @@ def compute_pressure_coeffs(
 
 # NOTE The loop could be parallelized with njit(parallel=True). However, on a small grid
 # (<16000 cells), the overhead made :meth:`reconstruct_pressure_vohralik` slower.
-@njit
+# NOTE Disable numba to make sure nothing is weirdly optimized.
+# @njit
 def linalg_solve_batch(A_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
     """Solve multiple small dense linear systems in batch mode.
 
@@ -1269,7 +1253,7 @@ def linalg_solve_batch(A_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
 
     """
     n, m, _ = A_batch.shape
-    solutions = np.empty((n, m), dtype=A_batch.dtype)
+    solutions = np.zeros((n, m), dtype=A_batch.dtype)
     for i in prange(n):
         solutions[i] = np.linalg.solve(A_batch[i], b_batch[i])
     return solutions
