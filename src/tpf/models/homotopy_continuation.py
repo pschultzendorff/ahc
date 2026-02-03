@@ -626,16 +626,16 @@ class SolutionStrategyHC(
         self._hc_is_diverged = value
 
     def prepare_simulation(self) -> None:
-        self.hc_toggle_fl = 0.0
-        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
         # This is mixed with more ``SolutionStrategy`` classes that implement
         # ``prepare_simulation``. We ignore the mypy error.
         super().prepare_simulation()  # type: ignore
 
         # Switch to goal cap. press. and rel. perms. to calculate
         # interpolants for global and complementary pressure.
+        self.hc_toggle_fl = 0.0
+        self.hc_toggle_ad.set_value(self.hc_toggle_fl)
 
-        # self.setup_glob_compl_pressure()
+        self.setup_glob_compl_pressure()
 
         # Switch back.
         self.hc_toggle_fl = 1.0
