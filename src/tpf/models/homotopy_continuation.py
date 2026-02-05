@@ -329,69 +329,33 @@ class EstimatesHCMixin(
 
         """
         # Retrieve flux w.r.t. goal rel. perm. and nonequilbirated flux coeffs.
-        fv_coeffs_new = pp.get_solution_values(
+        fv_coeffs = pp.get_solution_values(
             f"{flux_name}_RT0_coeffs", self.g_data, iterate_index=0
         )
-        fv_goal_const_laws_coeffs_new = pp.get_solution_values(
+        fv_goal_const_laws_coeffs = pp.get_solution_values(
             f"{flux_name}_wrt_goal_const_laws_RT0_coeffs", self.g_data, iterate_index=0
-        )
-        fv_coeffs_old = pp.get_solution_values(
-            f"{flux_name}_RT0_coeffs", self.g_data, time_step_index=0
-        )
-        fv_goal_const_laws_coeffs_old = pp.get_solution_values(
-            f"{flux_name}_wrt_goal_const_laws_RT0_coeffs",
-            self.g_data,
-            time_step_index=0,
         )
 
         def integrand(
             x: np.ndarray,
-            specifier: Literal["_norm", "_inner_product"],
         ) -> np.ndarray:
-            differences: list[np.ndarray] = []
-
-            for i, (fv_coeffs, fv_goal_const_laws_coeffs) in enumerate(
-                [
-                    (fv_coeffs_new, fv_goal_const_laws_coeffs_new),
-                    (fv_coeffs_old, fv_goal_const_laws_coeffs_old),
-                ]
-            ):
-                # The norm of the previous difference was already computed during the
-                # last time step.
-                if specifier == "_norm" and i == 1:
-                    break
-
-                coeffs_diff = fv_coeffs - fv_goal_const_laws_coeffs
-                flux_diff = self._evaluate_flux_at_points(
-                    coeffs_diff, x[..., 0], x[..., 1]
-                )
-
-                differences.append(flux_diff)
-
-            # Some trickery to either return the square of the norm or the inner
-            # product.
-            if specifier == "_norm":
-                return (differences[0] ** 2).sum(axis=-1)
-            elif specifier == "_inner_product":
-                return (differences[0] * differences[1]).sum(axis=-1)
+            coeffs_diff = fv_coeffs - fv_goal_const_laws_coeffs
+            flux_diff = self._evaluate_flux_at_points(coeffs_diff, x[..., 0], x[..., 1])
+            return (flux_diff**2).sum(axis=-1)
 
         # Integrate elementwise and store the result.
-        for specifier in ("_norm", "_inner_product"):
-            specifier = typing.cast(
-                Literal["_norm", "_inner_product"], specifier
-            )  # Satisfy mypy.
-            integral: Integral = self.quadrature_est.integrate(
-                functools.partial(integrand, specifier=specifier),
-                self.quadpy_elements,
-                recalc_points=False,
-                recalc_volumes=False,
-            )
-            pp.set_solution_values(
-                f"{flux_name}_C_estimator{specifier}",
-                integral.elementwise.squeeze(),
-                self.g_data,
-                iterate_index=0,
-            )
+        integral: Integral = self.quadrature_est.integrate(
+            integrand,
+            self.quadpy_elements,
+            recalc_points=False,
+            recalc_volumes=False,
+        )
+        pp.set_solution_values(
+            f"{flux_name}_C_estimator",
+            integral.elementwise.squeeze(),
+            self.g_data,
+            iterate_index=0,
+        )
 
     def local_lin_est(self, flux_name: FLUX_NAME) -> None:
         """
@@ -540,23 +504,14 @@ class EstimatesHCMixin(
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             # Calculate local estimators.
             self.local_hc_est(flux_name)
-
-            norm_key = f"{flux_name}_C_estimator_norm"
-            inner_key = f"{flux_name}_C_estimator_inner_product"
-
-            # Load local spatial integrals from current and previous time step and
-            # combined inner-product.
-            new = pp.get_solution_values(norm_key, self.g_data, iterate_index=0)
-            inner = pp.get_solution_values(inner_key, self.g_data, iterate_index=0)
-            old = pp.get_solution_values(norm_key, self.g_data, time_step_index=0)
-
-            # Estimate time integral with quadrature rule for linear functions.
-            # NOTE The stored values are already squared.
-            estimators.append(self.time_manager.dt / 3 * (new + inner + old).sum())
-
-            assert estimators[-1] >= 0, (
-                "Temporal integral of HC error estimate is negative."
+            local_integral: np.ndarray = pp.get_solution_values(
+                f"{flux_name}_C_estimator", self.g_data, iterate_index=0
             )
+
+            # NOTE The stored values are squared, hence we do not need to square here.
+            global_integral: float = local_integral.sum()
+            # Integrate in time by multiplying constant value with time step size.
+            estimators.append(self.time_manager.dt * global_integral)
 
         # Sum estimators for both equations.
         est: float = sum(estimators) ** (1 / 2)
@@ -692,7 +647,7 @@ class SolutionStrategyHC(
         # Check :meth:`DataSavingHC._data_to_export`.
         for flux_name, estimator_name in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
-            ["C_estimator_norm", "L_estimator"],
+            ["C_estimator", "L_estimator"],
         ):
             pp.set_solution_values(
                 f"{flux_name}_{estimator_name}",
@@ -775,7 +730,7 @@ class SolutionStrategyHC(
                 "F_estimator_old",
                 "D_estimator_norm",
                 "T_estimator",
-                "C_estimator_norm",
+                "C_estimator",
                 "L_estimator",
                 "energy_norm",
                 "RT0_coeffs",
@@ -1156,7 +1111,7 @@ class SolutionStrategyHC(
                 "F_estimator_old",
                 "D_estimator_norm",
                 "T_estimator",
-                "C_estimator_norm",
+                "C_estimator",
                 "L_estimator",
                 "energy_norm",
                 "RT0_coeffs",
@@ -1213,7 +1168,7 @@ class DataSavingHC(DataSavingEst):
         )
         for flux_name, estimator_name in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
-            ["T_estimator", "C_estimator_norm", "L_estimator"],
+            ["T_estimator", "C_estimator", "L_estimator"],
         ):
             try:
                 data.append(
