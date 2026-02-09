@@ -5,6 +5,7 @@ from collections import defaultdict
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import LogFormatter, LogLocator, NullFormatter
 from run import default_time_manager_params
 from run_all_layers import generate_configs
 
@@ -112,9 +113,10 @@ def plot_statistics(
                 )
         else:
             for i, solver_data in enumerate(data_list):
-                # Hide failed time steps.
+                # Hide the graph at failed timesteps.
                 solver_data = np.asarray(solver_data, dtype=np.float32)
-                solver_data[solver_data == 0] = np.nan
+                failed = solver_data == 0
+                solver_data[failed] = np.nan
 
                 ax.plot(
                     layer_indices,
@@ -123,6 +125,22 @@ def plot_statistics(
                     color=colors[i % len(colors)],
                     linestyle=linestyles[i % len(linestyles)],
                     linewidth=2,
+                )
+
+                # Interpolate y-position for failed points.
+                y_interp = np.interp(
+                    np.asarray(layer_indices)[failed],
+                    np.asarray(layer_indices)[~failed],
+                    solver_data[~failed],
+                )
+                # Mark failed runs explicitly.
+                ax.plot(
+                    np.asarray(layer_indices)[failed],
+                    y_interp,
+                    linestyle="none",
+                    marker="$!$",
+                    markersize=16,
+                    color=colors[i % len(colors)],
                 )
 
         # Mark upper and lower layers.
@@ -149,10 +167,14 @@ def plot_statistics(
         )
 
         ax.set_yscale("log")
-        # Ignore Pylance complaining about `ticker` not being in `matplotlib`.
-        ax.yaxis.set_major_formatter(matplotlib.ticker.LogFormatter())  # type: ignore
+
+        ax.yaxis.set_major_locator(LogLocator(base=10))
+        ax.yaxis.set_major_formatter(LogFormatter(base=10))
+        ax.yaxis.set_minor_locator(LogLocator(base=10, subs="auto"))
+        ax.yaxis.set_minor_formatter(NullFormatter())
+
         ax.tick_params(axis="both", which="major", labelsize=14)
-        ax.tick_params(axis="both", which="minor", labelsize=12)
+
         ax.set_xlabel("SPE10 layer", fontsize=16, fontweight="bold")
 
         if data_list is num_iterations:

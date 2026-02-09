@@ -1,42 +1,4 @@
-r"""Statistical analysis of nonlinear convergence on all layers of the SPE10, case 2A.
-
-The following solvers are employed:
-- Adaptive homotopy continuation (AHC) with Newton
-- Homotopy continuation (HC) with Newton
-- Adaptive Newton
-- Adaptive Newton with Appleyard chopping
-
-
-We loosely follow the setup of Wang and Tchelepi (2013) to test the homotopy
-continuation. The considered model is similar to the heterogeneous 3D models in the
-article (section 4.6.4), but on a 2D domain for now.
-
-X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport in
-   heterogeneous porous media,” Journal of Computational Physics, vol. 253, pp.
-   114–137, Nov. 2013, doi: 10.1016/j.jcp.2013.06.041.
-
-Model description:
-- 1200x2200 ft domain, single layers of SPE10, case 2A.
-- Constant water injection in the center: 87.5 m^3/day
-- Oil production at the four corners: 4000 psi bhp
-    - This is simulated by prescribing the bottom hole pressure and saturation (residual
-      oil saturation) in the corner cells. We do NOT use a well model.
-- Simulation time: 10 days
-- Solid properties:
-    - Porosity: Uppermost layer of the SPE10, case 2A.
-    - Permeability: Uppermost layer of the SPE10, case 2A.
-- Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.2.
-    - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
-      Residual saturation is 0.2.
-- Initial values:
-    - Saturation: 0.3
-- Rel. perm. models:
-    - Brooks-Corey
-- Capillary pressure model:
-    - Brooks-Corey, entry pressure 50 Pa.
-
-"""
+"""Run layers 53-69 of SPE10 model (complex lower layers)."""
 
 import os
 import pathlib
@@ -79,7 +41,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     configs = []
 
-    for spe10_layer in range(85):
+    for spe10_layer in range(69, 85):
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             folder_name = (
                 results_dir

@@ -9,6 +9,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 import seaborn as sns
+from matplotlib.ticker import (
+    FuncFormatter,
+    LogFormatter,
+    LogLocator,
+    MaxNLocator,
+    NullFormatter,
+)
 from tpf.numerics.nonlinear.hc_solver import HCSolver
 from tpf.utils.constants_and_typing import FEET
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
@@ -477,6 +484,7 @@ def plot_estimators(
     stats: SimulationStatistics,
     title: str | None = None,
     combine_disc_est: bool = False,
+    **kwargs,
 ) -> plt.Figure:
     """Create a plot showing the evolution of different error estimators over time.
 
@@ -504,6 +512,8 @@ def plot_estimators(
             stats.lin_estimator,
         )
     ):
+        if i > 30:
+            break
         if uses_hc:
             for j, lin_est_i in enumerate(lin_est):
                 # Plot NL est for each HC iteration.
@@ -513,10 +523,10 @@ def plot_estimators(
                     ),
                     lin_est_i,
                     "v-",
-                    color="green",
-                    markersize=4,
+                    color="orange",
+                    markersize=kwargs.get("marker_size", 4),
                     fillstyle="none",
-                    markerfacecolor="green",
+                    markerfacecolor="orange",
                     label=r"$\eta_\mathrm{lin}$" if i == 0 else "",
                 )
                 # Plot betas on the second y-axis
@@ -529,7 +539,7 @@ def plot_estimators(
                     linestyle="-",
                     color="black",
                     marker="s",
-                    markersize=4,
+                    markersize=kwargs.get("marker_size", 4),
                     alpha=0.7,
                     label=r"$\beta$" if i == 0 else "",
                 )
@@ -543,10 +553,10 @@ def plot_estimators(
                 range(tot_nl_iterations, tot_nl_iterations + len(lin_est)),
                 lin_est,
                 "o-",
-                color="green",
-                markersize=4,
+                color="orange",
+                markersize=kwargs.get("marker_size", 4),
                 fillstyle="none",
-                markerfacecolor="green",
+                markerfacecolor="orange",
                 label=r"$\eta_\mathrm{lin}$" if i == 0 else "",
             )
 
@@ -558,10 +568,10 @@ def plot_estimators(
                 range(tot_nl_iterations, tot_nl_iterations + len(hc_est_flat)),
                 hc_est_flat,
                 "^-",
-                markersize=4,
-                color="orange",
+                markersize=kwargs.get("marker_size", 4),
+                color="blue",
                 fillstyle="none",
-                markerfacecolor="orange",
+                markerfacecolor="blue",
                 label=r"$\eta_\mathrm{HC}$" if i == 0 else "",
             )
 
@@ -573,10 +583,10 @@ def plot_estimators(
                 range(tot_nl_iterations, tot_nl_iterations + len(disc_est_flat)),
                 disc_est_flat,
                 "o-",
-                color="goldenrod",
-                markersize=4,
+                color="red",
+                markersize=kwargs.get("marker_size", 4),
                 fillstyle="none",
-                markerfacecolor="goldenrod",
+                markerfacecolor="red",
                 label=r"$\eta_\mathrm{discr}$" if i == 0 else "",
             )
         else:
@@ -584,7 +594,7 @@ def plot_estimators(
                 range(tot_nl_iterations, tot_nl_iterations + len(spat_est_flat)),
                 spat_est_flat,
                 "bo-",
-                markersize=4,
+                markersize=kwargs.get("marker_size", 4),
                 fillstyle="none",
                 markerfacecolor="blue",
                 label=r"$\eta_{sp}$" if i == 0 else "",
@@ -593,7 +603,7 @@ def plot_estimators(
                 range(tot_nl_iterations, tot_nl_iterations + len(temp_est_flat)),
                 temp_est_flat,
                 "rv-",
-                markersize=4,
+                markersize=kwargs.get("marker_size", 4),
                 fillstyle="none",
                 label=r"$\eta_{\mathrm{temp}}$" if i == 0 else "",
             )
@@ -611,31 +621,25 @@ def plot_estimators(
                 alpha=0.5,
             )
 
-    # Set y scale to log
+    # Format axes, labels, and title.
     ax.set_yscale("log")
+
+    # On the x-axis use integer ticks only with sensible density.
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10, prune=None))
+    ax.tick_params(axis="both", which="major", labelsize=12)
+    ax.set_xlabel("Nonlinear iteration", fontsize=14, fontweight="bold")
+    ax.set_ylabel("Error estimate", fontsize=14, fontweight="bold")
+
     if uses_hc:
         ax2.set_yscale("log")
         ax2.set_ylim(ax.get_ylim())
-
-    # Add labels and title
-    # Set ticks to integers only
-    ax.set_xticks(range(0, tot_nl_iterations + 1, max(1, tot_nl_iterations // 10)))
-    ax.tick_params(axis="both", labelsize=12)
-    ax.set_xlabel(
-        "Nonlinear iteration",
-        fontsize=14,
-        fontweight="bold",
-    )
-    ax.set_ylabel(
-        "Error estimate",
-        fontsize=14,
-        fontweight="bold",
-    )
-
-    if uses_hc:
-        ax2.tick_params(axis="y", labelcolor="black")
-        ax2.set_ylabel(r"$\beta$ values", color="black", fontsize=14, fontweight="bold")
-        # Disable grid for secondary axis.
+        ax2.tick_params(axis="y", labelsize=12, labelcolor="black")
+        ax2.set_ylabel(
+            r"$\beta$ values",
+            fontsize=14,
+            fontweight="bold",
+            color="black",
+        )
         ax2.grid(False)
 
     if title is None:
@@ -805,9 +809,36 @@ def plot_convergence(
         fillstyle="none",
     )
 
-    # Set y scale to log
-    ax.set_yscale("log")
+    # Format axes, labels, and title.
     ax.set_xscale("log")
+    ax.set_yscale("log")
+
+    # Major ticks at decades.
+    ax.xaxis.set_major_locator(LogLocator(base=10))
+    ax.yaxis.set_major_locator(LogLocator(base=10))
+
+    ax.xaxis.set_major_formatter(LogFormatter(base=10))
+    ax.yaxis.set_major_formatter(LogFormatter(base=10))
+
+    # Minor ticks at all log subdivisions (2–9)
+    ax.xaxis.set_minor_locator(LogLocator(base=10, subs=list(range(2, 10))))
+    ax.yaxis.set_minor_locator(LogLocator(base=10, subs=list(range(2, 10))))
+
+    def selective_minor_formatter(val, pos):
+        if val <= 0:
+            return ""
+        exp = np.log10(val)
+        k = np.floor(exp)
+        mantissa = val / 10**k
+        if np.isclose(mantissa, 2.0) or np.isclose(mantissa, 5.0):
+            return f"{val:g}"
+        return ""
+
+    ax.xaxis.set_minor_formatter(FuncFormatter(selective_minor_formatter))
+    ax.yaxis.set_minor_formatter(FuncFormatter(selective_minor_formatter))
+
+    ax.tick_params(axis="both", which="major", labelsize=12)
+    ax.tick_params(axis="both", which="minor", labelsize=10)
 
     if parameter_name == "num_grid_cells":
         x_label = "Number of Grid Cells"
@@ -817,8 +848,7 @@ def plot_convergence(
         x_label = "Time Step Size (s)"
         y_label = r"$\eta_{\mathrm{temp}}$"
         title = "Convergence of Temporal Error Estimator"
-    # Add labels and title.
-    ax.tick_params(axis="both", labelsize=12)
+
     ax.set_xlabel(x_label, fontsize=14, fontweight="bold")
     ax.set_ylabel(y_label, fontsize=14, fontweight="bold")
     ax.set_title(title, fontsize=16, fontweight="bold")
