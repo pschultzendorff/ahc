@@ -15,7 +15,7 @@ doi: 10.1007/s10596-013-9356-0.]
 
 import itertools
 import logging
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import porepy as pp
@@ -219,6 +219,19 @@ class ErrorEstimateANewtonMixin(
             estimators.append(self.time_manager.dt / 3.0 * global_integral)
         # Sum estimators for both equations.
         est: float = sum(estimators) ** (1 / 2)
+
+        # If an interpolated temporal estimator is used, project the temporal estimator
+        # onto the original time step length (before cutting). The temporal convergence
+        # is assumed to be sublinear in the time step length.
+        if self.params.get("interpolate_temp_estimator_after_cutting", False):
+            if self.original_dt is not None:
+                scaling = (self.original_dt / self.time_manager.dt) ** (0.75)
+                est *= scaling
+                logger.info(
+                    "Projected temporal estimator onto original time step length"
+                    + f" with scaling factor {scaling:.2f}."
+                )
+
         logger.info(f"Global temporal discretization error estimator: {est}")
         return est
 
@@ -267,6 +280,14 @@ class ErrorEstimateANewtonMixin(
 class SolutionStrategyANewtonMixin(
     AdaptiveNewtonProtocol, EstimatesProtocol, TPFProtocol
 ):
+    def __init__(self, params=None) -> None:
+        super().__init__(params=params)  # type: ignore
+
+        self.original_dt: Optional[float] = None
+        """Original dt before time step cutting. If None, the time step was not cut."""
+        self.original_time: float = self.time_manager.time
+        """Original time before time step cutting."""
+
     def set_initial_estimators(self) -> None:
         """Initialize iterate and time step values for additional error estimators."""
         # In ``EstimatesProtocol``, this method is abstract, which mypy complains about.
@@ -282,6 +303,17 @@ class SolutionStrategyANewtonMixin(
                 time_step_index=0,
                 iterate_index=0,
             )
+
+    def before_nonlinear_loop(self) -> None:
+        """Set initial values for the error estimators."""
+        super().before_newton_loop()  # type: ignore
+
+        # Reset ``self.original_dt`` if ``self.original_time + self.original_dt`` has
+        # been reached.
+        if self.original_dt is not None:
+            if self.time_manager.time >= self.original_time + self.original_dt:
+                self.original_dt = None
+                self.original_time = self.time_manager.time
 
     def check_convergence(
         self,
@@ -360,6 +392,29 @@ class SolutionStrategyANewtonMixin(
             pp.set_solution_values(
                 f"{flux_name}_{estimator_name}", flux_values, self.g_data, hc_index=0
             )
+
+    def after_nonlinear_failure(self) -> None:
+        self.convergence_status = False
+        self.save_data_time_step()
+
+        if self.time_manager.is_constant:
+            # We cannot decrease the constant time step.
+            raise ValueError("HC iterations did not converge.")
+        else:
+            # Store ``self.original_dt`` if the time step is going to be cut and hadn't
+            # been cut before.
+            if self.original_dt is None:
+                self.original_dt = self.time_manager.dt
+                self.original_time = self.time_manager.time
+
+            # Update the time step magnitude if the dynamic scheme is used.
+            # Note: It will also raise a ValueError if the minimal time step is reached.
+            self.time_manager.compute_time_step(recompute_solution=True)
+
+            # Reset the iterate values. This ensures that the initial guess for an
+            # unknown time step equals the known time step.
+            prev_solution = self.equation_system.get_variable_values(time_step_index=0)
+            self.equation_system.set_variable_values(prev_solution, iterate_index=0)
 
 
 class TwoPhaseFlowANewton(

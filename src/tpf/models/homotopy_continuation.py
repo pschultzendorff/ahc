@@ -2,7 +2,7 @@ import functools
 import itertools
 import logging
 import typing
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import numpy as np
 import porepy as pp
@@ -478,6 +478,19 @@ class EstimatesHCMixin(
             estimators.append(self.time_manager.dt / 3.0 * global_integral)
         # Sum estimators for both fluxes.
         est: float = sum(estimators) ** (1 / 2)
+
+        # If an interpolated temporal estimator is used, project the temporal estimator
+        # onto the original time step length (before cutting). The temporal convergence
+        # is assumed to be sublinear in the time step length.
+        if self.params.get("interpolate_temp_estimator_after_cutting", False):
+            if self.original_dt is not None:
+                scaling = (self.original_dt / self.time_manager.dt) ** (0.75)
+                est *= scaling
+                logger.info(
+                    "Projected temporal estimator onto original time step length"
+                    + f" with scaling factor {scaling:.2f}."
+                )
+
         logger.info(f"Global temporal discretization error estimator: {est}")
         return est
 
@@ -554,6 +567,11 @@ class SolutionStrategyHC(
         super().__init__(params=params)
         self.hc_toggle_fl: float = 1.0
         self.hc_toggle_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
+
+        self.original_dt: Optional[float] = None
+        """Original dt before time step cutting. If None, the time step was not cut."""
+        self.original_time: float = self.time_manager.time
+        """Original time before time step cutting."""
 
     @property
     def hc_indices(self) -> list[int]:
@@ -660,6 +678,13 @@ class SolutionStrategyHC(
     # region HC LOOP
     def before_hc_loop(self) -> None:
         """Reset HC parameter and residuals."""
+        # Reset ``self.original_dt`` if ``self.original_time + self.original_dt`` has
+        # been reached.
+        if self.original_dt is not None:
+            if self.time_manager.time >= self.original_time + self.original_dt:
+                self.original_dt = None
+                self.original_time = self.time_manager.time
+
         # Reset lambda and decay.
         self.nonlinear_solver_statistics.hc_reset()
         self.hc_decay = self.hc_init_decay
@@ -761,6 +786,12 @@ class SolutionStrategyHC(
             # We cannot decrease the constant time step.
             raise ValueError("HC iterations did not converge.")
         else:
+            # Store ``self.original_dt`` if the time step is going to be cut and hadn't
+            # been cut before.
+            if self.original_dt is None:
+                self.original_dt = self.time_manager.dt
+                self.original_time = self.time_manager.time
+
             # Update the time step magnitude if the dynamic scheme is used.
             # Note: It will also raise a ValueError if the minimal time step is reached.
             self.time_manager.compute_time_step(recompute_solution=True)

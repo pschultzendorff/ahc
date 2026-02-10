@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 from numpy.typing import ArrayLike
 
@@ -395,6 +395,11 @@ else:
         hc_decay_recomp_max: int
         hc_decay_recomp_counter: int
 
+        original_dt: Optional[float]
+        """Original dt before time step cutting. If None, the time step was not cut."""
+        original_time: float
+        """Original time before time step cutting."""
+
         def rel_perm(
             self, saturation_w: pp.ad.Operator, phase: FluidPhase
         ) -> pp.ad.Operator:
@@ -678,6 +683,11 @@ else:
 
     class AdaptiveNewtonProtocol(Protocol):
         nonlinear_solver_statistics: SolverStatisticsANewton
+
+        original_dt: Optional[float]
+        """Original dt before time step cutting. If None, the time step was not cut."""
+        original_time: float
+        """Original time before time step cutting."""
 
         def global_spatial_est(self) -> float:
             """Estimate for global spatial discretization error."""

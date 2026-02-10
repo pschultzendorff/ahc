@@ -113,6 +113,7 @@ def setup_params(
             "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
             "nl_error_ratio": 0.1,
             "hc_nl_convergence_tol": 1e2,
+            "interpolate_temp_estimator_after_cutting": True,
             # Nonlinear solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -135,6 +136,7 @@ def setup_params(
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
             "nl_adaptive_convergence_tol": 1e2,
+            "interpolate_temp_estimator_after_cutting": True,
             # Further parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -150,6 +152,7 @@ def setup_params(
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
             "nl_adaptive_convergence_tol": 1e2,
+            "interpolate_temp_estimator_after_cutting": True,
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,

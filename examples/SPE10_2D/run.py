@@ -327,9 +327,72 @@ def generate_configs() -> list[SimulationConfig]:
 
     # region VISCOUS
 
-    # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3 with linear capillary
-    # pressure.
-    for init_s in [0.2, 0.3]:
+    if True:
+        # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3 with linear capillary
+        # pressure.
+        for init_s in [0.2, 0.3]:
+            for rp_model_name, rp_model in rp_models.items():
+                if rp_model_name == "linear":
+                    continue
+                for solver_name, adaptive_error_ratio in solvers_and_ratios:
+                    folder_name = (
+                        results_dir
+                        / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                        / "viscous"
+                        / "varying_rp"
+                        / f"init_s_{init_s}"
+                        / rp_model_name
+                    )
+                    configs.append(
+                        SimulationConfig(
+                            file_name=rp_model_name,
+                            folder_name=folder_name,
+                            solver_name=solver_name,
+                            adaptive_error_ratio=adaptive_error_ratio,
+                            init_s=init_s,
+                            rp_model_1=rp_models["linear"],
+                            rp_model_2=rp_model,
+                            cp_model_1=cp_models["None"],
+                            cp_model_2=cp_models["linear"],
+                            spe10_layer=spe10_layer,
+                        )
+                    )
+
+    if True:
+        # Varying init_s for the more challenging Brooks-Corey rel. perm. model.
+        for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
+                file_name = f"init_s_{init_s:.2f}"
+                folder_name = (
+                    results_dir
+                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                    / "viscous"
+                    / "varying_init_s"
+                    / file_name
+                )
+                configs.append(
+                    SimulationConfig(
+                        file_name=file_name,
+                        folder_name=folder_name,
+                        solver_name=solver_name,
+                        adaptive_error_ratio=adaptive_error_ratio,
+                        init_s=init_s,
+                        rp_model_1=rp_models["linear"],
+                        rp_model_2=rp_models["Brooks-Corey_nb_2"],
+                        cp_model_1=cp_models["None"],
+                        cp_model_2=cp_models["linear"],
+                        spe10_layer=spe10_layer,
+                    )
+                )
+
+    # endregion
+
+    # region VISCOUS_AND_CAPILLARY
+    # NOTE HC starts with a linear rel. perm. model and zero capillary pressure.
+
+    if True:
+        # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
+        # capillary pressure.
         for rp_model_name, rp_model in rp_models.items():
             if rp_model_name == "linear":
                 continue
@@ -337,10 +400,15 @@ def generate_configs() -> list[SimulationConfig]:
                 folder_name = (
                     results_dir
                     / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                    / "viscous"
+                    / "viscous_and_capillary"
                     / "varying_rp"
-                    / f"init_s_{init_s}"
+                    / f"init_s_{0.3}"
                     / rp_model_name
+                )
+                cp_model_2 = (
+                    cp_models["Brooks-Corey_nb_2"]
+                    if rp_model_name == "Brooks-Corey_nb_2"
+                    else cp_models["Brooks-Corey_nb_4"]
                 )
                 configs.append(
                     SimulationConfig(
@@ -348,132 +416,70 @@ def generate_configs() -> list[SimulationConfig]:
                         folder_name=folder_name,
                         solver_name=solver_name,
                         adaptive_error_ratio=adaptive_error_ratio,
-                        init_s=init_s,
+                        init_s=0.3,
                         rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
                         cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["linear"],
+                        cp_model_2=cp_model_2,
                         spe10_layer=spe10_layer,
                     )
                 )
 
-    # # Varying init_s for the more challenging Brooks-Corey rel. perm. model.
-    for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
-        for solver_name, adaptive_error_ratio in solvers_and_ratios:
-            file_name = f"init_s_{init_s:.2f}"
-            folder_name = (
-                results_dir
-                / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / "viscous"
-                / "varying_init_s"
-                / file_name
-            )
-            configs.append(
-                SimulationConfig(
-                    file_name=file_name,
-                    folder_name=folder_name,
-                    solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
-                    init_s=init_s,
-                    rp_model_1=rp_models["linear"],
-                    rp_model_2=rp_models["Brooks-Corey_nb_2"],
-                    cp_model_1=cp_models["None"],
-                    cp_model_2=cp_models["linear"],
-                    spe10_layer=spe10_layer,
+    if True:
+        # Varying init_s for the less challenging Brooks-Corey model.
+        for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
+                file_name = f"init_s_{init_s:.2f}"
+                folder_name = (
+                    results_dir
+                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                    / "viscous_and_capillary"
+                    / "varying_init_s"
+                    / file_name
                 )
-            )
-
-    # endregion
-
-    # region VISCOUS_AND_CAPILLARY
-    # NOTE HC starts with a linear rel. perm. model and zero capillary pressure.
-
-    # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
-    # capillary pressure.
-    for rp_model_name, rp_model in rp_models.items():
-        if rp_model_name == "linear":
-            continue
-        for solver_name, adaptive_error_ratio in solvers_and_ratios:
-            folder_name = (
-                results_dir
-                / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / "viscous_and_capillary"
-                / "varying_rp"
-                / f"init_s_{0.3}"
-                / rp_model_name
-            )
-            cp_model_2 = (
-                cp_models["Brooks-Corey_nb_2"]
-                if rp_model_name == "Brooks-Corey_nb_2"
-                else cp_models["Brooks-Corey_nb_4"]
-            )
-            configs.append(
-                SimulationConfig(
-                    file_name=rp_model_name,
-                    folder_name=folder_name,
-                    solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
-                    init_s=0.3,
-                    rp_model_1=rp_models["linear"],
-                    rp_model_2=rp_model,
-                    cp_model_1=cp_models["None"],
-                    cp_model_2=cp_model_2,
-                    spe10_layer=spe10_layer,
+                configs.append(
+                    SimulationConfig(
+                        file_name=file_name,
+                        folder_name=folder_name,
+                        solver_name=solver_name,
+                        adaptive_error_ratio=adaptive_error_ratio,
+                        init_s=init_s,
+                        rp_model_1=rp_models["linear"],
+                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                        cp_model_1=cp_models["None"],
+                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                        spe10_layer=spe10_layer,
+                    )
                 )
-            )
-    # # Varying init_s for the less challenging Brooks-Corey model.
-    for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
-        for solver_name, adaptive_error_ratio in solvers_and_ratios:
-            file_name = f"init_s_{init_s:.2f}"
-            folder_name = (
-                results_dir
-                / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / "viscous_and_capillary"
-                / "varying_init_s"
-                / file_name
-            )
-            configs.append(
-                SimulationConfig(
-                    file_name=file_name,
-                    folder_name=folder_name,
-                    solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
-                    init_s=init_s,
-                    rp_model_1=rp_models["linear"],
-                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                    cp_model_1=cp_models["None"],
-                    cp_model_2=cp_model_2,
-                    spe10_layer=spe10_layer,
-                )
-            )
 
-    # Less challenging Brooks-Corey cap. pressure with different entry pressures.
-    for entry_pressure in [100, 200, 300]:
-        for solver_name, adaptive_error_ratio in solvers_and_ratios:
-            file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
-            folder_name = (
-                results_dir
-                / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / "viscous_and_capillary"
-                / "varying_entry_pressure"
-                / file_name
-            )
-            cp_model_2 = cp_models["Brooks-Corey_nb_4"].copy()
-            cp_model_2["entry_pressure"] = entry_pressure * pp.PASCAL
-            configs.append(
-                SimulationConfig(
-                    file_name=file_name,
-                    folder_name=folder_name,
-                    solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
-                    init_s=0.3,
-                    rp_model_1=rp_models["linear"],
-                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                    cp_model_1=cp_models["None"],
-                    cp_model_2=cp_model_2,
-                    spe10_layer=spe10_layer,
+    if True:
+        # Less challenging Brooks-Corey cap. pressure with different entry pressures.
+        for entry_pressure in [100, 200, 300]:
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
+                file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
+                folder_name = (
+                    results_dir
+                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                    / "viscous_and_capillary"
+                    / "varying_entry_pressure"
+                    / file_name
                 )
-            )
+                cp_model_2 = cp_models["Brooks-Corey_nb_4"].copy()
+                cp_model_2["entry_pressure"] = entry_pressure * pp.PASCAL
+                configs.append(
+                    SimulationConfig(
+                        file_name=file_name,
+                        folder_name=folder_name,
+                        solver_name=solver_name,
+                        adaptive_error_ratio=adaptive_error_ratio,
+                        init_s=0.3,
+                        rp_model_1=rp_models["linear"],
+                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                        cp_model_1=cp_models["None"],
+                        cp_model_2=cp_model_2,
+                        spe10_layer=spe10_layer,
+                    )
+                )
     # endregion
 
     return configs
