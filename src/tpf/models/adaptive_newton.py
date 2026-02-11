@@ -306,7 +306,7 @@ class SolutionStrategyANewtonMixin(
 
     def before_nonlinear_loop(self) -> None:
         """Set initial values for the error estimators."""
-        super().before_newton_loop()  # type: ignore
+        super().before_nonlinear_loop()  # type: ignore
 
         # Reset ``self.original_dt`` if ``self.original_time + self.original_dt`` has
         # been reached.
