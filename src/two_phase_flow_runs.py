@@ -1,0 +1,253 @@
+"""Some test runs with the ``two_phase_flow_model.TwoPhaseFlow`` class. If not noted
+otherwise, the runs were performed on a 2D grid with 20x20 cells.
+"""
+import os
+from typing import Optional, Union
+
+import numpy as np
+
+import porepy as pp
+from porepy.models.run_models import run_time_dependent_model
+from porepy_adaptions.models.two_phase_flow_model import TwoPhaseFlow
+
+
+class TwoPhaseFlow_Dirichlet(TwoPhaseFlow):
+    def _bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
+        """Homogeneous Dirichlet conditions on all external boundaries."""
+        all_bf, *_ = self._domain_boundary_sides(g)
+        return pp.BoundaryCondition(g, all_bf, "dir")
+
+
+# Simple test run
+model = TwoPhaseFlow({"folder_name": os.path.join("two_phase_flow_runs", "simple")})
+# run_time_dependent_model(model, {})
+
+# Test run with wetting source
+class TwoPhaseFlow_WSource(TwoPhaseFlow):
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 1
+        return array
+
+
+model = TwoPhaseFlow_WSource(
+    {"folder_name": os.path.join("two_phase_flow_runs", "w_source_neu")}
+)
+run_time_dependent_model(model, {})
+
+
+class TwoPhaseFlow_WSource_Dir(TwoPhaseFlow_Dirichlet):
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 1
+        return array
+
+
+model = TwoPhaseFlow_WSource_Dir(
+    {"folder_name": os.path.join("two_phase_flow_runs", "w_source_dir")}
+)
+run_time_dependent_model(model, {})
+
+
+# Test run with non-wetting source
+class TwoPhaseFlow_NWSource(TwoPhaseFlow):
+    def _nw_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 1
+        return array
+
+
+model = TwoPhaseFlow_NWSource(
+    {"folder_name": os.path.join("two_phase_flow_runs", "nw_source_neu")}
+)
+run_time_dependent_model(model, {})
+
+
+class TwoPhaseFlow_NWSource_Dir(TwoPhaseFlow_Dirichlet):
+    def _nw_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 1
+        return array
+
+
+model = TwoPhaseFlow_NWSource_Dir(
+    {"folder_name": os.path.join("two_phase_flow_runs", "nw_source_dir")}
+)
+run_time_dependent_model(model, {})
+
+
+# Longer injection
+class TwoPhaseFlow_LongInj(TwoPhaseFlow_WSource):
+    def __init__(self, params: Optional[dict] = None) -> None:
+        super().__init__(params)
+        # Let the model run for a longer time
+        self._time_step: float = 0.2
+        self._schedule: np.ndarray = np.array([0, 40.0])
+
+
+model = TwoPhaseFlow_LongInj(
+    {"folder_name": os.path.join("two_phase_flow_runs", "long_inj_neu")}
+)
+run_time_dependent_model(model, {})
+
+
+class TwoPhaseFlow_LongInj_Dir(TwoPhaseFlow_WSource_Dir):
+    def __init__(self, params: Optional[dict] = None) -> None:
+        super().__init__(params)
+        # Let the model run for a longer time
+        self._time_step: float = 0.2
+        self._schedule: np.ndarray = np.array([0, 40.0])
+
+
+model = TwoPhaseFlow_LongInj_Dir(
+    {"folder_name": os.path.join("two_phase_flow_runs", "long_inj_dir")}
+)
+run_time_dependent_model(model, {})
+
+# Test run with extraction
+
+
+# Neumann conditions do not converge
+class TwoPhaseFlow_Ext(TwoPhaseFlow):
+    def __init__(self, params: Optional[dict] = None) -> None:
+        super().__init__(params)
+        # Let the model run for a longer time
+        self._time_step: float = 0.2
+        self._schedule: np.ndarray = np.array([0, 10.0])
+
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[309] = -1
+        return array
+
+
+model = TwoPhaseFlow_Ext(
+    {"folder_name": os.path.join("two_phase_flow_runs", "ext_neu")}
+)
+# run_time_dependent_model(model, {})
+
+
+class TwoPhaseFlow_Ext_Dir(TwoPhaseFlow_Dirichlet):
+    def __init__(self, params: Optional[dict] = None) -> None:
+        super().__init__(params)
+        # Let the model run for a longer time
+        self._time_step: float = 0.2
+        self._schedule: np.ndarray = np.array([0, 10.0])
+
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[309] = -1
+        return array
+
+
+model = TwoPhaseFlow_Ext_Dir(
+    {"folder_name": os.path.join("two_phase_flow_runs", "ext_dir")}
+)
+run_time_dependent_model(model, {})
+
+
+# Test run with injection and extraction at the same time
+class TwoPhaseFlow_InjExt(TwoPhaseFlow):
+    def __init__(self, params: Optional[dict] = None) -> None:
+        super().__init__(params)
+        # Let the model run for a longer time
+        self._time_step: float = 0.1
+        self._schedule: np.ndarray = np.array([0, 10.0])
+
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[109] = 1
+        array[309] = -1
+        return array
+
+
+model = TwoPhaseFlow_InjExt(
+    {"folder_name": os.path.join("two_phase_flow_runs", "inj_ext_neu")}
+)
+run_time_dependent_model(model, {})
+
+
+class TwoPhaseFlow_InjExt_Dir(TwoPhaseFlow_Dirichlet):
+    def __init__(self, params: Optional[dict] = None) -> None:
+        super().__init__(params)
+        # Let the model run for a longer time
+        self._time_step: float = 0.1
+        self._schedule: np.ndarray = np.array([0, 10.0])
+
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[109] = 1
+        array[309] = -1
+        return array
+
+
+model = TwoPhaseFlow_InjExt_Dir(
+    {"folder_name": os.path.join("two_phase_flow_runs", "inj_ext_dir")}
+)
+run_time_dependent_model(model, {})
+
+# Test run with more complicated geometry
+class TwoPhaseFlow_Geom(TwoPhaseFlow_WSource):
+    def _permeability(self, g: pp.Grid) -> np.ndarray:
+        """Low permeability regions in the upper and lower half, high permeability
+        region in the left half.
+        """
+        array: np.ndarray = super()._permeability(g)
+        array[309:311] = 0.01
+        array[109:111] = 0.01
+        array[204] = 10
+        array[205] = 10
+        return array
+
+
+model = TwoPhaseFlow_Geom(
+    {"folder_name": os.path.join("two_phase_flow_runs", "complex_geom")}
+)
+# run_time_dependent_model(model, {})
+
+# Test run on triangle grid
+class TwoPhaseFlow_TriangleGrid(TwoPhaseFlow):
+    def create_grid(self) -> None:
+        GRID_SIZE: int = 20
+        PHYS_SIZE: int = 2
+        cell_dims: np.ndarray = np.array(
+            [
+                GRID_SIZE,
+                GRID_SIZE,
+            ]
+        )
+        phys_dims: np.ndarray = np.array(
+            [
+                PHYS_SIZE,
+                PHYS_SIZE,
+            ]
+        )
+        g_cart: pp.CartGrid = pp.CartGrid(cell_dims, phys_dims)
+        g_tetra: pp.TetrahedralGrid = pp.TetrahedralGrid(g_cart.nodes)
+        g_tetra.compute_geometry()
+        self.mdg: pp.MixedDimensionalGrid = pp.meshing.subdomains_to_mdg([[g_cart]])
+        self.box: dict = pp.bounding_box.from_points(
+            np.array(
+                [
+                    [
+                        0,
+                        0,
+                    ],
+                    [
+                        GRID_SIZE,
+                        GRID_SIZE,
+                    ],
+                ]
+            ).T
+        )
+
+    def _w_source(self, g: pp.Grid) -> np.ndarray:
+        array: np.ndarray = super()._w_source(g)
+        array[209] = 1
+        return array
+
+
+model = TwoPhaseFlow_TriangleGrid(
+    {"folder_name": os.path.join("two_phase_flow_runs", "triangle_grid")}
+)
+# run_time_dependent_model(model, {})

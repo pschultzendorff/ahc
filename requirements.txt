@@ -1,0 +1,16 @@
+future
+#gmsh
+matplotlib
+#meshio >= 5.0
+networkx
+numba >= 0.56.3
+numpy
+requests
+scipy
+shapely
+shapely[vectorized]
+six
+sympy
+typing_extensions
+pytorch
+#porepy
