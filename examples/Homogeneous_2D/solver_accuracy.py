@@ -6,12 +6,12 @@ baseline. Next, we run the abovementioned solvers and compare the accuracy durin
 nonlinear iterations.
 
 Model description:
-- 600x1100 ft domain (we just take a quarter of the original SPE10 domain)
+- 1200x2200 ft domain
 - Constant water injection in the center: 87.5 m^3/day
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
       oil saturation) in the corner cells. We do NOT use a well model.
-- Simulation time: 10 days
+- Simulation time: 30 days
 - Solid properties:
     - Porosity: Homogeneous 0.3.
     - Permeability: Homogenous; 1e-15 m^2.
@@ -20,7 +20,8 @@ Model description:
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
-    - Pressure: 6000 psi
+- Initial values:
+    - Pressure: 6000 psi (initial guess for Newton, no influence on the solution)
     - Saturation: residual water saturation (0.2) or 0.3.
 - Rel. perm. models:
     - linear
@@ -51,7 +52,7 @@ from sklearn.preprocessing import StandardScaler
 from tpf.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
 from tpf.models.adaptive_newton import TwoPhaseFlowANewton
 from tpf.models.flow_and_transport import EquationsTPF
-from tpf.models.homotopy_continuation import TwoPhaseFlowAHC
+from tpf.models.homotopy_continuation import TwoPhaseFlowHC
 from tpf.models.protocol import TPFProtocol
 from tpf.numerics.nonlinear.hc_solver import HCSolver
 from tpf.utils.constants_and_typing import FEET
@@ -379,7 +380,7 @@ class HomogeneousSPE10Newton(
 ): ...
 
 
-class HomogeneousSPE10AHC(HomogeneousAndAccuracyMixin, SPE10Mixin, TwoPhaseFlowAHC): ...
+class HomogeneousSPE10AHC(HomogeneousAndAccuracyMixin, SPE10Mixin, TwoPhaseFlowHC): ...
 
 
 # endregion

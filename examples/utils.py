@@ -16,6 +16,7 @@ from matplotlib.ticker import (
     MaxNLocator,
     NullFormatter,
 )
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from tpf.numerics.nonlinear.hc_solver import HCSolver
 from tpf.utils.constants_and_typing import FEET
 from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
@@ -53,13 +54,15 @@ class SimulationConfig:
 
 
 def setup_params(
-    solver: str, adaptive_error_ratio: float | None
+    solver: str, adaptive_error_ratio: float | None, **kwargs
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Select correct solver and time manager parameters.
 
     Parameters:
         solver: The name of the solver ("AHC", "HC", "Newton", or "NewtonAppleyard").
         adaptive_error_ratio: The error ratio used for adaptive parameter settings.
+        kwargs: Additional keyword arguments, e.g., for extrapolation time error
+            estimator after time step cutting.
 
     Returns:
         A tuple ``(solver_params, time_manager_params)``, where ``solver_params``
@@ -113,7 +116,9 @@ def setup_params(
             "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
             "nl_error_ratio": 0.1,
             "hc_nl_convergence_tol": 1e2,
-            "interpolate_temp_estimator_after_cutting": True,
+            "extrapolate_temp_estimator_after_cutting": kwargs.get(
+                "extrapolate_temp_estimator_after_cutting", True
+            ),
             # Nonlinear solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -136,7 +141,9 @@ def setup_params(
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
             "nl_adaptive_convergence_tol": 1e2,
-            "interpolate_temp_estimator_after_cutting": True,
+            "extrapolate_temp_estimator_after_cutting": kwargs.get(
+                "extrapolate_temp_estimator_after_cutting", True
+            ),
             # Further parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
@@ -152,7 +159,9 @@ def setup_params(
             "nl_adaptive": True,
             "nl_error_ratio": adaptive_error_ratio,
             "nl_adaptive_convergence_tol": 1e2,
-            "interpolate_temp_estimator_after_cutting": True,
+            "extrapolate_temp_estimator_after_cutting": kwargs.get(
+                "extrapolate_temp_estimator_after_cutting", True
+            ),
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,
@@ -635,7 +644,9 @@ def plot_estimators(
 
     if uses_hc:
         ax2.set_yscale("log")
-        ax2.set_ylim(ax.get_ylim())
+        ax2.set_ylim(
+            0.8 * min((min(hc_step) for hc_step in stats.lambdas)), 1.1
+        )  # Set y-limits for better visibility of beta values.])
         ax2.tick_params(axis="y", labelsize=12, labelcolor="black")
         ax2.set_ylabel(
             r"$\beta$ values",
@@ -679,102 +690,6 @@ def plot_estimators(
     return fig
 
 
-# def plot_spatial_convergence(
-#     statistics: list[SimulationStatistics],
-#     ref_facs: list[float],
-#     title: str | None = None,
-#     combine_disc_est: bool = True,
-# ) -> plt.Figure:
-#     """Plot estimators for different mesh sizes.
-
-#     Returns:
-#         A matplotlib figure with the plotted estimators.
-
-#     """
-#     fig, ax = plt.subplots(figsize=(8, 6))
-
-#     cmap = plt.get_cmap("viridis")
-#     colors = [cmap(i) for i in np.linspace(0, 1, len(statistics))]
-
-#     for ref_fac, color, statistic in zip(ref_facs, colors, statistics):
-#         uses_hc: bool = len(statistic.hc_estimator) > 0
-
-#         tot_nl_iterations: int = 0
-#         tot_nl_iterations_fine: int = 0
-#         # Plot spatial estimator
-#         for i, (time, spat_est, temp_est, lin_est) in enumerate(
-#             zip(
-#                 statistic.time_steps,
-#                 statistic.spat_estimator,
-#                 statistic.temp_estimator,
-#                 statistic.lin_estimator,
-#             )
-#         ):
-#             if uses_hc:
-#                 hc_est_flat = flatten(statistic.hc_estimator[i])
-#                 spat_est_flat = flatten(spat_est)
-#                 temp_est_flat = flatten(temp_est)
-#             else:
-#                 spat_est_flat = spat_est
-#                 temp_est_flat = temp_est
-
-#             # Plot spatial and temporal estimators for the full time step.
-
-#             # Combine spatial and temporal estimators.
-#             disc_est_flat = np.array(spat_est_flat) + np.array(temp_est_flat)
-#             ax.plot(
-#                 range(tot_nl_iterations, tot_nl_iterations + len(disc_est_flat)),
-#                 disc_est_flat,
-#                 "o-",
-#                 color=color,
-#                 markersize=4,
-#                 fillstyle="none",
-#                 markerfacecolor=color,
-#                 label=rf"{ref_fac} $\eta_{{disc}}$" if i == 0 else "",
-#             )
-#             # Update number of nl iterations.
-#             tot_nl_iterations += len(spat_est_flat)
-
-#     # Set y scale to log
-#     ax.set_yscale("log")
-
-#     # Add labels and title
-#     ax.tick_params(axis="both", labelsize=12)
-#     ax.set_xlabel(
-#         "Nonlinear iteration",
-#         fontsize=14,
-#         fontweight="bold",
-#     )
-#     ax.set_ylabel(
-#         "Error estimate (log scale)",
-#         fontsize=14,
-#         fontweight="bold",
-#     )
-#     if title is None:
-#         title = "Spatial Convergence of Error Estimators"
-#     ax.set_title(
-#         title,
-#         fontsize=16,
-#         fontweight="bold",
-#     )
-
-#     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
-
-#     # Add legend
-#     handles, labels = ax.get_legend_handles_labels()
-#     by_label = dict(zip(labels, handles))
-#     ax.legend(
-#         by_label.values(),
-#         by_label.keys(),
-#         loc="best",
-#         ncol=2,
-#         prop={"size": 14, "weight": "bold"},
-#     )
-
-#     fig.tight_layout()
-#     return fig
-
-
 def plot_convergence(
     stats: list[SimulationStatistics],
     parameters: list[float],
@@ -804,17 +719,13 @@ def plot_convergence(
             else:
                 final_estimators.append(stat.temp_estimator[-1][-1])
 
-    ax.plot(
-        parameters,
-        final_estimators,
-        "o-",
-        markersize=4,
-        fillstyle="none",
-    )
+    # Sort by params to make the plot and reference lines clean.
+    params_np = np.asarray(parameters, dtype=float)
+    est_np = np.asarray(final_estimators, dtype=float)
 
-    # Format axes, labels, and title.
-    ax.set_xscale("log")
-    ax.set_yscale("log")
+    ax.loglog(params_np, est_np, "o-", markersize=4, linewidth=2, fillstyle="none")
+
+    # # Format axes, labels, and title.
 
     # Major ticks at decades.
     ax.xaxis.set_major_locator(LogLocator(base=10))
@@ -858,16 +769,43 @@ def plot_convergence(
 
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
 
-    # Add legend
-    # handles, labels = ax.get_legend_handles_labels()
-    # by_label = dict(zip(labels, handles))
-    # ax.legend(
-    #     by_label.values(),
-    #     by_label.keys(),
-    #     loc="best",
-    #     ncol=2,
-    #     prop={"size": 14, "weight": "bold"},
-    # )
+    # Add linear and quadratic reference lines on log-log scale.
+    if parameter_name == "num_grid_cells":
+        inset_loc = "lower left"
+        slope = -1.0  # Spatial estimator decreases with higher cell count.
+    elif parameter_name == "time_step_size":
+        inset_loc = "lower right"
+        slope = 1.0  # Temporal estimator increases with larger time step.
+
+    ax_ins = inset_axes(ax, width="30%", height="30%", loc=inset_loc, borderpad=2)
+
+    # Ensure slopes from the original axes are preserved in the inset.
+    ax_ins.set_aspect("equal", adjustable="box")
+
+    x_ref = np.array([1, 10])
+    y_linear = x_ref ** (slope * 1)  # Slope of -+1 (Linear)
+    y_quadratic = x_ref ** (slope * 2)  # Slope of -+2 (Quadratic)
+
+    ax_ins.loglog(x_ref, y_linear, color="gray", linestyle="--", lw=2)
+    ax_ins.loglog(x_ref, y_quadratic, color="gray", linestyle=":", lw=2)
+
+    # Clean up the inset: remove ticks to keep it purely as a visual slope guide.
+    ax_ins.set_xticks([])
+    ax_ins.set_yticks([])
+    ax_ins.set_xticklabels([])
+    ax_ins.set_yticklabels([])
+
+    # Get location for text on reference lines.
+    x_mid = np.sqrt(x_ref[0] * x_ref[1])
+    y_lin_mid = x_mid ** (slope * 1)
+    y_quad_mid = x_mid ** (slope * 2)
+
+    ax_ins.text(
+        x_mid, y_lin_mid, r"$\mathcal{O}(x^1)$", fontsize=14, ha="center", va="bottom"
+    )
+    ax_ins.text(
+        x_mid, y_quad_mid, r"$\mathcal{O}(x^2)$", fontsize=14, ha="center", va="bottom"
+    )
 
     fig.tight_layout()
     return fig

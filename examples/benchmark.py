@@ -9,21 +9,22 @@ X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport
    114–137, Nov. 2013, doi: 10.1016/j.jcp.2013.06.041.
 
 Model description:
-- 600x1100 ft domain (we just take a quarter of the original SPE10 domain)
+- 1200x2200 ft domain
 - Constant water injection in the center: 87.5 m^3/day
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
       oil saturation) in the corner cells. We do NOT use a well model.
-- Simulation time: 10 days
+- Simulation time: 30 days
 - Solid properties:
-    - Porosity: Uppermost layer of the SPE10, case 2A.
-    - Permeability: Uppermost layer of the SPE10, case 2A.
+    - Porosity: SPE10 case 2A, layer 55
+    - Permeability: SPE10 case 2A, layer 55
 - Fluid properties:
     - Water: pp.fluid_values.water. Residual saturation is 0.2.
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
-    - Pressure: 6000 psi
+- Initial values:
+    - Pressure: 6000 psi (initial guess for Newton, no influence on the solution)
     - Saturation: residual water saturation (0.2).
 - Rel. perm. models:
     - linear
