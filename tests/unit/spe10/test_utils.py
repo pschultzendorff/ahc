@@ -2,7 +2,7 @@ from typing import Literal
 
 import porepy as pp
 import pytest
-from tpf.derived_models.utils import position_cell_id, center_cell_id, corner_faces_id
+from tpf.derived_models.utils import center_cell_id, corner_faces_id, position_cell_id
 
 
 @pytest.fixture
@@ -20,14 +20,17 @@ def cartesian_grid_3d():
 
 
 @pytest.mark.parametrize(
-    "grid, x, y, sexpected_corners",
+    "grid, x, y, expected_corners",
     [
         ("cartesian_grid_2d", [0, 2, 6, 8]),
         ("cartesian_grid_3d", [0, 2, 6, 8, 18, 20, 24, 26]),
     ],
 )
-def test_cell_id_position(grid: Literal['cartesian_grid_2d'] | Literal['cartesian_grid_3d'], expected_corner: list[int]):
-    grid = 
+def test_cell_id_position(
+    grid: Literal["cartesian_grid_2d"] | Literal["cartesian_grid_3d"],
+    expected_corners: list[int],
+):
+    grid = None
     assert set(position_cell_id(grid)) == set(expected_corners)
 
 
@@ -38,5 +41,8 @@ def test_cell_id_position(grid: Literal['cartesian_grid_2d'] | Literal['cartesia
         ("cartesian_grid_3d", [0, 2, 6, 8, 18, 20, 24, 26]),
     ],
 )
-def test_center_cell_ids(grid: Literal['cartesian_grid_2d'] | Literal['cartesian_grid_3d'], expected_center: list[int]):
+def test_center_cell_ids(
+    grid: Literal["cartesian_grid_2d"] | Literal["cartesian_grid_3d"],
+    expected_center: list[int],
+):
     assert EquationsSPE10.center_cell_id(grid) == expected_center

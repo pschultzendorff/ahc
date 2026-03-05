@@ -87,8 +87,8 @@ def plot_statistics(
 
     num_layers = len(num_iterations[0])
     layer_indices = range(1, num_layers + 1)
-    colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:gray"]
-    linestyles = ["-", "--", "-.", ":", (0, (1, 5))]
+    colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:cyan"]
+    linestyles = ["-", "--", "-.", ":", (0, (1, 3))]
 
     for data_list in [num_iterations, num_time_steps, relative_errors]:
         fig, ax = plt.subplots(figsize=(10, 5))
@@ -138,8 +138,11 @@ def plot_statistics(
                     np.asarray(layer_indices)[failed],
                     y_interp,
                     linestyle="none",
-                    marker="$!$",
-                    markersize=16,
+                    marker="o",
+                    markersize=20,
+                    markerfacecolor="none",
+                    markeredgecolor=colors[i % len(colors)],
+                    markeredgewidth=2.0,
                     color=colors[i % len(colors)],
                 )
 

@@ -11,7 +11,7 @@ The following solvers are employed:
 Model description:
 - Constant CO2 injection in the center.
 - No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
-- Simulation time: 10 days
+- Simulation time: 3000 days
 - Solid properties:
     - Porosity: SPE11, case A.
     - Permeability: SPE11, case A.
@@ -47,7 +47,7 @@ from tpf.models.protocol import TPFProtocol
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, clean_up_after_simulation, setup_params
+from utils import SimulationConfig, setup_params
 
 # region SETUP
 

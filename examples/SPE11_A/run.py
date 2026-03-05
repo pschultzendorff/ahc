@@ -11,7 +11,7 @@ The following solvers are employed:
 Model description:
 - Constant CO2 injection in the center.
 - No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
-- Simulation time: 10 days
+- Simulation time: 30 days
 - Solid properties:
     - Porosity: SPE11, case A.
     - Permeability: SPE11, case A.

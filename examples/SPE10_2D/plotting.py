@@ -15,14 +15,15 @@ EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]
 
 if __name__ == "__main__":
     configs = generate_configs()
-    configs_viscous_varying_rp_init_s_02 = configs[:16]
-    configs_viscous_varying_rp_init_s_03 = configs[16:32]
-    configs_viscous_varying_init_s = configs[4:8] + configs[32:44] + configs[20:24]
-    configs_viscous_and_cap_varying_cap_init_s_03 = configs[44:60]
-    configs_viscous_and_cap_varying_init_s = configs[60:72] + configs[44:48]
-    configs_viscous_and_cap_varying_entry_press = configs[44:48] + configs[72:]
-    data_1 = {}
+    configs_viscous_varying_rp_init_s_02 = configs[:20]
+    configs_viscous_varying_rp_init_s_03 = configs[20:40]
+    configs_viscous_varying_init_s = configs[5:10] + configs[40:55] + configs[25:30]
+    configs_viscous_and_cap_varying_cap_init_s_03 = configs[55:75]
+    configs_viscous_and_cap_varying_init_s = configs[75:90] + configs[55:60]
+    configs_viscous_and_cap_varying_entry_press = configs[55:60] + configs[90:]
     rel_errors = {}
+
+    data_1 = {}
     for config in configs_viscous_varying_rp_init_s_02:
         if config.rp_model_2["model"] == "Corey":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
@@ -30,7 +31,7 @@ if __name__ == "__main__":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_Br.-Corey {config.rp_model_2['n_b']}"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_1[key] = statistics
-        if config.solver_name == "AHC":
+        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
             if statistics.converged:
                 rel_errors[f"fig_1_{key}"] = (
                     f"{calc_relative_error(statistics)['total']:.2f}"
@@ -38,6 +39,7 @@ if __name__ == "__main__":
             else:
                 rel_errors[f"fig_1_{key}"] = "not converged"
     fig1 = plot_nl_iterations(data_1, "rel. perm. model")
+
     data_2 = {}
     for config in configs_viscous_varying_rp_init_s_03:
         if config.rp_model_2["model"] == "Corey":
@@ -46,7 +48,7 @@ if __name__ == "__main__":
             key = f"{config.solver_name}_{config.adaptive_error_ratio}_Br.-Corey {config.rp_model_2['n_b']}"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_2[key] = statistics
-        if config.solver_name == "AHC":
+        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
             if statistics.converged:
                 rel_errors[f"fig_2_{key}"] = (
                     f"{calc_relative_error(statistics)['total']:.2f}"
@@ -54,12 +56,13 @@ if __name__ == "__main__":
             else:
                 rel_errors[f"fig_2_{key}"] = "not converged"
     fig2 = plot_nl_iterations(data_2, "rel. perm. model")
+
     data_3 = {}
     for config in configs_viscous_varying_init_s:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_3[key] = statistics
-        if config.solver_name == "AHC":
+        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
             if statistics.converged:
                 rel_errors[f"fig_3_{key}"] = (
                     f"{calc_relative_error(statistics)['total']:.2f}"
@@ -67,6 +70,7 @@ if __name__ == "__main__":
             else:
                 rel_errors[f"fig_3_{key}"] = "not converged"
     fig3 = plot_nl_iterations(data_3, r"$s_\mathrm{w}^0$")
+
     data_4 = {}
     for config in configs_viscous_and_cap_varying_cap_init_s_03:
         key = (
@@ -79,7 +83,7 @@ if __name__ == "__main__":
             key += f"Br.-C. $nb={config.rp_model_2['n_b']}$"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_4[key] = statistics
-        if config.solver_name == "AHC":
+        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
             if statistics.converged:
                 rel_errors[f"fig_4_{key}"] = (
                     f"{calc_relative_error(statistics)['total']:.2f}"
@@ -92,12 +96,13 @@ if __name__ == "__main__":
         tight_layout=True,
         rotate_x_labels=True,
     )
+
     data_5 = {}
     for config in configs_viscous_and_cap_varying_init_s:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_5[key] = statistics
-        if config.solver_name == "AHC":
+        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
             if statistics.converged:
                 rel_errors[f"fig_5_{key}"] = (
                     f"{calc_relative_error(statistics)['total']:.2f}"
@@ -105,12 +110,13 @@ if __name__ == "__main__":
             else:
                 rel_errors[f"fig_5_{key}"] = "not converged"
     fig5 = plot_nl_iterations(data_5, r"$s_\mathrm{w}^0$")
+
     data_6 = {}
     for config in configs_viscous_and_cap_varying_entry_press:
         key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
         statistics = read_data(config, EXPECTED_FINAL_TIME)
         data_6[key] = statistics
-        if config.solver_name == "AHC":
+        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
             if statistics.converged:
                 rel_errors[f"fig_6_{key}"] = (
                     f"{calc_relative_error(statistics)['total']:.2f}"

@@ -11,7 +11,7 @@ The following solvers are employed:
 Model description:
 - Constant CO2 injection in the center.
 - No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
-- Simulation time: 10 days
+- Simulation time: 3000 days
 - Solid properties:
     - Porosity: SPE11, case A.
     - Permeability: SPE11, case A.
@@ -168,6 +168,7 @@ def run_simulation(
     config: SimulationConfig,
     solver_params: dict | None = None,
     time_manager_params: dict | None = None,
+    **kwargs,
 ) -> None:
     """Run simulation for a single configuration."""
     logger.info(
@@ -183,7 +184,7 @@ def run_simulation(
 
     model_class = setup_model(config.solver_name)
     updated_solver_params, updated_time_manager_params = setup_params(
-        config.solver_name, config.adaptive_error_ratio
+        config.solver_name, config.adaptive_error_ratio, **kwargs
     )
 
     # Build params dictionaries.
@@ -244,6 +245,7 @@ def run_simulation(
 
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
+    ("AHC", 0.1),
     ("AHC", 0.01),
     ("HC", 0.1),
     ("Newton", 0.1),

@@ -22,16 +22,17 @@ Model description:
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
       oil saturation) in the corner cells. We do NOT use a well model.
-- Simulation time: 10 days
+- Simulation time: 30 days
 - Solid properties:
-    - Porosity: Uppermost layer of the SPE10, case 2A.
-    - Permeability: Uppermost layer of the SPE10, case 2A.
+    - Porosity: SPE10 case 2A, layer 55
+    - Permeability: SPE10 case 2A, layer 55
 - Fluid properties:
     - Water: pp.fluid_values.water. Residual saturation is 0.2.
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
-    - Pressure: 6000 psi
+- Initial values:
+    - Pressure: 6000 psi (initial guess for Newton, no influence on the solution)
     - Saturation: Varying between 0.2 and 0.3.
 - Rel. perm. models:
     - Corey with power 2.
@@ -193,7 +194,19 @@ def run_simulation(
     time_manager_params: dict | None = None,
     **kwargs,
 ) -> None:
-    """Run simulation for a single configuration."""
+    """Run simulation for a single configuration.
+
+    Parameters:
+        config: The simulation configuration.
+        solver_params: Optional dictionary of solver parameters. If None, default
+        parameters
+            are used and updated with the parameters from the config.
+        time_manager_params: Optional dictionary of time manager parameters. If None,
+            default parameters are used and updated with the parameters from the config.
+        **kwargs: Additional keyword arguments to pass to the model setup and parameter
+            setup functions.
+
+    """
     logger.info(
         f"solver: {config.solver_name}, "
         f"adaptive error ratio: {config.adaptive_error_ratio:.2f}, "
@@ -205,7 +218,7 @@ def run_simulation(
     )
     model_class = setup_model(config.solver_name, **kwargs)
     updated_solver_params, updated_time_manager_params = setup_params(
-        config.solver_name, config.adaptive_error_ratio
+        config.solver_name, config.adaptive_error_ratio, **kwargs
     )
 
     # Build params dictionaries.
@@ -265,6 +278,7 @@ def run_simulation(
 
 # region RUN
 solvers_and_ratios: list[tuple[str, float]] = [
+    ("AHC", 0.1),
     ("AHC", 0.01),
     ("HC", 0.1),
     ("Newton", 0.1),

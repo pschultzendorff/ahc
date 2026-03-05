@@ -21,16 +21,17 @@ Model description:
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
       oil saturation) in the corner cells. We do NOT use a well model.
-- Simulation time: 10 days
+- Simulation time: 30 days
 - Solid properties:
-    - Porosity: Uppermost layer of the SPE10, case 2A.
-    - Permeability: Uppermost layer of the SPE10, case 2A.
+    - Porosity: SPE10 case 2A, layer 55
+    - Permeability: SPE10 case 2A, layer 55
 - Fluid properties:
     - Water: pp.fluid_values.water. Residual saturation is 0.2.
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
-    - Pressure: 6000 psi
+- Initial values:
+    - Pressure: 6000 psi (initial guess for Newton, no influence on the solution)
     - Saturation: Varying between 0.2 and 0.3.
 - Rel. perm. models:
     - linear
@@ -98,14 +99,14 @@ def generate_configs() -> list[SimulationConfig]:
 
     configs = []
 
-    # # Varying init_s for the Brooks-Corey model.
+    # Varying init_s for the Brooks-Corey model.
     for init_s in [0.2, 0.3, 0.5]:
         for solver_name, adaptive_error_ratio in solvers_and_ratios:
             if solver_name == "HC":
+                # HC solver is not of interest here.
                 continue
-            elif solver_name == "AHC":
-                adaptive_error_ratio = 1e-4
-            else:
+            elif solver_name == "AHC" and adaptive_error_ratio == 0.1:
+                # Run only the AHC solve with the lower adaptive error ratio.
                 continue
             file_name = f"init_s_{init_s:.2f}"
             folder_name = (

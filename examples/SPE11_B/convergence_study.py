@@ -77,7 +77,7 @@ def generate_configs() -> list[SimulationConfig]:
                 file_name="temporal_estimator_convergence",
                 folder_name=folder_name,
                 solver_name="AHC",
-                adaptive_error_ratio=1e-10,  # Fixed for temporal study.
+                adaptive_error_ratio=1e-5,  # Fixed for temporal study.
                 refinement_factor=refinement_factors[2],
                 init_s=0.8,
                 rp_model_1=rp_models["linear"],
@@ -128,12 +128,12 @@ def generate_configs() -> list[SimulationConfig]:
             solver_name="AHC",
             adaptive_error_ratio=0.01,
             refinement_factor=refinement_factors[2],
-            init_s=0.8,
+            init_s=0.9,
             rp_model_1=rp_models["linear"],
             rp_model_2=rp_models["Brooks-Corey_nb_4"],
             cp_model_1=cp_models["None"],
             cp_model_2=cp_models["Brooks-Corey_nb_4"],
-            spe11_entry_pressure=190 * pp.PASCAL,  # Larger to ensure divergence.
+            spe11_entry_pressure=200 * pp.PASCAL,  # Larger to ensure divergence.
         )
     )
 
@@ -149,18 +149,20 @@ if __name__ == "__main__":
         elif "spatial" in config.folder_name.parent.name:
             time_step_size = 30.0 * pp.DAY  # Default for spatial study.
         else:
-            time_step_size = 3000.0 * pp.DAY  # Default for hc study.
-        if "convergence" in config.folder_name.parent.name:
-            time_manager_params = {
-                "schedule": np.array([0.0, time_step_size]),
-                "dt_init": time_step_size,
-                "constant_dt": True,
-            }
-        else:
-            time_manager_params = default_time_manager_params
-        if i == 3:
-            run_simulation(config, time_manager_params=time_manager_params)
-            clean_up_after_simulation(config)
+            time_step_size = 3000.0 * pp.DAY  # Default for HC study.
+        time_manager_params = {
+            "schedule": np.array([0.0, time_step_size]),
+            "dt_init": time_step_size,
+            "constant_dt": True,
+        }
+
+        continue
+        run_simulation(
+            config,
+            time_manager_params=time_manager_params,
+            extrapolate_temp_estimator_after_cutting=False,
+        )
+        clean_up_after_simulation(config)
 
     fig_dir = dirname / "figures"
     fig_dir.mkdir(exist_ok=True)
@@ -180,7 +182,7 @@ if __name__ == "__main__":
     fig_spatial = plot_convergence(data, num_grid_cells, "num_grid_cells")
     fig_spatial.savefig(fig_dir / "spatial_estimator_convergence.png", dpi=300)
 
-    time_step_size = 3000.0 * pp.DAY  # Default for hc study.
+    time_step_size = 3000.0 * pp.DAY  # Default for HC study.
     stats = read_data(configs[11], expected_final_time=time_step_size)
     fig = plot_estimators(stats, combine_disc_est=True)
     fig.savefig(fig_dir / "hc_estimator_convergence.png", dpi=300)

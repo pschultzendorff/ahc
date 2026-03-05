@@ -13,7 +13,7 @@ dirname = Path(__file__).parent.resolve()
 
 OUTPUT_LOG_ENABLED = False
 
-# List of runscroüt suffixes to run.
+# List of runscript suffixes.
 suffixes = [0, 1, 2, 3]
 
 cpu_core = -1  # Need to start one below the first core to use.
@@ -25,7 +25,8 @@ for idx, suffix in enumerate(suffixes):
     while cpu_core in cpu_skipping:
         cpu_core += 1
     cmd = [
-        "n",
+        "nohup",
+        # "time",
         "taskset",
         "-c",
         str(cpu_core),
@@ -39,4 +40,5 @@ for idx, suffix in enumerate(suffixes):
             f"Started sweep with {runfile} on CPU core {cpu_core}. Logging to {output_log}."
         )
     else:
+        subprocess.Popen(cmd, stderr=subprocess.STDOUT)
         logger.info(f"Started sweep with {runfile} on CPU core {cpu_core}. ")

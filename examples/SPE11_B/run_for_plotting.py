@@ -4,7 +4,7 @@ r"""Run the SPE11 A example with small time steps for plotting.
 Model description:
 - Constant CO2 injection in the center.
 - No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
-- Simulation time: 10 days
+- Simulation time: 3000 days
 - Solid properties:
     - Porosity: SPE11, case A.
     - Permeability: SPE11, case A.

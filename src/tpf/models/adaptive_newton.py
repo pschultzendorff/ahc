@@ -223,7 +223,7 @@ class ErrorEstimateANewtonMixin(
         # If an interpolated temporal estimator is used, project the temporal estimator
         # onto the original time step length (before cutting). The temporal convergence
         # is assumed to be sublinear in the time step length.
-        if self.params.get("interpolate_temp_estimator_after_cutting", False):
+        if self.params.get("extrapolate_temp_estimator_after_cutting", False):
             if self.original_dt is not None:
                 scaling = (self.original_dt / self.time_manager.dt) ** (0.75)
                 est *= scaling

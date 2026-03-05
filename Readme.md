@@ -45,14 +45,6 @@ vol. 11, no. 1, Art. no. 1, Jan. 2025, doi: 10.5540/03.2025.011.01.0332.]
 #### Adaptive Homotopy Continuation
 
 
-#### Neural networks
-Neural networks from `Pytorch` can be included as `ad.Function` into the PorePy `ad`
-framework. This is done via the `ml.ml_ad.nn_wrapper` function, which transforms a
-neural network into a function. This acts like the functions in `ad.functions`.
-
-Some artificial data for rel. perm. and cap. pressure functions is provided, as well as
-simple neural networks and a training function. 
-
 # TODO
 - Remove calls to ``pp.shift_solution_values`` after nonlinear/hc convergence, where it
   is not necessary!
