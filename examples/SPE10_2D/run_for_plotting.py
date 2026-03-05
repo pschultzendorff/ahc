@@ -15,10 +15,10 @@ Model description:
       oil saturation) in the corner cells. We do NOT use a well model.
 - Simulation time: 30 days
 - Solid properties:
-    - Porosity: Layers 10 and 80 of SPE10, case 2A.
-    - Permeability: Layers 10 and 80 of SPE10, case 2A.
+    - Porosity: Layers 10 and 55 of SPE10, case 2A.
+    - Permeability: Layers 10 and 55 of SPE10, case 2A.
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.2.
+    - Water: ``pp.fluid_values.water``. Residual saturation is 0.2.
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
@@ -26,7 +26,7 @@ Model description:
 - Rel. perm. model:
     - Brooks-Corey-Mualem
 - Capillary pressure model:
-    - Brooks-Corey
+    - Linear, entry pressure 50 Pa.
 
 """
 

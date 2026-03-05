@@ -26,21 +26,17 @@ Model description:
     - Porosity: SPE10 case 2A, layer 55
     - Permeability: SPE10 case 2A, layer 55
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.2.
+    - Water: ``pp.fluid_values.water``. Residual saturation is 0.2.
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
-- Initial values:
-    - Pressure: 6000 psi (initial guess for Newton, no influence on the solution)
-    - Saturation: Varying between 0.2 and 0.3.
-- Rel. perm. models:
-    - linear
-    - Corey with power .
-    - Corey with power 3
-    - Brooks-Corey
-- Capillary pressure model:
-    - None
-    - Brooks-Corey
+    - Pressure: 4000 psi (= BHP; initial guess for Newton, no influence on the solution)
+    - Saturation: 0.2, 0.3, and 0.5.
+- Rel. perm. models (model_2; model_1 is linear for AHC):
+    - Brooks-Corey-Mualem with n_b=4, eta=2.
+- Capillary pressure model (model_2; model_1 is None for AHC):
+    - None.
+    - Linear, entry pressure 50 Pa.
 
 """
 

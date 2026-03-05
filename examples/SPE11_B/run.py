@@ -13,20 +13,21 @@ Model description:
 - No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
 - Simulation time: 3000 days
 - Solid properties:
-    - Porosity: SPE11, case A.
-    - Permeability: SPE11, case A.
+    - Porosity: SPE11, case B.
+    - Permeability: SPE11, case B.
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.1.
-    - CO2:  Residual
-      saturation is 0.1.
+    - Water: ``pp.fluid_values.water``. Residual saturation is 0.15.
+    - CO2: Reservoir conditions (350 bar, 70°C). Residual saturation is 0.1.
 - Initial values:
-    - Pressure: Atmospheric pressure.
+    - Pressure: 30 MPa (reservoir pressure).
     - Saturation: Varying between 0.8 and 0.9.
-- Rel. perm. models:
-    - linear
-    - Brooks-Corey
-- Capillary pressure model:
-    - None
+- Rel. perm. models (model_2; model_1 is always linear for HC/AHC):
+    - Brooks-Corey-Mualem with n_b=2, eta=2.
+    - Brooks-Corey-Mualem with n_b=4, eta=2.
+    - Corey with power 2.
+    - Corey with power 3.
+- Capillary pressure model (model_2; model_1 is always None for HC/AHC):
+    - Brooks-Corey with n_b=4.
 
 """
 

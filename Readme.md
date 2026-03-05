@@ -44,9 +44,3 @@ vol. 11, no. 1, Art. no. 1, Jan. 2025, doi: 10.5540/03.2025.011.01.0332.]
 
 #### Adaptive Homotopy Continuation
 
-
-# TODO
-- Remove calls to ``pp.shift_solution_values`` after nonlinear/hc convergence, where it
-  is not necessary!
-- Thoroughly evaluate whether classes should be subclasses or mixins.
-- Make things faster.

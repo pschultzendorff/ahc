@@ -20,7 +20,7 @@ Model description:
     - Porosity: SPE10 case 2A, layer 55
     - Permeability: SPE10 case 2A, layer 55
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.2.
+    - Water: ``pp.fluid_values.water``. Residual saturation is 0.2.
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:

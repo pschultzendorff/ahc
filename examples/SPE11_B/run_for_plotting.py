@@ -1,4 +1,4 @@
-r"""Run the SPE11 A example with small time steps for plotting.
+r"""Run the SPE11 B example with small time steps for plotting.
 
 
 Model description:
@@ -6,20 +6,16 @@ Model description:
 - No flow boundary condition on the sides and bottom. Homogeneous Dirichlet on top.
 - Simulation time: 3000 days
 - Solid properties:
-    - Porosity: SPE11, case A.
-    - Permeability: SPE11, case A.
+    - Porosity: SPE11, case B.
+    - Permeability: SPE11, case B.
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.1.
-    - CO2: From the NIST database, taken at 20°C and atmospheric pressure. Residual
-      saturation is 0.1.
+    - Water: ``pp.fluid_values.water``. Residual saturation is 0.15.
+    - CO2: Reservoir conditions (350 bar, 70°C). Residual saturation is 0.1.
 - Initial values:
-    - Pressure: Atmospheric pressure.
-    - Saturation: Varying between 0.8 and 0.9.
-- Rel. perm. models:
-    - linear
-    - Brooks-Corey
-- Capillary pressure model:
-    - None
+    - Pressure: 30 MPa (reservoir pressure).
+    - Saturation: 0.8 (water-filled domain).
+- Rel. perm. model (Brooks-Corey-Mualem with n_b=4, eta=2).
+- Capillary pressure model (Brooks-Corey with n_b=4).
 
 """
 

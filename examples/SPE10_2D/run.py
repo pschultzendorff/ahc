@@ -17,7 +17,8 @@ X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport
    114–137, Nov. 2013, doi: 10.1016/j.jcp.2013.06.041.
 
 Model description:
-- 1200x2200 ft domain, layer 80 of the SPE10, case 2A.
+- 1200x2200 ft domain, layer 55 of the SPE10, case 2A (default; all 85 layers are
+  tested in ``run_all_layers.py``).
 - Constant water injection in the center: 87.5 m^3/day
 - Oil production at the four corners: 4000 psi bhp
     - This is simulated by prescribing the bottom hole pressure and saturation (residual
@@ -27,19 +28,22 @@ Model description:
     - Porosity: SPE10 case 2A, layer 55
     - Permeability: SPE10 case 2A, layer 55
 - Fluid properties:
-    - Water: pp.fluid_values.water. Residual saturation is 0.2.
+    - Water: ``pp.fluid_values.water``. Residual saturation is 0.2.
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
-- Initial values:
-    - Pressure: 6000 psi (initial guess for Newton, no influence on the solution)
+    - Pressure: 4000 psi (= BHP; initial guess for Newton, no influence on the solution)
     - Saturation: Varying between 0.2 and 0.3.
-- Rel. perm. models:
+- Rel. perm. models (model_2; model_1 is always linear for HC/AHC):
     - Corey with power 2.
-    - Corey with power 3
-    - Brooks-Corey
-- Capillary pressure model:
-    - Brooks-Corey, varying entry pressure between 50 Pa and 300 Pa.
+    - Corey with power 3.
+    - Brooks-Corey-Mualem with n_b=2, eta=2.
+    - Brooks-Corey-Mualem with n_b=4, eta=2.
+- Capillary pressure models (model_2; model_1 is always None for HC/AHC):
+    - None.
+    - Linear, entry pressure 50 Pa.
+    - Brooks-Corey with n_b=2, entry pressure 100 Pa.
+    - Brooks-Corey with n_b=4, entry pressure varying between 100 Pa and 300 Pa.
 
 """
 
