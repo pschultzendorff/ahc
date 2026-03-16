@@ -13,12 +13,7 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import (
-    cp_models,
-    default_time_manager_params,
-    rp_models,
-    run_simulation,
-)
+from run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -155,8 +150,6 @@ if __name__ == "__main__":
             "dt_init": time_step_size,
             "constant_dt": True,
         }
-
-        continue
         run_simulation(
             config,
             time_manager_params=time_manager_params,

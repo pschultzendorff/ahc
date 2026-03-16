@@ -2,7 +2,6 @@ import pathlib
 import sys
 from collections import defaultdict
 
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import LogFormatter, LogLocator, NullFormatter
@@ -181,7 +180,9 @@ def plot_statistics(
         ax.set_xlabel("SPE10 layer", fontsize=16, fontweight="bold")
 
         if data_list is num_iterations:
-            ax.set_ylabel("# nonlinear iterations", fontsize=16, fontweight="bold")
+            ax.set_ylabel(
+                "# cumulative nonlinear iterations", fontsize=16, fontweight="bold"
+            )
         elif data_list is num_time_steps:
             ax.set_ylabel("# time steps", fontsize=16, fontweight="bold")
         else:

@@ -14,7 +14,6 @@ from matplotlib.ticker import (
     LogFormatter,
     LogLocator,
     MaxNLocator,
-    NullFormatter,
 )
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from tpf.numerics.nonlinear.hc_solver import HCSolver
@@ -430,15 +429,18 @@ def plot_nl_iterations(
             tot_hc_iters = len(flatten(stat.timestep_nl_iters))
             final_lambda = stat.lambdas[-1][-1]
             annotations[i, j] = (
-                f"{tot_nl_iters}/{tot_hc_iters}/{final_lambda:.3f}\n"
+                f"{tot_nl_iters}/{tot_hc_iters}/{final_lambda:.4f}\n"
                 + f"({len(stat.time_steps)})"
             )
         # For Newton, show only nl iters and time steps.
         else:
             annotations[i, j] = f"{tot_nl_iters}\n({len(stat.time_steps)})"
 
-    # Create heatmap figure
-    fig, ax = plt.subplots(figsize=(8, 4))
+    # Create heatmap figure.
+    if kwargs.get("extended_figure_height", False):
+        fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4))
 
     # Failed time steps are marked in red.
     cmap = matplotlib.colormaps["Blues"]
@@ -451,7 +453,7 @@ def plot_nl_iterations(
         fmt="s",
         cmap=cmap,
         cbar=True,
-        cbar_kws={"label": "Number of nonlinear iterations"},
+        cbar_kws={"label": "Number of cumulative nonlinear iterations"},
         xticklabels=x_ticks,
         yticklabels=solvers,
         linewidths=0.8,
@@ -479,7 +481,8 @@ def plot_nl_iterations(
     ax.set_xlabel(varying_param_name, fontsize=12, fontweight="bold")
     ax.set_ylabel("Solver & adaptive error ratio", fontsize=12, fontweight="bold")
     ax.set_title(
-        title or r"#NL iters/#HC iters/final $\beta$" + "\n" + "(#time steps)\n",
+        title
+        or r"# cumulative NL iters/#HC iters/final $\beta$" + "\n" + "(#time steps)\n",
         # + f"by solver and {varying_param_name}",
         fontsize=14,
         fontweight="bold",
@@ -489,6 +492,25 @@ def plot_nl_iterations(
         fig.tight_layout()
     if kwargs.get("rotate_x_labels", False):
         ax.tick_params(axis="x", labelrotation=45)
+
+    # Ensure rotated x tick labels are not cut off at the bottom.
+    fig.subplots_adjust(
+        bottom=max(
+            0.1,
+            max(
+                (len(label.get_text()) for label in ax.get_xticklabels()),
+                default=0,
+            )
+            * 0.01,
+        )
+    )
+    plt.draw()
+    # Use tight_layout with padding to prevent clipping of rotated labels.
+    try:
+        fig.tight_layout(pad=1.5)
+    except Exception:
+        pass
+
     return fig
 
 
@@ -599,7 +621,7 @@ def plot_estimators(
                 markersize=kwargs.get("marker_size", 4),
                 fillstyle="none",
                 markerfacecolor="red",
-                label=r"$\eta_\mathrm{discr}$" if i == 0 else "",
+                label=r"$\eta_\mathrm{disc}$" if i == 0 else "",
             )
         else:
             ax.plot(
@@ -639,8 +661,8 @@ def plot_estimators(
     # On the x-axis use integer ticks only with sensible density.
     ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10, prune=None))
     ax.tick_params(axis="both", which="major", labelsize=12)
-    ax.set_xlabel("Nonlinear iteration", fontsize=14, fontweight="bold")
-    ax.set_ylabel("Error estimate", fontsize=14, fontweight="bold")
+    ax.set_xlabel("Cumulative nonlinear iteration", fontsize=14, fontweight="bold")
+    ax.set_ylabel("Error estimators", fontsize=14, fontweight="bold")
 
     if uses_hc:
         ax2.set_yscale("log")
@@ -755,11 +777,11 @@ def plot_convergence(
     ax.tick_params(axis="both", which="minor", labelsize=10)
 
     if parameter_name == "num_grid_cells":
-        x_label = "Number of Grid Cells"
+        x_label = "Number of grid cells"
         y_label = r"$\eta_{\mathrm{spat}}$"
         title = "Convergence of Spatial Error Estimator"
     elif parameter_name == "time_step_size":
-        x_label = "Time Step Size (s)"
+        x_label = "Time step size ($s$)"
         y_label = r"$\eta_{\mathrm{temp}}$"
         title = "Convergence of Temporal Error Estimator"
 

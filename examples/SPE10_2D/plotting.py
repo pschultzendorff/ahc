@@ -2,7 +2,6 @@ import json
 import pathlib
 import sys
 
-import porepy as pp
 from run import default_time_manager_params, generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
@@ -38,7 +37,7 @@ if __name__ == "__main__":
                 )
             else:
                 rel_errors[f"fig_1_{key}"] = "not converged"
-    fig1 = plot_nl_iterations(data_1, "rel. perm. model")
+    fig1 = plot_nl_iterations(data_1, "Relative permeability model")
 
     data_2 = {}
     for config in configs_viscous_varying_rp_init_s_03:
@@ -55,7 +54,7 @@ if __name__ == "__main__":
                 )
             else:
                 rel_errors[f"fig_2_{key}"] = "not converged"
-    fig2 = plot_nl_iterations(data_2, "rel. perm. model")
+    fig2 = plot_nl_iterations(data_2, "Relative permeability model")
 
     data_3 = {}
     for config in configs_viscous_varying_init_s:
@@ -92,9 +91,10 @@ if __name__ == "__main__":
                 rel_errors[f"fig_4_{key}"] = "not converged"
     fig4 = plot_nl_iterations(
         data_4,
-        "cap. press. model & rel. perm. model",
+        "Capillary pressure & Relative permeability model",
         tight_layout=True,
         rotate_x_labels=True,
+        extended_figure_height=True,
     )
 
     data_5 = {}
