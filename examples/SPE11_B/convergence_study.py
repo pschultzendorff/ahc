@@ -150,6 +150,7 @@ if __name__ == "__main__":
             "dt_init": time_step_size,
             "constant_dt": True,
         }
+        continue
         run_simulation(
             config,
             time_manager_params=time_manager_params,
@@ -181,7 +182,7 @@ if __name__ == "__main__":
     fig.savefig(fig_dir / "hc_estimator_convergence.png", dpi=300)
 
     stats = read_data(configs[12], expected_final_time=time_step_size)
-    fig = plot_estimators(stats, combine_disc_est=True)
+    fig = plot_estimators(stats, combine_disc_est=True, legend_loc="upper right")
     fig.savefig(fig_dir / "hc_estimator_divergence.png", dpi=300)
 
 

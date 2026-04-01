@@ -703,7 +703,7 @@ def plot_estimators(
     ax.legend(
         by_label.values(),
         by_label.keys(),
-        loc="lower left",
+        loc=kwargs.get("legend_loc", "lower left"),
         ncol=2,
         prop={"size": 14, "weight": "bold"},
     )
