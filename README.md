@@ -1,4 +1,4 @@
-# ahc — Adaptive Homotopy Continuation for Two-Phase Flow in PorePy.
+# ahc - Adaptive Homotopy Continuation for Two-Phase Flow in PorePy.
 This repository extends the functionality of
 [PorePy](https://github.com/pmgbergen/porepy) with the following:
 - an incompressible & immiscible two-phase flow model in the fractional flow formulation
