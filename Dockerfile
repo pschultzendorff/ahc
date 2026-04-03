@@ -23,4 +23,4 @@ RUN pip install --no-cache-dir -e /app/ahc
 # Matplotlib backend for .png files
 ENV MPLBACKEND=Agg
 
-CMD ["sh", "/app/ahc/run_all.sh"]
+CMD ["/app/ahc/run_all.sh"]
