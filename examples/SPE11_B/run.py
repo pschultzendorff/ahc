@@ -41,14 +41,14 @@ from typing import Any, Type
 
 import numpy as np
 import porepy as pp
-from tpf.derived_models.spe11 import SPE11Mixin, case_B
-from tpf.models.adaptive_newton import TwoPhaseFlowANewton
-from tpf.models.homotopy_continuation import TwoPhaseFlowHC
-from tpf.models.protocol import TPFProtocol
+from ahc.derived_models.spe11 import SPE11Mixin, case_B
+from ahc.models.adaptive_newton import TwoPhaseFlowANewton
+from ahc.models.homotopy_continuation import TwoPhaseFlowHC
+from ahc.models.protocol import TPFProtocol
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, clean_up_after_simulation, setup_params
+from ..utils import SimulationConfig, clean_up_after_simulation, setup_params
 
 # region SETUP
 

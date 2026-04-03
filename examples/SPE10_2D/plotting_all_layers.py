@@ -5,12 +5,12 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import LogFormatter, LogLocator, NullFormatter
-from run import default_time_manager_params
-from run_all_layers import generate_configs
+from .run import default_time_manager_params
+from .run_all_layers import generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationStatistics, calc_relative_error, flatten, read_data
+from ..utils import SimulationStatistics, calc_relative_error, flatten, read_data
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
@@ -22,8 +22,8 @@ def plot_statistics(
     data: dict[str, SimulationStatistics],
 ):
     # Collect num_time_steps and num_iterations per solver and layer.
-    num_iterations = defaultdict(lambda: defaultdict(float))
-    num_time_steps = defaultdict(lambda: defaultdict(float))
+    num_iterations = defaultdict(lambda: defaultdict(float))  # type: ignore
+    num_time_steps = defaultdict(lambda: defaultdict(float))  # type: ignore
     relative_errors = {}
 
     for case, stats in data.items():
@@ -61,17 +61,17 @@ def plot_statistics(
     # Turn into sorted list (solvers) of sorted list (layers) of values.
     # NOTE A little hacky. turning the sorted into a dict is not expected to maintain
     # ordering.
-    num_iterations = [
+    num_iterations = [  # type: ignore
         [value for __, value in sorted(v.items(), key=lambda item: int(item[0]))]
         for _, v in sorted(num_iterations.items())
     ]
-    num_time_steps = [
+    num_time_steps = [  # type: ignore
         [value for __, value in sorted(v.items(), key=lambda item: int(item[0]))]
         for _, v in sorted(num_time_steps.items())
     ]
 
     # Turn into sorted list (errors) of sorted list (layers) of values.
-    relative_errors = [
+    relative_errors = [  # type: ignore
         [
             value
             for __, value in sorted(
@@ -95,7 +95,7 @@ def plot_statistics(
         # Plot either for each error type (relative_errors), or for each solver
         # (num_iterations and num_time_steps)
         if data_list is relative_errors:
-            for i, error_type in enumerate(data_list):
+            for i, error_type in enumerate(data_list):  # type: ignore
                 error_key = error_keys[i]
                 label = (
                     rf"$\hat{{\eta}}_\mathrm{{{error_key.upper()}}}$"
@@ -111,7 +111,7 @@ def plot_statistics(
                     linewidth=2,
                 )
         else:
-            for i, solver_data in enumerate(data_list):
+            for i, solver_data in enumerate(data_list):  # type: ignore
                 # Hide the graph at failed timesteps.
                 solver_data = np.asarray(solver_data, dtype=np.float32)
                 failed = solver_data == 0
@@ -200,7 +200,7 @@ def plot_statistics(
 # endregion
 
 if __name__ == "__main__":
-    EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]
+    EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]  # type: ignore
 
     configs = generate_configs()
     data = {}

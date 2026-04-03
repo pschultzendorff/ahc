@@ -3,11 +3,11 @@ import pathlib
 import sys
 
 import porepy as pp
-from run import generate_configs
+from .run import generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import calc_relative_error, plot_nl_iterations, read_data
+from ..utils import calc_relative_error, plot_nl_iterations, read_data
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 

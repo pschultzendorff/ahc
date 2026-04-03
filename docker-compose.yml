@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  ahc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./examples/SPE10_2D/figures:/app/ahc/examples/SPE10_2D/figures
+      - ./examples/SPE10_2D/results:/app/ahc/examples/SPE10_2D/results
+      - ./examples/SPE11_B/figures:/app/ahc/examples/SPE11_B/figures
+      - ./examples/SPE11_B/results:/app/ahc/examples/SPE11_B/results
+    container_name: ahc

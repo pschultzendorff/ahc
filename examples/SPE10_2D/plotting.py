@@ -2,15 +2,15 @@ import json
 import pathlib
 import sys
 
-from run import default_time_manager_params, generate_configs
+from .run import default_time_manager_params, generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import calc_relative_error, plot_nl_iterations, read_data
+from ..utils import calc_relative_error, plot_nl_iterations, read_data
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
-EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]
+EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]  # type: ignore
 
 if __name__ == "__main__":
     configs = generate_configs()

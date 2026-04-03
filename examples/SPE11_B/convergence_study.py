@@ -1,4 +1,4 @@
-r"""Study convergence of spatial and temporal error estimators on SPE11, case B.
+"""Study convergence of spatial and temporal error estimators on SPE11, case B.
 
 The following solvers are employed:
 - Adaptive homotopy continuation (AHC) with Newton
@@ -13,11 +13,12 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import cp_models, rp_models, run_simulation
+
+from .run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import (
+from ..utils import (
     SimulationConfig,
     clean_up_after_simulation,
     plot_convergence,

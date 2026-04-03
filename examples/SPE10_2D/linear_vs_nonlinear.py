@@ -43,11 +43,11 @@ import sys
 import warnings
 
 import numpy as np
-from run import cp_models, rp_models, run_simulation
+from .run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig
+from ..utils import SimulationConfig
 
 # region SETUP
 

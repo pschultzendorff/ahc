@@ -5,25 +5,35 @@ This repository extends the functionality of
 - a posteriori error estimators for the two-phase flow model
 - an adaptive homotopy continuation algorithm based on the error estimators
 
-The code does not work with a current PorePy build, but requires [this
+The code does not work with the current PorePy version, but requires [this
 fork](https://github.com/pschultzendorff/porepy_hc), which adds some functionalities for
 homotopy continuation to work properly.
 
-#### Setup
-The following should be done in either a docker container or a virtual environment. A
-dockerfile & build will be provided at a later point.
-1. Clone https://github.com/pschultzendorff/porepy_hc and follow the instructions to
-   install PorePy
-2. Clone this repository:
-   ```bash
-   git clone https://github.com/pschultzendorff/tpf_PorePy
-   ```
-3. Install the package in editable mode:
-   ```bash
-   pip install -e .
-   ```
-   The package is then importable as `ahc` (e.g. `import ahc`).
+If you use this code, please cite:
 
+P. von Schultzendorff, J. W. Both, J. M. Nordbotten, T. H. Sandve, and M. Vohralík,
+"Adaptive homotopy continuation solver for incompressible two-phase flow in porous
+media"
+
+## Installation and reproducing the examples
+
+**Local setup (requires Python 3.12.11):**
+```bash
+git clone https://github.com/pschultzendorff/porepy_hc
+pip install -e ./porepy_hc[development,testing]
+git clone https://github.com/pschultzendorff/ahc
+pip install -e ./ahc
+sh ./ahc/run_all.sh
+```
+
+**Docker:**
+```bash
+git clone https://github.com/pschultzendorff/ahc
+cd ahc
+docker compose up
+```
+
+## Content
 
 #### Two-phase flow model
 Implemented in the fractional flow formulation.
@@ -59,7 +69,7 @@ met.
 
 ---
 
-#### References
+## References
 [1] C. Cancès, I. Pop, and M. Vohralík, "An a posteriori error estimate for
 vertex-centered finite volume discretizations of immiscible incompressible two-phase
 flow," *Math. Comp.*, vol. 83, no. 285, pp. 153–188, Jan. 2014,
@@ -74,3 +84,19 @@ technique based on Raviart-Thomas basis functions for cell-centered finite volum
 approximations to the Darcy problem," *Proceeding Series of the Brazilian Society of
 Computational and Applied Mathematics*, vol. 11, no. 1, Jan. 2025,
 doi: 10.5540/03.2025.011.01.0332.
+
+[4] M. A. Christie and M. J. Blunt, "Tenth SPE Comparative Solution Project: A
+Comparison of Upscaling Techniques," *SPE Reservoir Evaluation & Engineering*, vol. 4,
+no. 4, pp. 308–317, 2001, doi: 10.2118/72469-PA.
+
+[5] J. M. Nordbotten, M. A. Ferno, B. Flemisch, A. R. Kovscek, and K.-A. Lie, "The 11th
+Society of Petroleum Engineers Comparative Solution Project: Problem Definition," 
+*SPE Journal*, vol. 29, no. 5, pp. 2507–2524, 2024, doi: 10.2118/218015-PA.
+
+## AI disclosure
+
+Generative AI (GitHub Copilot in VS Code, ChatGPT, and Microsoft Copilot) was used to
+create scripted figures with `Matplotlib`.
+
+## TODO 
+Fix some of the tests

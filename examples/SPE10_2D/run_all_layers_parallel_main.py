@@ -17,7 +17,7 @@ OUTPUT_LOG_ENABLED = False
 suffixes = [0, 1, 2, 3]
 
 cpu_core = -1  # Need to start one below the first core to use.
-cpu_skipping = []
+cpu_skipping: list[int] = []  # type: ignore
 for idx, suffix in enumerate(suffixes):
     runfile = dirname / f"run_all_layers_parallel_{suffix}.py"
     output_log = dirname / f"output_run_all_layers_parallel_{suffix}.log"
@@ -31,7 +31,7 @@ for idx, suffix in enumerate(suffixes):
         "-c",
         str(cpu_core),
         "python",
-        runfile,
+        str(runfile),
     ]
     if OUTPUT_LOG_ENABLED:
         with output_log.open("w") as out:

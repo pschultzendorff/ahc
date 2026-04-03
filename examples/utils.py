@@ -9,6 +9,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 import seaborn as sns
+from ahc.numerics.nonlinear.hc_solver import HCSolver
+from ahc.utils.constants_and_typing import FEET
+from ahc.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 from matplotlib.ticker import (
     FuncFormatter,
     LogFormatter,
@@ -16,9 +19,6 @@ from matplotlib.ticker import (
     MaxNLocator,
 )
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-from tpf.numerics.nonlinear.hc_solver import HCSolver
-from tpf.utils.constants_and_typing import FEET
-from tpf.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
