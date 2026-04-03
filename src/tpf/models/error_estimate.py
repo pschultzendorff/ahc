@@ -8,11 +8,11 @@ import numpy as np
 import porepy as pp
 from porepy.viz.exporter import DataInput
 
-from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFProtocol
+from tpf.models.protocol import EstimatesProtocol
 from tpf.models.reconstruction import (
-    DataSavingRec,
-    SolutionStrategyRec,
-    TwoPhaseFlowReconstruction,
+    RecDataSavingMixin,
+    ReconstructionTwoPhaseFlow,
+    RecSolutionStrategy,
     evaluate_poly_at_points,
 )
 from tpf.numerics.quadrature import Integral, TriangleQuadrature
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 np.seterr(under="ignore")
 
 
-class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
+class ErrorEstimatesMixin(EstimatesProtocol):
     """Methods to equilibrate fluxes during the Newton iteration.
 
     Note: If the grid is updated during the simulation, the cellwise Poincare constants
@@ -103,7 +103,7 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             dt_s_ad = pp.ad.time_derivatives.dt(self.wetting.s, dt)
             dt_s: np.ndarray = (dt_s_ad).value(self.equation_system)  # type: ignore
             porosity: np.ndarray = self.porosity(self.g)
-            integral: Integral = Integral(
+            integral = Integral(
                 (
                     self.g.cell_volumes
                     * self.poincare_constants
@@ -215,10 +215,10 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
             raise ValueError("Not implemented for tensor permeability.")
 
         # 2: Get reconstructed pressure coefficients and mobilities
-        pressure_coeffs_new = {}
-        pressure_coeffs_old = {}
-        phase_mobilities_new = {}
-        phase_mobilities_old = {}
+        pressure_coeffs_new: dict[str, np.ndarray] = {}
+        pressure_coeffs_old: dict[str, np.ndarray] = {}
+        phase_mobilities_new: dict[str, np.ndarray] = {}
+        phase_mobilities_old: dict[str, np.ndarray] = {}
 
         pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
         for pressure_key in pressure_keys:
@@ -693,15 +693,17 @@ class ErrorEstimateMixin(ReconstructionProtocol, TPFProtocol):
         return global_energy
 
 
-# This could also be a mixin, but by subclassing ``SolutionStrategyReconstruction``, we
-# avoid having to pay attention to the order of the different solution strategy classes.
-#
+# NOTE EstimatesSolutionStrategy could also be a mixin, but by subclassing
+# ``SolutionStrategyReconstruction``, we avoid having to pay attention to the order of
+# the different solution strategy classes.
+
+
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class SolutionStrategyEst(  # type: ignore
+class EstimatesSolutionStrategy(  # type: ignore
     EstimatesProtocol,
-    SolutionStrategyRec,
+    RecSolutionStrategy,
 ):
     def prepare_simulation(self) -> None:
         """Set up estimators after setting up the base simulation and
@@ -823,7 +825,7 @@ class SolutionStrategyEst(  # type: ignore
         )
 
 
-class DataSavingEst(DataSavingRec):
+class EstimatesDataSavingMixin(RecDataSavingMixin):
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
@@ -886,9 +888,9 @@ class DataSavingEst(DataSavingRec):
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class TwoPhaseFlowErrorEstimate(
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
-    DataSavingEst,
-    TwoPhaseFlowReconstruction,
-): ...  # type: ignore
+class ErrorEstimatesTwoPhaseFlow(  # type: ignore
+    ErrorEstimatesMixin,
+    EstimatesSolutionStrategy,
+    EstimatesDataSavingMixin,
+    ReconstructionTwoPhaseFlow,
+): ...

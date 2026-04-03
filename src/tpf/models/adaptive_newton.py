@@ -21,32 +21,18 @@ import numpy as np
 import porepy as pp
 
 from tpf.models.error_estimate import (
-    DataSavingEst,
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
+    ErrorEstimatesTwoPhaseFlow,
+    EstimatesSolutionStrategy,
 )
-from tpf.models.flow_and_transport import SolutionStrategyTPF, TwoPhaseFlow
-from tpf.models.protocol import (
-    AdaptiveNewtonProtocol,
-    EstimatesProtocol,
-    ReconstructionProtocol,
-    TPFProtocol,
-)
-from tpf.models.reconstruction import (
-    EquationsRecMixin,
-    EquilibratedFluxMixin,
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-)
+from tpf.models.flow_and_transport import TPFSolutionStrategy
+from tpf.models.protocol import AdaptiveNewtonProtocol
 from tpf.numerics.quadrature import Integral
 from tpf.utils.constants_and_typing import FLUX_NAME, TOTAL_FLUX, WETTING_FLUX
 
 logger = logging.getLogger(__name__)
 
 
-class ErrorEstimateANewtonMixin(
-    AdaptiveNewtonProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
-):
+class ErrorEstimateANewtonMixin(AdaptiveNewtonProtocol):
     def local_temp_est(self, flux_name: FLUX_NAME) -> None:
         r"""Calculate the local-in-space temporal error estimators.
 
@@ -277,9 +263,10 @@ class ErrorEstimateANewtonMixin(
         return self.global_discr_est() + self.global_lin_est()
 
 
-class SolutionStrategyANewtonMixin(
-    AdaptiveNewtonProtocol, EstimatesProtocol, TPFProtocol
-):
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
+class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy):  # type: ignore
     def __init__(self, params=None) -> None:
         super().__init__(params=params)  # type: ignore
 
@@ -326,7 +313,7 @@ class SolutionStrategyANewtonMixin(
         # ``SolutionStrategyEstMixin.check_convergence``, but
         # ``TwoPhaseFlow.check_convergence``. The former logs estimators we are not
         # interested in.
-        converged, diverged = SolutionStrategyTPF.check_convergence(
+        converged, diverged = TPFSolutionStrategy.check_convergence(
             self,  # type: ignore
             nonlinear_increment,
             residual,
@@ -417,18 +404,12 @@ class SolutionStrategyANewtonMixin(
             self.equation_system.set_variable_values(prev_solution, iterate_index=0)
 
 
-class TwoPhaseFlowANewton(
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
+class TwoPhaseFlowANewton(  # type: ignore
     ErrorEstimateANewtonMixin,
-    SolutionStrategyANewtonMixin,
-    # Estimator mixins:
-    ErrorEstimateMixin,
-    DataSavingEst,
-    SolutionStrategyEst,
-    # Reconstruction mixins:
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-    EquilibratedFluxMixin,
-    EquationsRecMixin,
-    # The rest
-    TwoPhaseFlow,
-): ...  # type: ignore
+    SolutionStrategyANewton,
+    # Estimator model:
+    ErrorEstimatesTwoPhaseFlow,
+): ...

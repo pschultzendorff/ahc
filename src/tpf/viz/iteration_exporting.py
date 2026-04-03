@@ -9,13 +9,22 @@ and adjusted for homotopy continuation.
 import numpy as np
 import porepy as pp
 
-from tpf.models.protocol import DataSavingMixinExtendedProtocol, HCProtocol, TPFProtocol
+from tpf.models.protocol import (
+    IterationDataSavingProtocol,
+    TPFProtocol,
+)
+
+# NOTE This is purely a mixin, i.e., the only superclasses are protocols. This makes it
+# flexible to use with both adaptive homotopy continuation and adaptive Newton, but mypy
+# complains about missing methods superclass. We ignore these complaints.
 
 
-class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFProtocol):
-    def initialize_data_saving(self):
+class IterationExportingMixin(IterationDataSavingProtocol, TPFProtocol):
+    """Class for exporting model states during nonlinear iteration"""
+
+    def initialize_data_saving(self) -> None:
         """Initialize iteration exporter."""
-        super().initialize_data_saving()
+        super().initialize_data_saving()  # type: ignore
         self.iteration_exporter = pp.Exporter(
             self.mdg,
             file_name=self.params["file_name"] + "_iterations",
@@ -39,7 +48,7 @@ class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFPr
             self.r_2: int = 10**p_2
             self.r_1 = self.r_1 * self.r_2
 
-    def save_data_iteration(self):
+    def save_data_iteration(self) -> None:
         """Export current solution to vtu files.
 
         This method is typically called by after_nonlinear_iteration.
@@ -50,9 +59,11 @@ class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFPr
 
         """
         if self.uses_hc:
+            # Ignore mypy. If self.uses_hc,
+            # self.nonlinear_solver_statistics.hc_num_iteration exists.
             time_step: int = int(
                 self.nonlinear_solver_statistics.num_iteration
-                + self.r_2 * self.nonlinear_solver_statistics.hc_num_iteration
+                + self.r_2 * self.nonlinear_solver_statistics.hc_num_iteration  # type: ignore
                 + self.r_1 * self.time_manager.time_index
             )
         else:
@@ -73,7 +84,7 @@ class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFPr
         """
         self.save_data_iteration()
         self.iteration_exporter.write_pvd()
-        super().after_nonlinear_iteration(nonlinear_increment)
+        super().after_nonlinear_iteration(nonlinear_increment)  # type: ignore
 
     def after_nonlinear_convergence(self) -> None:
         """Save model state after nonlinear convergence.
@@ -84,10 +95,10 @@ class IterationExportingMixin(DataSavingMixinExtendedProtocol, HCProtocol, TPFPr
         """
         self.save_data_iteration()
         self.iteration_exporter.write_pvd()
-        super().after_nonlinear_convergence()
+        super().after_nonlinear_convergence()  # type: ignore
 
     def after_nonlinear_failure(self) -> None:
         """Save model state after nonlinear failure."""
         self.save_data_iteration()
         self.iteration_exporter.write_pvd()
-        super().after_nonlinear_failure()
+        super().after_nonlinear_failure()  # type: ignore

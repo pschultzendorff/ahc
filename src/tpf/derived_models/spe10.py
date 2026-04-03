@@ -72,12 +72,11 @@ INITIAL_PRESSURE: float = BHP
 def download_spe10_data(
     data_dir: pathlib.Path, zip_filepath: pathlib.Path = DATA_DIR / ZIP_FILENAME
 ) -> None:
-    """Download the SPE10porosity and permeability data, and store them
-    locally."""
+    """Download the SPE10 porosity and permeability data."""
     # Ensure the destination directory exists.
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Download the ZIP file.
+    # Download the ZIP file containing the SPE10 dataset.
     logger.info(f"Downloading dataset from {URL}")
     response = requests.get(URL)
     response.raise_for_status()
@@ -108,12 +107,13 @@ def download_spe10_data(
             + " contents."
         )
 
+    # Clean up.
     zip_filepath.unlink()
     logger.info("Downloaded files cleaned up.")
 
 
 def load_spe10_data(data_dir: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
-    """Load the SPE10data into :class:`~numpy.ndarray`.
+    """Load the SPE10 data into a :class:`~numpy.ndarray`.
 
     Returns:
         tuple: A tuple containing:
@@ -151,14 +151,26 @@ def load_spe10_data(data_dir: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
 
     logger.info("Loading permeability and porosity data.")
     perm_data = np.loadtxt(str(perm_file)).reshape(3, 85, 220, 60)  # unit: [mD]
-    # Convert permeability to m^2.
+
+    # Convert permeability which comes in mD to m^2.
     perm_data *= pp.MILLIDARCY
     poro_data = np.loadtxt(str(poro_file)).reshape(85, 220, 60)  # unit: [-]
 
     return perm_data, poro_data
 
 
-class EquationsSPE10(TPFProtocol):
+# NOTE All SPE10 classes are purely mixins, i.e., the only superclasses are protocols.
+# This ensures that the SPE10 model can be added on top of both adaptive homotopy
+# continuation and adaptive Newton.
+# For example, super().prepare_simulation calls either
+# SolutionStrategyHC.prepare_simulation or EstimatesSolutionStrategy.prepare_simulation.
+# If SPE10SolutionStrategyMixin would subclass EstimatesSolutionStrategy, this could not
+# be solved dynamically.
+# On the downside, mypy complains about missing methods or calls to abstract methods
+# with trivial body in the (protocol) superclass. We ingore these complaints.
+
+
+class SPE10EquationsMixin(TPFProtocol):
     """Mixin class to provide the SPE10 model equations and data.
 
     Takes care of:
@@ -192,26 +204,29 @@ class EquationsSPE10(TPFProtocol):
         """
         return np.maximum(self._porosity, np.full_like(self._porosity, 1e-5))
 
-    def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:  # type: ignore
+    def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         r"""Volumetric phase source term. Given as volumetric flux.
 
-        Five-spot setup. Water (wetting) injection in the center, oil (nonwetting)
-        production in the four corners.
+        Five-spot setup. Water (wetting) injection in the center. Mixture production in
+        the corners via Dirichlet bc.
 
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
+        array: np.ndarray = np.zeros(self.g.num_cells)
+
         if phase.name == self.wetting.name:
-            array: np.ndarray = super().phase_fluid_source(g, phase)
+            # Center well injecting water.
             array[center_cell_id(g)] = phase.convert_units(
                 INJECTION_RATE, "m^3"
             ) / phase.convert_units(pp.DAY, "s")  # 87.5 m^3/day in [m^3/s]
             return array
-        elif phase.name == self.nonwetting.name:
-            return super().phase_fluid_source(g, phase)
+
+        # No injection wells for oil.
+        return array
 
 
-class ModifiedBoundarySPE10(TPFProtocol):
+class SPE10ModifiedBoundaryMixin(TPFProtocol):
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann).
 
@@ -245,7 +260,7 @@ class ModifiedBoundarySPE10(TPFProtocol):
         return bc
 
 
-class SolutionStrategySPE10(TPFProtocol):
+class SPE10SolutionStrategyMixin(TPFProtocol):
     """Mixin class to provide the SPE10 model data.
 
     Takes care of:
@@ -333,14 +348,6 @@ class SolutionStrategySPE10(TPFProtocol):
         if hasattr(self, "iteration_exporter"):
             self.iteration_exporter.add_constant_data(data)  # type: ignore
 
-        # # Additionally, add them to the list of variables to make plotting easier.
-        # pp.set_solution_values(
-        #     "permeability_kxx",
-        #     data[-2],
-        #     data=self.mdg.subdomains(return_data=True)[0][1],
-        # )
-        # pp.set_solution_values("porosity", self.g, self._permeability[1])
-
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
@@ -361,20 +368,26 @@ class SolutionStrategySPE10(TPFProtocol):
         )
 
     def prepare_simulation(self) -> None:
+        # Ignore mypy. When mixed in with a concrete class, self.set_materials and
+        # super().prepare_simulation exist.
+
+        # Initialize materials and geometry early so the grid is available.
         self.set_materials()  # type: ignore
         self.set_geometry()
-        # Initialize permeability and porosity now. Must be done after setting the
-        # geometry but before setting equations.
+
+        # SPE10 porosity/permeability depend on the grid, so load them after geometry
+        # creation and before equation setup.
         self.load_spe10_model(self.mdg.subdomains()[0])
-        # Continue with the simulation preparation. This will run ``set_geometry`` and
-        # ``set_materials`` again, which is not an issue.
+
+        # Continue with the standard simulation setup. This calls set_materials and
+        # set_geometry again, which is harmless here.
         super().prepare_simulation()  # type: ignore
-        # Save porosity and permeability only after the exporter is initialized. Else,
-        # they would be overwritten.
+
+        # Export SPE10 fields after exporter initialization.
         self.add_constant_spe10_data()
 
 
-class ModelGeometrySPE10(TPFProtocol):
+class SPE10ModelGeometryMixin(TPFProtocol):
     def set_domain(self) -> None:
         r"""Single layer of the SPE10 problem 2 model. Extend of the full domain is
         :math:`\qty{1200 x 2200 x 170}{\feet}`. A single layer is
@@ -455,9 +468,9 @@ class ModelGeometrySPE10(TPFProtocol):
         return meshing_kwargs
 
 
-# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
-# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
-# with care. We ignore the error.
 class SPE10Mixin(
-    EquationsSPE10, ModifiedBoundarySPE10, SolutionStrategySPE10, ModelGeometrySPE10
-): ...  # type: ignore
+    SPE10EquationsMixin,
+    SPE10ModifiedBoundaryMixin,
+    SPE10SolutionStrategyMixin,
+    SPE10ModelGeometryMixin,
+): ...

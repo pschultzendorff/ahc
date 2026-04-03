@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
-import scipy.sparse as sps
-from matplotlib import cm
-from numba import njit, prange
+import scipy.sparse as sps  # type: ignore[import-untyped]
+from mpl_toolkits.mplot3d import Axes3D  # type: ignore[import-untyped]
+from numba import njit, prange  # type: ignore[import-untyped]
 
 
 def plot_quadratic_pressures(
@@ -36,30 +36,31 @@ def plot_quadratic_pressures(
     x = np.linspace(bounding_box["xmin"], bounding_box["xmax"], 100)
     y = np.linspace(bounding_box["ymin"], bounding_box["ymax"], 100)
     xv, yv = np.meshgrid(x, y)
-    xv = xv.flatten()
-    yv = yv.flatten()
+    xv_flat = xv.flatten()
+    yv_flat = yv.flatten()
 
     cell_nodes_map = sps.find(g.cell_nodes().T)[1]
     nodes_of_cell = cell_nodes_map.reshape(g.num_cells, g.dim + 1)
 
-    viz_mesh_to_grid = find_points_in_triangles(xv, yv, g.nodes[:2].T[nodes_of_cell])
+    viz_mesh_to_grid = find_points_in_triangles(
+        xv_flat, yv, g.nodes[:2].T[nodes_of_cell]
+    )
     viz_mesh_coeffs = coeffs[viz_mesh_to_grid]
 
     pressure = (
-        viz_mesh_coeffs[..., 0] * xv**2
-        + viz_mesh_coeffs[..., 1] * xv * yv
-        + viz_mesh_coeffs[..., 2] * xv
-        + viz_mesh_coeffs[..., 3] * yv**2
-        + viz_mesh_coeffs[..., 4] * yv
+        viz_mesh_coeffs[..., 0] * xv_flat**2
+        + viz_mesh_coeffs[..., 1] * xv_flat * yv_flat
+        + viz_mesh_coeffs[..., 2] * xv_flat
+        + viz_mesh_coeffs[..., 3] * yv_flat**2
+        + viz_mesh_coeffs[..., 4] * yv_flat
         + viz_mesh_coeffs[..., 5]
     )
 
-    xv = xv.reshape((100, 100))
-    yv = yv.reshape((100, 100))
     pressure = pressure.reshape((100, 100))
 
     # Create a 3D plot
-    fig, ax = plt.subplots(figsize=(10, 8), subplot_kw={"projection": "3d"})
+    fig, ax_temp = plt.subplots(figsize=(10, 8), subplot_kw={"projection": "3d"})
+    ax: Axes3D = ax_temp  # type: ignore[assignment]
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Pressure")
@@ -85,7 +86,12 @@ def plot_quadratic_pressures(
 
     # Plot
     ax.plot_surface(
-        xv, yv, pressure_safe, cmap=cm.coolwarm, linewidth=0, antialiased=False
+        xv,
+        yv,
+        pressure_safe,
+        cmap=plt.colormaps["coolwarm"],
+        linewidth=0,
+        antialiased=False,  # type: ignore[attr-defined]
     )
     ax.view_init(elev=50, azim=30)
     ax.set_xlim(bounding_box["xmin"], bounding_box["xmax"])

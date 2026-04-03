@@ -1,8 +1,7 @@
-import functools
 import itertools
 import logging
 import typing
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 import numpy as np
 import porepy as pp
@@ -15,24 +14,13 @@ from tpf.models.constitutive_laws_tpf import (
     RelPermConstants,
 )
 from tpf.models.error_estimate import (
-    DataSavingEst,
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
+    ErrorEstimatesTwoPhaseFlow,
+    EstimatesDataSavingMixin,
+    EstimatesSolutionStrategy,
 )
-from tpf.models.flow_and_transport import SolutionStrategyTPF, TwoPhaseFlow
+from tpf.models.flow_and_transport import TPFSolutionStrategy
 from tpf.models.phase import FluidPhase
-from tpf.models.protocol import (
-    EstimatesProtocol,
-    HCProtocol,
-    ReconstructionProtocol,
-    TPFProtocol,
-)
-from tpf.models.reconstruction import (
-    EquationsRecMixin,
-    EquilibratedFluxMixin,
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-)
+from tpf.models.protocol import HCProtocol
 from tpf.numerics.quadrature import Integral
 from tpf.utils.constants_and_typing import (
     CAPILLARY_FLUX,
@@ -81,8 +69,8 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         self,
         saturation_w: pp.ad.Operator,
         phase: FluidPhase,
-        # Ignore mypy complaining about incompatible signature with supertype.
-    ) -> pp.ad.Operator:  # type: ignore[override]
+        rel_perm_constants: RelPermConstants | None = None,
+    ) -> pp.ad.Operator:
         # Return homotopy continuation relative permeability.
         #
         # mypy incorrectly assumes ``HCProtocol.rel_perm`` exists and is called. At
@@ -113,6 +101,7 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         self,
         saturation_w: np.ndarray,
         phase: FluidPhase,
+        rel_perm_constants: RelPermConstants | None = None,
     ) -> np.ndarray:
         rel_perm_1: np.ndarray = super().rel_perm_np(  # type: ignore
             saturation_w,  # type: ignore
@@ -134,7 +123,7 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
+class CapillaryPressureHC(HCProtocol, CapillaryPressure):
     @typing.override
     def set_cap_press_constants(self) -> None:
         cap_press_constants: dict[str, dict] = self.params.get(
@@ -221,9 +210,7 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):  # type: ignore
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class EstimatesHCMixin(
-    HCProtocol, EstimatesProtocol, ReconstructionProtocol, TPFProtocol
-):  # type: ignore
+class EstimatesHCMixin(HCProtocol):  # type: ignore
     def local_nc_est(self, flux_name: FLUX_NAME) -> None:
         """Calculate the local-in-space nonconformity error estimators.
 
@@ -560,9 +547,7 @@ class EstimatesHCMixin(
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class SolutionStrategyHC(
-    HCProtocol, EstimatesProtocol, ReconstructionProtocol, SolutionStrategyTPF
-):  # type: ignore
+class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
     def __init__(self, params=None) -> None:
         super().__init__(params=params)
         self.hc_toggle_fl: float = 1.0
@@ -1046,10 +1031,10 @@ class SolutionStrategyHC(
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
         # NOTE Here, we explicitely do NOT want to call
-        # ``SolutionStrategyEstMixin.check_convergence``, but
+        # ``EstimatesSolutionStrategy.check_convergence``, but
         # ``TwoPhaseFlow.check_convergence``. The former logs estimators we are not
         # interested in.
-        converged, diverged = SolutionStrategyTPF.check_convergence(
+        converged, diverged = TPFSolutionStrategy.check_convergence(
             self, nonlinear_increment, residual, reference_residual, nl_params
         )
 
@@ -1185,7 +1170,7 @@ class SolutionStrategyHC(
     # endregion
 
 
-class DataSavingHC(DataSavingEst):
+class DataSavingHC(EstimatesDataSavingMixin):
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
@@ -1219,7 +1204,10 @@ class DataSavingHC(DataSavingEst):
         return data
 
 
-class TwoPhaseFlowHC(
+# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
+# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
+# with care. We ignore the error.
+class TwoPhaseFlowHC(  # type: ignore
     # HC constitutive laws mixins:
     RelativePermeabilityHC,
     CapillaryPressureHC,
@@ -1228,14 +1216,6 @@ class TwoPhaseFlowHC(
     EstimatesHCMixin,
     SolutionStrategyHC,
     DataSavingHC,
-    # Estimator mixins:
-    ErrorEstimateMixin,
-    SolutionStrategyEst,
-    # Reconstruction mixins:
-    GlobalPressureMixin,
-    PressureReconstructionMixin,
-    EquilibratedFluxMixin,
-    EquationsRecMixin,
-    # The rest
-    TwoPhaseFlow,
+    # Estimator model:
+    ErrorEstimatesTwoPhaseFlow,
 ): ...  # type: ignore

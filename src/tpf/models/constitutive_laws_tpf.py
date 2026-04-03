@@ -438,7 +438,7 @@ class CapillaryPressure(TPFProtocol):
         ...
 
     def entry_pressure(
-        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None, **kwargs
+        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None
     ) -> pp.ad.Operator:
         r"""Entry pressure function.
 
@@ -460,7 +460,7 @@ class CapillaryPressure(TPFProtocol):
         return pp.ad.Scalar(cap_press_constants.entry_pressure, name="entry pressure")
 
     def entry_pressure_np(
-        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None, **kwargs
+        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None
     ) -> float | np.ndarray:
         r"""Entry pressure function for numpy.
 
@@ -468,7 +468,6 @@ class CapillaryPressure(TPFProtocol):
             g: Grid object.
             cap_press_constants: Capillary pressure constants. If set, overrides
                 :attr:`self._cap_press_constants`. Default is ``None``.
-            **kwargs:
 
         Returns:
             Entry pressure.
@@ -526,17 +525,17 @@ class CapillaryPressure(TPFProtocol):
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
         if kwargs.get("divide_by_entry_pressure", False):
-            entry_pressure = pp.ad.Scalar(1, name="entry pressure")
+            entry_pressure: pp.ad.Operator = pp.ad.Scalar(1, name="entry pressure")
         else:
-            entry_pressure: pp.ad.Operator = self.entry_pressure(
-                self.g, cap_press_constants=cap_press_constants, **kwargs
+            entry_pressure = self.entry_pressure(
+                self.g, cap_press_constants=cap_press_constants
             )
 
         s_normalized = self.normalize_saturation(saturation_w, self.wetting)
 
         if cap_press_constants.model is None:
             # Return cap. pressure 0. Do NOT limit to avoid non zero derivatives.
-            p_c = pp.ad.DenseArray(
+            p_c: pp.ad.Operator = pp.ad.DenseArray(
                 np.zeros(
                     self.g.num_cells,
                 )
@@ -544,7 +543,7 @@ class CapillaryPressure(TPFProtocol):
 
         else:
             if cap_press_constants.model == "Brooks-Corey":
-                p_c: pp.ad.Operator = entry_pressure * s_normalized ** pp.ad.Scalar(
+                p_c = entry_pressure * s_normalized ** pp.ad.Scalar(
                     -1 / cap_press_constants.n_b
                 )
             elif cap_press_constants.model == "linear":
@@ -600,21 +599,21 @@ class CapillaryPressure(TPFProtocol):
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
         if kwargs.get("divide_by_entry_pressure", False):
-            entry_pressure = 1.0
+            entry_pressure: float | np.ndarray = 1.0
         else:
-            entry_pressure: float | np.ndarray = self.entry_pressure_np(
-                self.g, cap_press_constants=cap_press_constants, **kwargs
+            entry_pressure = self.entry_pressure_np(
+                self.g, cap_press_constants=cap_press_constants
             )
 
         s_normalized = self.normalize_saturation_np(saturation_w, self.wetting)
 
         if cap_press_constants.model is None:
             # Return cap. pressure 0. Do NOT limit to avoid non zero derivatives.
-            p_c = 0 * s_normalized
+            p_c: np.ndarray = 0 * s_normalized
 
         else:
             if cap_press_constants.model == "Brooks-Corey":
-                p_c: np.ndarray = entry_pressure * np.power(
+                p_c = entry_pressure * np.power(
                     s_normalized,
                     -1 / cap_press_constants.n_b,
                     out=np.full_like(s_normalized, cap_press_constants.max),
@@ -716,10 +715,10 @@ class CapillaryPressure(TPFProtocol):
         if cap_press_constants is None:
             cap_press_constants = self._cap_press_constants
         if kwargs.get("divide_by_entry_pressure", False):
-            entry_pressure = 1.0
+            entry_pressure: float | np.ndarray = 1.0
         else:
-            entry_pressure: float | np.ndarray = self.entry_pressure_np(
-                self.g, cap_press_constants=cap_press_constants, **kwargs
+            entry_pressure = self.entry_pressure_np(
+                self.g, cap_press_constants=cap_press_constants
             )
 
         s_normalized: np.ndarray = self.normalize_saturation_np(
@@ -813,3 +812,207 @@ def validate_constants() -> None:
     """Check that the relative permeability and capillary pressure models go in hand."""
     # TODO: Implement this function.
     pass
+
+
+# region CONSTITUTIVE LAWS
+
+
+class DarcyFluxes(TPFProtocol):
+    def phase_potential_discretization(self, g: pp.Grid) -> pp.ad.TpfaAd:
+        return pp.ad.TpfaAd(self.flux_key, [g])
+
+    def capillary_potential_discretization(self, g: pp.Grid) -> pp.ad.TpfaAd:
+        return pp.ad.TpfaAd(self.cap_potential_key, [g])
+
+    def phase_mobility_discretization(
+        self, g: pp.Grid, phase: FluidPhase
+    ) -> pp.ad.UpwindAd:
+        return pp.ad.UpwindAd(phase.mobility_key, [g])
+
+    def phase_mobility(
+        self,
+        g: pp.Grid,
+        phase: FluidPhase,
+    ) -> pp.ad.Operator:
+        r"""Evaluate upwinded phase mobility :math:`\lambda_\alpha`.
+
+        The phase mobility is evaluated with phase-potential upwinding as described in
+        [Hamon, F. P., Mallison, B. T. & Tchelepi, H. A. Implicit Hybrid Upwinding
+        for two-phase flow in heterogeneous porous media with buoyancy and capillarity.
+        Computer Methods in Applied Mechanics and Engineering 331, 701–727 (2018).].
+        More specifically, the phase mobility on edge :math:`e = K \cap K'`is evaluated
+        as follows:
+
+        .. math::
+            \lambda_{\alpha,e} = \begin{cases}
+                    \lambda_{alpha}(s_{w,K}) & \text{if } \Delta p_{\alpha,K,K'} +
+                        g_{\alpha,K,K'} \geq 0,\\
+                    \lambda_{alpha}(s_{w,K'}) & \text{if } \Delta p_{\alpha,K,K'} +
+                        g_{\alpha,K,K'} \geq 0 < 0.\\
+                \end{cases}
+
+        TODO Implement upwinding in the gravity case.
+
+        Parameters:
+            g: Model grid.
+            phase: Fluid phase for which the mobility is calculated.
+
+        Returns:
+            Phase mobility.
+
+        """
+        # Get data and discretization.
+        viscosity = pp.ad.Scalar(phase.viscosity, name=f"{phase.name}_viscosity")
+        upwind = self.phase_mobility_discretization(g, phase)
+
+        # NOTE Neumann bc are no-flow, hence no need to determine mobilities there.
+        mobility = (upwind.upwind() @ self.rel_perm(self.wetting.s, phase)) / viscosity
+        return mobility
+
+    def total_mobility(self, g: pp.Grid) -> pp.ad.Operator:
+        r"""Sum phase mobilities to obtain total mobility :math:`\lambda_\mathrm{t}`.
+
+        To avoid division by zero on boundaries, we add a small epsilon.
+
+        Parameters:
+            g: Grid object.
+
+        Returns:
+            Total mobility.
+
+        """
+        return pp.ad.sum_operator_list(
+            [self.phase_mobility(g, phase) for phase in self.phases.values()],
+            name="total mobility",
+        ) + pp.ad.Scalar(1e-7)
+
+    def phase_potential(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
+        """Phase potential times permeability. Combines pressure and buoyancy potential.
+
+        Note: This is not the phase potential itself, as we multiply with the medium's
+        permeability in the TPFA discretization. However, this does not matter when used
+        to determine the upwinding direction.
+
+        Note: This is zero at Neumann boundaries.
+
+        """
+        # Get phase data & discretization.
+        pressure_phase_bc_dir = pp.ad.DenseArray(
+            self.bc_dirichlet_pressure_values(g, phase)
+        )
+        phase_vector_source = pp.ad.DenseArray(self.vector_source(g, phase))
+        tpfa = self.phase_potential_discretization(g)
+
+        # Phase flux terms.
+        pressure_potential = (
+            tpfa.flux() @ phase.p + tpfa.bound_flux() @ pressure_phase_bc_dir
+        )
+        buyoancy_potential = -tpfa.vector_source() @ phase_vector_source
+
+        # Add together:
+        potential = pressure_potential + buyoancy_potential
+        potential.set_name(f"{phase.name} potential")
+        return potential
+
+    def total_flux(self, g: pp.Grid) -> pp.ad.Operator:
+        """Total volume flux.
+
+        This is always calculated in terms of the nonwetting pressure and the capillary
+        pressure (i.e. in terms of the wetting Saturation). Note that, unlike in the
+        phase flux functions, the mobilities are already included in this formulation.
+
+        SI Units: kg/s -> Depends on the units of the other parameters.
+
+        """
+        # Get data and discretizations.
+        vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
+        vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+
+        # NOTE Some notes on the boundary conditions of the potential discretizations
+        # and the total flux:
+        # - Neumann boundaries: We assume no-flow boundaries.
+        # - Dirichlet boundaries: The total flux is a function of the mobilities and
+        #   phase potentials. We assume that only outflow takes place, i.e., upwinded
+        #   mobilities are taken from inside the domain and no capillary flux occurs.
+
+        # NOTE We use TPFA for discretization of the capillary flux. Don't know the
+        # reason, but apparently this was somehow necessary in 2023. Possibly stability
+        # reasons.
+        # NOTE As capillary flux over boundaries is assumed to be zero, it does not
+        # matter which flux key is used for TPFA.
+        tpfa = self.phase_potential_discretization(g)
+        tpfa_cap_press = self.capillary_potential_discretization(g)
+
+        # Capillary pressure and phase mobilities.
+        pressure_c = self.cap_press(self.wetting.s)
+        mobility_w = self.phase_mobility(g, self.wetting)
+        mobility_n = self.phase_mobility(g, self.nonwetting)
+        mobility_t = self.total_mobility(g)
+
+        # Compute nonwetting & capillary pressure potential.
+        viscous_potential_n = self.phase_potential(g, self.nonwetting)
+        capillary_potential = tpfa_cap_press.flux() @ pressure_c
+
+        # Gravity terms.
+        buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
+        buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
+
+        # Finally, we can combine all viscous and buoyancy fluxes multiplied with phase
+        # mobilities to the total flux.
+        # FIXME Fix buoyancy potential.
+        total_flux = (
+            mobility_t * viscous_potential_n
+            - mobility_w * capillary_potential
+            - mobility_w * buoyancy_potential_w
+            - mobility_n * buoyancy_potential_n
+        )
+        total_flux.set_name("Total volume flux")
+        return total_flux
+
+    def wetting_flux(self, g: pp.Grid) -> pp.ad.Operator:
+        """Calculate the wetting flux from the total flux and fractional flow.
+
+        Note: This is different from obtaining the flux directly from phase pressures
+        and saturations.
+
+        Note: When equilibrating the wetting flux, it needs to be equilibrated w.r.t. to
+        this term as it's the term used when assembling the Jacobian and residual.
+
+        """
+        # Get data and spatial discretization.
+        tpfa = self.phase_potential_discretization(g)
+        tpfa_cap_press = self.capillary_potential_discretization(g)
+        vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
+        vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+
+        # Compute cap pressure and mobilities.
+        pressure_c = self.cap_press(self.wetting.s)
+        mobility_w = self.phase_mobility(g, self.wetting)
+        mobility_n = self.phase_mobility(g, self.nonwetting)
+        mobility_t = self.total_mobility(g)
+
+        # Compute capillary and buoyancy potential.
+        capillary_potential = tpfa_cap_press.flux() @ pressure_c
+        buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
+        buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
+
+        flux_t = self.total_flux(g)
+        fractional_flow = mobility_w / mobility_t
+
+        # FIXME Fix buoyancy potential.
+        wetting_flux = fractional_flow * flux_t + fractional_flow * mobility_n * (
+            capillary_potential + buoyancy_potential_w - buoyancy_potential_n
+        )
+        wetting_flux.set_name(("Wetting flux from fractional flow"))
+        return wetting_flux
+
+
+class TPFConstitutiveLaws(
+    RelativePermeability,
+    CapillaryPressure,
+    DarcyFluxes,
+    pp.constitutive_laws.DimensionReduction,
+): ...
+
+
+# endregion

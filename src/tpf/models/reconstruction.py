@@ -8,15 +8,18 @@ from typing import Any
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-from numba import njit, prange
+
+# Ignore type checking numba due to missing stubs.
+from numba import njit, prange  # type: ignore
 from porepy.viz.exporter import DataInput
 
 from tpf.models.flow_and_transport import (
-    DataSavingTPF,
-    SolutionStrategyTPF,
+    TPFDataSavingMixin,
+    TPFEquations,
+    TPFSolutionStrategy,
     TwoPhaseFlow,
 )
-from tpf.models.protocol import ReconstructionProtocol, TPFProtocol
+from tpf.models.protocol import ReconstructionProtocol
 from tpf.numerics.quadrature import (
     GaussLegendreQuadrature1D,
     TriangleQuadrature,
@@ -35,7 +38,7 @@ from tpf.utils.constants_and_typing import (
 logger = logging.getLogger(__name__)
 
 
-class GlobalPressureMixin(TPFProtocol):
+class GlobalPressureMixin(ReconstructionProtocol):
     DEFAULT_QUAD_DEGREE_1D = 10
     DEFAULT_INTERP_DEGREE = 100
 
@@ -227,7 +230,7 @@ class GlobalPressureMixin(TPFProtocol):
         return -self._compute_cap_press_integral(s_0, s_1, lambda w, n, t: w * n / t)
 
 
-class PressureReconstructionMixin(TPFProtocol):
+class PressureReconstructionMixin(ReconstructionProtocol):
     """Code and method are copied from Valera et al. (2024)."""
 
     DEFAULT_QUAD_DEGREE_REC = 4
@@ -508,7 +511,7 @@ class PressureReconstructionMixin(TPFProtocol):
         )
 
 
-class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
+class EquilibratedFluxMixin(ReconstructionProtocol):
     """Methods to equilibrate fluxes during the Newton iteration.
 
     Note: If the grid is updated during the simulation, the opposite side nodes and sign
@@ -728,7 +731,8 @@ class EquilibratedFluxMixin(ReconstructionProtocol, TPFProtocol):
         }
 
 
-class EquationsRecMixin(TPFProtocol):
+class RecEquations(ReconstructionProtocol, TPFEquations):
+    @typing.override
     def set_equations(self) -> None:
         """Set additional equations needed for reconstructions.
 
@@ -835,9 +839,9 @@ class EquationsRecMixin(TPFProtocol):
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class SolutionStrategyRec(  # type: ignore
+class RecSolutionStrategy(  # type: ignore
     ReconstructionProtocol,
-    SolutionStrategyTPF,
+    TPFSolutionStrategy,
 ):
     @property
     @typing.override
@@ -1270,7 +1274,7 @@ def linalg_solve_batch(A_batch: np.ndarray, b_batch: np.ndarray) -> np.ndarray:
     return solutions
 
 
-class DataSavingRec(DataSavingTPF):
+class RecDataSavingMixin(TPFDataSavingMixin):
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
@@ -1334,12 +1338,12 @@ class DataSavingRec(DataSavingTPF):
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class TwoPhaseFlowReconstruction(  # type: ignore
+class ReconstructionTwoPhaseFlow(  # type: ignore
     GlobalPressureMixin,
     PressureReconstructionMixin,
     EquilibratedFluxMixin,
-    EquationsRecMixin,
-    SolutionStrategyRec,
-    DataSavingRec,
+    RecEquations,
+    RecSolutionStrategy,
+    RecDataSavingMixin,
     TwoPhaseFlow,
 ): ...  # type: ignore

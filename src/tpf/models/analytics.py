@@ -9,10 +9,10 @@ import numpy as np
 import porepy as pp
 from porepy.viz.exporter import DataInput
 
-from tpf.models.error_estimate import TwoPhaseFlowErrorEstimate
-from tpf.models.protocol import EstimatesProtocol, ReconstructionProtocol, TPFProtocol
+from tpf.models.error_estimate import ErrorEstimatesTwoPhaseFlow
+from tpf.models.protocol import EstimatesProtocol
 from tpf.models.reconstruction import (
-    DataSavingRec,
+    RecDataSavingMixin,
     evaluate_poly_at_points,
 )
 from tpf.numerics.quadrature import Integral
@@ -34,9 +34,13 @@ logger = logging.getLogger(__name__)
 np.seterr(under="ignore")
 
 
-class ErrorEstimateAnalyticsMixin(
-    EstimatesProtocol, ReconstructionProtocol, TPFProtocol
-):
+class ErrorEstimateAnalyticsMixin(EstimatesProtocol):
+    """Analytics and debugging functionality for :class:`ErrorEstimates`."""
+
+    # NOTE This is purely a mixin, i.e., has no concrete superclass. We ignore mypy
+    # complaining about missing methods or calls to abstract methods with trivial body
+    # in superclass.
+
     def local_pressure_potential(self, pressure_key: PRESSURE_KEY) -> None:
         def evaluate_potential_from_coeffs(
             x: np.ndarray,
@@ -124,18 +128,18 @@ class ErrorEstimateAnalyticsMixin(
 
         # 2: Get reconstructed pressure coefficients and mobilities.
         if flux_name == TOTAL_FLUX:
-            pressure_keys = (GLOBAL_PRESSURE,)
-            mobility_keys = ("total_mobility",)
+            pressure_keys = [GLOBAL_PRESSURE]
+            mobility_keys = ["total_mobility"]
         elif flux_name == WETTING_FLUX:
-            pressure_keys = (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE)
-            mobility_keys = ("total_mobility", "fractional_flow")
+            pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
+            mobility_keys = ["total_mobility", "fractional_flow"]
         else:
             raise ValueError(f"Unknown flux name: {flux_name}")
 
-        pressure_coeffs_new = {}
-        pressure_coeffs_old = {}
-        mobilities_new = {}
-        mobilities_old = {}
+        pressure_coeffs_new: dict[str, np.ndarray] = {}
+        pressure_coeffs_old: dict[str, np.ndarray] = {}
+        mobilities_new: dict[str, np.ndarray] = {}
+        mobilities_old: dict[str, np.ndarray] = {}
 
         for pressure_key in pressure_keys:
             pressure_coeffs_new[pressure_key] = pp.get_solution_values(
@@ -272,7 +276,7 @@ class ErrorEstimateAnalyticsMixin(
             saturation = self.eval_saturation(pressure)
             return np.repeat(np.min(saturation, axis=0)[None, ...], 6, axis=0)
 
-        integral: Integral = self.quadrature_est.integrate(
+        integral_min: Integral = self.quadrature_est.integrate(
             functools.partial(integrand_min, pressure_coeffs=pressure_coeffs),
             self.quadpy_elements,
             recalc_points=False,
@@ -280,7 +284,7 @@ class ErrorEstimateAnalyticsMixin(
         )
         pp.set_solution_values(
             f"s_w_min_{specifier}",
-            integral.elementwise.squeeze() / self.quadrature_est.volumes,
+            integral_min.elementwise.squeeze() / self.quadrature_est.volumes,
             self.g_data,
             iterate_index=0,
         )
@@ -293,7 +297,7 @@ class ErrorEstimateAnalyticsMixin(
             saturation = self.eval_saturation(pressure)
             return np.repeat(np.max(saturation, axis=0)[None, ...], 6, axis=0)
 
-        integral: Integral = self.quadrature_est.integrate(
+        integral_max: Integral = self.quadrature_est.integrate(
             functools.partial(integrand_max, pressure_coeffs=pressure_coeffs),
             self.quadpy_elements,
             recalc_points=False,
@@ -301,7 +305,7 @@ class ErrorEstimateAnalyticsMixin(
         )
         pp.set_solution_values(
             f"s_w_max_{specifier}",
-            integral.elementwise.squeeze() / self.quadrature_est.volumes,
+            integral_max.elementwise.squeeze() / self.quadrature_est.volumes,
             self.g_data,
             iterate_index=0,
         )
@@ -333,7 +337,7 @@ class ErrorEstimateAnalyticsMixin(
         )
 
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
-        super().after_nonlinear_iteration(nonlinear_increment)
+        super().after_nonlinear_iteration(nonlinear_increment)  # type: ignore
         self.local_pressure_potential(GLOBAL_PRESSURE)
         self.local_pressure_potential(COMPLEMENTARY_PRESSURE)
         self.local_flux_norm(TOTAL_FLUX)
@@ -356,7 +360,7 @@ class ErrorEstimateAnalyticsMixin(
 
         plot_quadratic_pressures(
             self.g,
-            self._domain.bounding_box,
+            self.domain.bounding_box,
             global_pressure_coeffs,
             save_path=save_path,
         )
@@ -371,7 +375,7 @@ class ErrorEstimateAnalyticsMixin(
 
         plot_quadratic_pressures(
             self.g,
-            self._domain.bounding_box,
+            self.domain.bounding_box,
             global_pressure_coeffs,
             save_path=save_path,
         )
@@ -385,7 +389,7 @@ class ErrorEstimateAnalyticsMixin(
         )
         plot_quadratic_pressures(
             self.g,
-            self._domain.bounding_box,
+            self.domain.bounding_box,
             complementary_pressure_coeffs,
             save_path=save_path,
         )
@@ -398,13 +402,13 @@ class ErrorEstimateAnalyticsMixin(
         )
         plot_quadratic_pressures(
             self.g,
-            self._domain.bounding_box,
+            self.domain.bounding_box,
             complementary_pressure_coeffs,
             save_path=save_path,
         )
 
 
-class DataSavingEst(DataSavingRec):
+class EstDataSavingMixin(RecDataSavingMixin):
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
@@ -474,8 +478,8 @@ class DataSavingEst(DataSavingRec):
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
-class TwoPhaseFlowErrorEstimateAnalytics(
+class TwoPhaseFlowErrorEstimateAnalytics(  # type: ignore
     ErrorEstimateAnalyticsMixin,
-    DataSavingEst,
-    TwoPhaseFlowErrorEstimate,
-): ...  # type: ignore
+    EstDataSavingMixin,
+    ErrorEstimatesTwoPhaseFlow,
+): ...

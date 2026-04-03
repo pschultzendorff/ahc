@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 import porepy as pp
-import scipy.sparse as sps
+import scipy.sparse as sps  # type: ignore[import-untyped]
 from porepy.numerics.ad.forward_mode import AdArray
 from porepy.numerics.ad.functions import FloatType
 
@@ -94,10 +94,14 @@ def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
         Jacobian is set to zero.
 
     """
+    # NOTE This function raises a number of mypy errors. In the PorePy function
+    # pp.numerics.ad.functions.maximum, the same errors exist, but are not treated. We
+    # simply ignore all errors.
+
     # If neither var_0 or var_1 are ``AdArrays``, return the ``np.minimum`` function.
     if not isinstance(var_0, AdArray) and not isinstance(var_1, AdArray):
         # FIXME: According to the type hints, this should not be possible.
-        return np.minimum(var_0, var_1, dtype=np.float64)
+        return np.minimum(var_0, var_1, dtype=np.float64)  # type: ignore
 
     # Make a fall-back zero Jacobian for constant arguments.
     # EK: It is not clear if this is relevant, or if we filter out these cases with the
@@ -105,7 +109,7 @@ def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
     # know clearer how the Ad-machinery should be used.
     zero_jac = 0
     if isinstance(var_0, AdArray):
-        zero_jac = sps.csr_matrix(var_0.jac.shape)
+        zero_jac = sps.csr_matrix(var_0.jac.shape)  # type: ignore
     elif isinstance(var_1, AdArray):
         zero_jac = sps.csr_matrix(var_1.jac.shape)
 
@@ -157,16 +161,16 @@ def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
         return AdArray(min_val, 0)
 
     # Start from ``var_0``, then change entries corresponding to inds.
-    min_jac = jacs[0].copy()
+    min_jac = jacs[0].copy()  # type: ignore
 
     if isinstance(min_jac, sps.spmatrix):
         # Enforce csr format, unless the matrix is csc, in which case we keep it.
         if not min_jac.getformat() == "csc":
-            min_jac = min_jac.tocsr()
-        lines = pp.matrix_operations.slice_mat(jacs[1].tocsr(), inds)
+            min_jac = min_jac.tocsr()  # type: ignore
+        lines = pp.matrix_operations.slice_mat(jacs[1].tocsr(), inds)  # type: ignore
         pp.matrix_operations.merge_matrices(min_jac, lines, inds, min_jac.getformat())
     else:
-        min_jac[inds] = jacs[1][inds]
+        min_jac[inds] = jacs[1][inds]  # type: ignore
 
     return AdArray(min_val, min_jac)
 

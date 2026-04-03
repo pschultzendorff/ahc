@@ -14,11 +14,11 @@ for the model.
 
 import copy
 import logging
-import math
 import pathlib
 from typing import Any
 
-import gmsh
+# Ignore type checking gmsh due to missing stubs.
+import gmsh  # type: ignore
 import numpy as np
 import porepy as pp
 import requests
@@ -250,11 +250,6 @@ def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
             + "};\n"
         )
 
-        well_1_pts: list[str] = []
-        well_2_pts: list[str] = []
-        well_1_lns: list[str] = []
-        well_2_lns: list[str] = []
-
         # Add wells plus 3 boxes of increasing size around the wells to ensure
         # well-conditioned cells. Without the boxes, the large size difference between
         # the wells and other features can create ill-conditioned cells.
@@ -359,7 +354,7 @@ def fix_face_normals(
 
     # Get all entities
     entities: list[tuple[int, int]] = gmsh.model.getEntities(2)
-    points: np.ndarray = gmsh.model.mesh.getNodes(-1, -1)[1].reshape(-1, 3)  # type: ignore
+    points: np.ndarray = gmsh.model.mesh.getNodes(-1, -1)[1].reshape(-1, 3)
 
     # Function to calculate the normal of a triangle
     def calculate_normal(triangle: np.ndarray) -> np.ndarray:
@@ -378,7 +373,8 @@ def fix_face_normals(
         for elem_type, elem_tags, nodes in zip(element_types, element_tags, node_tags):
             if elem_type == 2:
                 # Convert to zero-based index
-                triangles: np.ndarray = nodes.reshape(-1, 3) - 1  # type: ignore
+                triangles: np.ndarray = nodes.reshape(-1, 3) - 1
+
                 # Loop through all simplices and swap order of vertices if normal points
                 # in the wrong direction.
                 for i, triangle in enumerate(triangles):
@@ -478,10 +474,21 @@ def LeverettJfunction(permeability: ArrayLike, porosity: ArrayLike) -> np.ndarra
     """
     permeability = np.asarray(permeability)
     porosity = np.asarray(porosity)
-    return np.sqrt(porosity / permeability) * 6.12e-3  # type: ignore
+    return np.sqrt(porosity / permeability) * 6.12e-3
 
 
-class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
+# NOTE All SPE11 classes are purely mixins, i.e., the only superclasses are protocols.
+# This ensures that the SPE11 model can be added on top of both adaptive homotopy
+# continuation and adaptive Newton.
+# For example, super().prepare_simulation calls either
+# SolutionStrategyHC.prepare_simulation or EstimatesSolutionStrategy.prepare_simulation.
+# If SPE11SolutionStrategyMixin would subclass EstimatesSolutionStrategy, this could not
+# be solved dynamically.
+# On the downside, mypy complains about missing methods or calls to abstract methods
+# with trivial body in the (protocol) superclass. We ingore these complaints.
+
+
+class SPE11CapillaryPressureMixin(SPE11Protocol, TPFProtocol):
     """Spatially heterogeneous capillary pressure and upper limit on capillary pressure."""
 
     def set_cap_press_constants(self) -> None:
@@ -505,7 +512,6 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
         self,
         g: pp.Grid | pp.BoundaryGrid,
         cap_press_constants: CapPressConstants | None = None,
-        **kwargs,
     ) -> pp.ad.Operator:
         r"""Entry pressure function.
 
@@ -513,25 +519,22 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
             g: Grid object.
             cap_press_constants: Capillary pressure constants. If set, overrides
                 :attr:`self._cap_press_constants`. Default is ``None``.
-            **kwargs: May contain the following keywords:
-                - faces: Flag indicating whether the entry pressure is evaluated on cell
-                    faces (instead of the default cell centers). Default is False.
 
         Returns:
             Entry pressure.
 
         """
         if self.params.get("spe11_heterogeneous_cap_pressure", True):
-            # We know that the entry pressure is an np.ndarray.
+            # Ignore mypy. g is a pp.Grid and self.entry_pressure_np returns an array in
+            # this case.
             return pp.ad.DenseArray(
-                self.entry_pressure_np(g, cap_press_constants, **kwargs)  # type: ignore
+                self.entry_pressure_np(g, cap_press_constants)  # type: ignore
             )
         else:
-            # We know that the entry pressure is a scalar.
             return pp.ad.Scalar(self.params["spe11_entry_pressure"])
 
     def entry_pressure_np(
-        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None, **kwargs
+        self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None
     ) -> float | np.ndarray:
         r"""Entry pressure function for numpy.
 
@@ -539,9 +542,6 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
             g: Grid object.
             cap_press_constants: Capillary pressure constants. If set, overrides
                 :attr:`self._cap_press_constants`. Default is ``None``.
-            **kwargs: May contain the following keywords:
-                - faces: Flag indicating whether the entry pressure is evaluated on cell
-                    faces (instead of the default cell centers). Default is False.
 
         Returns:
             Entry pressure.
@@ -553,23 +553,16 @@ class CapillaryPressureSPE11(SPE11Protocol, TPFProtocol):
                 for facies, ep in self.spe11_params["ENTRY_PRESSURE"].items():
                     entry_pressure[g.tags[facies + "_simplices"]] = ep
             elif self.spe11_case == "B":
-                entry_pressure: np.ndarray = LeverettJfunction(
+                entry_pressure = LeverettJfunction(
                     self.permeability(g)["kxx"], self.porosity(g)
                 )
-
-            # Map to faces.
-            if kwargs.get("faces", False):
-                cells_to_faces = g.cell_faces
-                entry_pressure = cells_to_faces @ entry_pressure
-                # Divide inner faces by 2 to obtain the averaged value.
-                entry_pressure[g.get_internal_faces()] /= 2
 
             return entry_pressure
         else:
             return self.params["spe11_entry_pressure"]
 
 
-class EquationsSPE11(SPE11Protocol, TPFProtocol):
+class SPE11EquationsMixin(SPE11Protocol, TPFProtocol):
     """Mixin class to provide the SPE11 model inspired equations and data.
 
     Takes care of:
@@ -581,7 +574,7 @@ class EquationsSPE11(SPE11Protocol, TPFProtocol):
 
     """
 
-    def permeability(self, g: pp.Grid) -> dict[str, np.ndarray]:
+    def permeability(self, g: pp.Grid) -> np.ndarray | dict[str, np.ndarray]:
         """Solid permeability. Units are set by :attr:`self.solid`."""
         permeability: np.ndarray = np.zeros(g.num_cells)
         for facies, perm in self.spe11_params["PERMEABILITY"].items():
@@ -595,17 +588,20 @@ class EquationsSPE11(SPE11Protocol, TPFProtocol):
             porosity[g.tags[facies + "_simplices"]] = por
         return porosity
 
-    def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:  # type: ignore
+    def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         r"""Volumetric phase source term. Given as volumetric flux.
 
-        Two injection wells are placed. One in the upper section of the domain and one
-        in the lower section.
+        Two CO2 injection wells are placed. One in the upper section of the domain and
+        one in the lower section.
 
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
+        array = np.zeros(g.num_cells)
+
         if phase.name == self.nonwetting.name:
-            array: np.ndarray = super().phase_fluid_source(g, phase)
+            # Two wells injecting CO2.
+
             # Lower well.
             well_1_ids: np.ndarray = well_cell_id(
                 g,
@@ -653,12 +649,12 @@ class EquationsSPE11(SPE11Protocol, TPFProtocol):
                 self.spe11_params["INJECTION_RATE"], "m^3"
             ) / (phase.convert_units(pp.SECOND, "s") * len(well_2_ids))
             return array
-            # return super().phase_fluid_source(g, phase)
-        elif phase.name == self.wetting.name:
-            return super().phase_fluid_source(g, phase)
+
+        # No water is injected.
+        return array
 
 
-class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
+class SPE11ModifiedBoundaryMixin(SPE11Protocol, TPFProtocol):
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann).
 
@@ -683,7 +679,7 @@ class ModifiedBoundarySPE11(SPE11Protocol, TPFProtocol):
         return bc_values
 
 
-class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):
+class SPE11ModelGeometryMixin(SPE11Protocol, TPFProtocol):
     def set_domain(self) -> None:
         """Set domain of the problem."""
         box: dict[str, pp.number] = {
@@ -709,7 +705,7 @@ class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):
         # Copy facies tags.
         for key, value in extended_domain_g.tags.items():
             if key.startswith("facies"):
-                active_g.tags[key] = value[self.active_cells]  # type: ignore[index]
+                active_g.tags[key] = value[self.active_cells]
 
         # Set subgrid as domain.
         self.mdg = copy.deepcopy(self.extended_domain)
@@ -728,7 +724,7 @@ class ModelGeometrySPE11(SPE11Protocol, TPFProtocol):
         assert np.isclose(width, self.spe11_params["WIDTH"])
 
 
-class SolutionStrategySPE11(TPFProtocol):
+class SPE11SolutionStrategyMixin(SPE11Protocol, TPFProtocol):
     """Mixin class to provide the SPE11 model data.
 
     Takes care of:
@@ -739,8 +735,7 @@ class SolutionStrategySPE11(TPFProtocol):
     """
 
     def __init__(self, params: dict | None) -> None:
-        # :attr:`self.spe11_case` has to be set before :meth:`self.set_phases` is
-        # called.
+        # self.spe11_case has to be set before self.set_phases is called.
         if params is None:
             params = {}
         self.spe11_case: str = params.get("spe11_case", "A")
@@ -755,6 +750,8 @@ class SolutionStrategySPE11(TPFProtocol):
                 + "Please choose either 'A' or 'B'."
             )
 
+        # Ignore mypy. When mixed in with a concrete class, super().__init__ takes
+        # params.
         super().__init__(params)  # type: ignore
 
     def set_phases(self) -> None:
@@ -789,9 +786,9 @@ class SolutionStrategySPE11(TPFProtocol):
             iterate_index=0,
         )
 
-    # For the next two methods, ignore type errors due do unknown methods/attributes and
-    # the wrong type for self.permeability.
     def prepare_simulation(self) -> None:
+        # Ignore mypy. When mixed in with a concrete class, self.set_materials and
+        # super().prepare_simulation exist.
         self.set_materials()  # type: ignore
         self.set_geometry()
         super().prepare_simulation()  # type: ignore
@@ -805,47 +802,49 @@ class SolutionStrategySPE11(TPFProtocol):
         extended_domain_g = self.extended_domain.subdomains()[0]
         full_array = np.zeros(extended_domain_g.num_cells)
 
+        # Ignore mypy. Permeability is always dict.
         for dim, perm in self.permeability(self.g).items():  # type: ignore
             extended_perm = full_array.copy()
-            extended_perm[self.active_cells] = perm  # type: ignore[index]
+            extended_perm[self.active_cells] = perm
             data.append((extended_domain_g, "permeability_" + dim, extended_perm))
 
         extended_porosity = full_array.copy()
-        extended_porosity[self.active_cells] = self.porosity(self.g)  # type: ignore[index]
+        extended_porosity[self.active_cells] = self.porosity(self.g)
         data.append((extended_domain_g, "porosity", extended_porosity))
 
         # Entry pressure is only a distribution if it is heterogeneous.
         if self.params["spe11_heterogeneous_cap_pressure"]:
             extended_entry_pressure = full_array.copy()
-            extended_entry_pressure[self.active_cells] = self.entry_pressure_np(  # type: ignore
-                self.g
-            )
-            data.append((extended_domain_g, "entry_pressure", extended_entry_pressure))  # type: ignore
+            extended_entry_pressure[self.active_cells] = self.entry_pressure_np(self.g)
+            data.append((extended_domain_g, "entry_pressure", extended_entry_pressure))
 
         self.exporter.add_constant_data(data)
+
         # For convenience, add the porosity and permeability to the iteration exporter
         # if it exists.
         if hasattr(self, "iteration_exporter"):
-            self.iteration_exporter.add_constant_data(data)  # type: ignore
+            self.iteration_exporter.add_constant_data(data)
 
 
-# Protocol is subclassed just to ensure correct method resolution order.
-class DataSavingEstSPE11(SPE11Protocol):
+class SPE11DataSavingEstMixin(SPE11Protocol, TPFProtocol):
     def _data_to_export(
         self, time_step_index: int | None = None, iterate_index: int | None = None
     ) -> list[DataInput]:
-        data = super()._data_to_export(  # type: ignore
+
+        # Ignore mypy. When mixed in, super()._data_to_export exists.
+        data: list[tuple[pp.Grid, str, np.ndarray]] = super()._data_to_export(  # type: ignore
             time_step_index, iterate_index
         )
-        updated_data = []
+        updated_data: list[DataInput] = []
 
         # Add zero values on inactive cells for proper visualization.
         extended_domain_g = self.extended_domain.subdomains()[0]
         for _, name, array in data:
             full_array = np.zeros(extended_domain_g.num_cells)
-            full_array[self.active_cells] = array  # type: ignore[index]
+            full_array[self.active_cells] = array
             array = full_array
             updated_data.append((extended_domain_g, name, array))
+
         return updated_data
 
     def initialize_data_saving(self) -> None:
@@ -866,14 +865,11 @@ class DataSavingEstSPE11(SPE11Protocol):
             )
 
 
-# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
-# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
-# with care. We ignore the error.
 class SPE11Mixin(
-    CapillaryPressureSPE11,
-    EquationsSPE11,
-    ModifiedBoundarySPE11,
-    SolutionStrategySPE11,
-    ModelGeometrySPE11,
-    DataSavingEstSPE11,
-): ...  # type: ignore
+    SPE11CapillaryPressureMixin,
+    SPE11EquationsMixin,
+    SPE11ModifiedBoundaryMixin,
+    SPE11SolutionStrategyMixin,
+    SPE11ModelGeometryMixin,
+    SPE11DataSavingEstMixin,
+): ...

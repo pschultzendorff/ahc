@@ -1,7 +1,5 @@
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
-from numpy.typing import ArrayLike
-
 from tpf.numerics.quadrature import TriangleQuadrature
 from tpf.utils.constants_and_typing import FLUX_NAME
 from tpf.viz.solver_statistics import (
@@ -12,12 +10,9 @@ from tpf.viz.solver_statistics import (
 )
 
 if not TYPE_CHECKING:
-    # This branch is accessed in python runtime.
-    # NOTE See Warning in module docstring before attempting anything here.
-    class TPFProtocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+    # This branch is accessed during python runtime.
 
-    class HCProtocol:
+    class TPFProtocol:
         """This is an empty placeholder of the protocol, used for type hints."""
 
     class ReconstructionProtocol:
@@ -26,27 +21,30 @@ if not TYPE_CHECKING:
     class EstimatesProtocol:
         """This is an empty placeholder of the protocol, used for type hints."""
 
+    class HCProtocol:
+        """This is an empty placeholder of the protocol, used for type hints."""
+
     class AdaptiveNewtonProtocol:
         """This is an empty placeholder of the protocol, used for type hints."""
 
     class SPE11Protocol:
         """This is an empty placeholder of the protocol, used for type hints."""
 
-    class DataSavingMixinExtendedProtocol:
+    class IterationDataSavingProtocol:
         """This is an empty placeholder of the protocol, used for type hints."""
 
 else:
     # This branch is accessed by mypy and linters.
     import numpy as np
     import porepy as pp
-    from porepy.models.protocol import DataSavingProtocol, PorePyModel
+    from porepy.models.protocol import PorePyModel
     from porepy.viz.exporter import DataInput
 
     from tpf.models.constitutive_laws_tpf import CapPressConstants, RelPermConstants
     from tpf.models.phase import FluidPhase
     from tpf.utils.constants_and_typing import PRESSURE_KEY
 
-    class TPFProtocol(PorePyModel):
+    class TPFProtocol(PorePyModel, Protocol):
         # Variables & equations
         primary_pressure_var: str
         """Name of primary pressure variable. Normally provided by a mixin of instance
@@ -148,7 +146,6 @@ else:
         @property
         def uses_hc(self) -> bool:
             """"""
-            ...
 
         def normalize_saturation(
             self,
@@ -156,7 +153,6 @@ else:
             phase: FluidPhase | None = None,
         ) -> pp.ad.Operator:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-            ...
 
         def normalize_saturation_np(
             self,
@@ -164,21 +160,18 @@ else:
             phase: FluidPhase,
         ) -> np.ndarray:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-            ...
 
         def normalize_saturation_deriv(
             self,
             phase: FluidPhase,
         ) -> pp.ad.Operator:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-            ...
 
         def normalize_saturation_deriv_np(
             self,
             phase: FluidPhase,
         ) -> float:
             """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
-            ...
 
         # Constitutive laws
         def rel_perm(
@@ -191,7 +184,6 @@ else:
             :class:`RelativePermeability`.
 
             """
-            ...
 
         def rel_perm_np(
             self,
@@ -204,26 +196,22 @@ else:
             :class:`CapillaryPressure`.
 
             """
-            ...
 
         def set_rel_perm_constants(self) -> None:
             """Normally provided by a mixin of instance
             :class:`RelativePermeability`.
 
             """
-            ...
 
         def entry_pressure_np(
             self,
             g: pp.Grid,
             cap_press_constants: CapPressConstants | None = None,
-            **kwargs,
         ) -> float | np.ndarray:
             """Entry pressure for capillary pressure. Normally provided by a mixin of
             instance :class:`CapillaryPressure`.
 
             """
-            ...
 
         def cap_press(
             self,
@@ -235,7 +223,6 @@ else:
             :class:`CapillaryPressure`.
 
             """
-            ...
 
         def cap_press_np(
             self,
@@ -248,7 +235,6 @@ else:
             :class:`CapillaryPressure`.
 
             """
-            ...
 
         def cap_press_deriv(
             self,
@@ -260,7 +246,6 @@ else:
             :class:`CapillaryPressure`.
 
             """
-            ...
 
         def cap_press_deriv_np(
             self,
@@ -273,16 +258,15 @@ else:
             :class:`CapillaryPressure`.
 
             """
-            ...
 
         def set_cap_press_constants(self) -> None:
             """Normally provided by a mixin of instance :class:`CapillaryPressure`."""
-            ...
 
         # DarcyFluxes attributes and methods:
         def phase_mobility_discretization(
             self, g: pp.Grid, phase: FluidPhase
-        ) -> pp.ad.UpwindAd: ...
+        ) -> pp.ad.UpwindAd:
+            """Normally provided by an instance of :class:`DarcyFluxes`"""
 
         def phase_mobility(
             self,
@@ -290,44 +274,34 @@ else:
             phase: FluidPhase,
         ) -> pp.ad.Operator:
             """Formula for the phase mobility for the given phase."""
-            ...
 
         def total_mobility(self, g: pp.Grid) -> pp.ad.Operator:
             """Formula for the total mobility."""
-            ...
 
         def phase_potential(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
             """Formula fo the phase potential."""
-            ...
 
         def total_flux(self, g: pp.Grid) -> pp.ad.Operator:
             """Total volume flux."""
-            ...
 
         def wetting_flux(self, g: pp.Grid) -> pp.ad.Operator:
             """Calculate the wetting flux from the total flux and fractional flow."""
-            ...
 
         # EquationsTPF
         def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
             """Volumetric phase source term."""
-            ...
 
         def total_fluid_source(self, g: pp.Grid) -> np.ndarray:
             """Volumetric total source."""
-            ...
 
         def vector_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
             """Volumetric phase vector source."""
-            ...
 
         def permeability(self, g: pp.Grid) -> np.ndarray | dict[str, np.ndarray]:
             """Solid permeability."""
-            ...
 
         def porosity(self, g: pp.Grid) -> np.ndarray:
             """Solid porosity."""
-            ...
 
         # BoundaryConditionsTPF attributes and methods:
         def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
@@ -335,13 +309,11 @@ else:
             provided by a mixin of instance :class:`BoundaryConditionsTPF`.
 
             """
-            ...
 
         def bc_dirichlet_pressure_values(
             self, g: pp.Grid, phase: FluidPhase
         ) -> np.ndarray:
             """Phase dependent pressure bc values on Dirichlet boundaries."""
-            ...
 
         # SolutionStrategyTPF attributes and methods:
         def bound_saturation(
@@ -352,13 +324,210 @@ else:
             iterate_index: int | None = None,
         ) -> np.ndarray:
             """Bound saturation values to physical limits."""
-            ...
 
         def assemble_residual(self) -> np.ndarray:
             """Assemble the residual."""
-            ...
 
-    class HCProtocol(Protocol):
+        # def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
+        #     """Method to be called after every non-linear iteration."""
+
+        # def after_nonlinear_convergence(self) -> None:
+        #     """Method to be called after every non-linear iteration."""
+
+        # def after_nonlinear_failure(self) -> None:
+        #     """Method to be called if the non-linear solver fails to converge."""
+
+    class ReconstructionProtocol(TPFProtocol, Protocol):
+        postproc_ad_ops: dict[str, pp.ad.Operator]
+        """Operators to be evaluated during post-processing. Normally provided by a
+        mixin of instance :class:`SolutionStrategyReconstruction`.
+
+        """
+
+        quadpy_elements: np.ndarray
+        """Grid cells in quadpy format."""
+
+        # PressureMixin attributes and methods:
+        def setup_glob_compl_pressure(self) -> None:
+            """Setup global pressure and global pressure interpolants."""
+
+        def calc_pressure_interpolants(self) -> None:
+            """Calculate interpolants values for the global and complementary pressure."""
+
+        def eval_glob_compl_pressure(
+            self,
+            s_w: np.ndarray,
+            pressure_key: PRESSURE_KEY,
+            p_n: np.ndarray | None = None,
+        ) -> np.ndarray:
+            """Evaluate the global or complementary pressure field for the given pressure
+            and saturation values.
+
+            """
+
+        def eval_saturation(self, q: np.ndarray) -> np.ndarray:
+            """Calculate wetting saturation from global pressure."""
+
+        def eval_glob_compl_pressure_on_domain(
+            self,
+            time_step_index: int | None = None,
+        ) -> None:
+            """Evaluate the global and complementary pressure fields on the full domain and
+            store it in the data dictionary.
+
+            """
+
+        def global_pressure_integral_part(
+            self, s_0: np.ndarray, s_1: np.ndarray
+        ) -> np.ndarray:
+            r"""Compute the integral in the global pressure formula for given integral
+            boundaries.
+
+            """
+
+        def complementary_pressure_integral_part(
+            self, s_0: np.ndarray, s_1: np.ndarray
+        ) -> np.ndarray:
+            r"""Compute complementary pressure from the rel. perm. and capillary pressure
+            functions.
+
+            """
+
+        def set_boundary_pressures(self) -> None:
+            """Set boundary pressures for the global and complementary pressure fields."""
+
+        # PressureReconstructionMixin attributes and methods:
+        def setup_pressure_reconstruction(self) -> None:
+            """Setup pressure reconstruction."""
+
+        def postprocess_pressure_vohralik(
+            self,
+            pressure_key: PRESSURE_KEY,
+            specifier: str = "",
+            prepare_simulation: bool = False,
+        ) -> None:
+            """Postprocess pressure into elementwise P2 polynomials."""
+
+        def reconstruct_pressure_vohralik(
+            self,
+            pressure_key: PRESSURE_KEY,
+            prepare_simulation: bool = False,
+        ) -> None:
+            r"""Reconstruct pressures in :math:`H^1_0(\Omega)` by applying the Oswald
+            interpolator."""
+
+        # EquilibratedFluxMixin attributes and methods:
+
+        def setup_flux_equilibration(self) -> None:
+            """Setup flux equilibration."""
+
+        def equilibrate_flux_during_Newton(
+            self,
+            flux_name: FLUX_NAME,
+            nonlinear_increment: np.ndarray | None = None,
+        ) -> None:
+            """Equilibrate an approximate flux solution at a given Newton iteration."""
+
+        def extend_fv_fluxes(
+            self,
+            flux_name: FLUX_NAME,
+            flux_specifier: str = "",
+            prepare_simulation: bool = False,
+        ) -> None:
+            """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions."""
+
+        def equilibrated_flux_mismatch(self) -> dict[str, float]:
+            r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)`
+            and being mass conservative.
+
+            """
+
+        # SolutionStrategyReconstructionsMixin attributes and methods:
+        def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
+            """Evaluate additional pressure and flux variables and save in data dictionary
+            after each iteration.
+
+            """
+
+        def postprocess_solution(
+            self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
+        ) -> None:
+            """Equilibrate fluxes and reconstruct pressures."""
+
+        def local_energy_norm(self) -> None:
+            r"""Calculate the local in space and time energy norm of the numerical
+            solution."""
+
+        def global_energy_norm(self) -> float:
+            r"""Calculate the global in space and local in time energy norm of the
+            numerical solution."""
+
+    class EstimatesProtocol(ReconstructionProtocol, Protocol):
+        #  EstimatesMixin attributes and methods:
+        quadrature_est_degree: int
+        quadrature_est: TriangleQuadrature
+        nonlinear_solver_statistics: SolverStatisticsEst
+
+        def setup_estimates(self) -> None:
+            """Setup error estimates."""
+
+        @staticmethod
+        def poincare_constant(g: pp.Grid) -> np.ndarray:
+            """Compute the Poincare constant."""
+
+        def local_residual_est(self, flux_name: FLUX_NAME) -> None:
+            """Calculate and store the local residual estimate for each element."""
+
+        def local_flux_est(self, flux_name: FLUX_NAME) -> None:
+            """Calculate and store the local flux estimate for each element."""
+
+        def local_darcy_est(
+            self, flux_name: FLUX_NAME, flux_specifier: str = ""
+        ) -> None:
+            """Calculate and store the local Darcy estimate for each element."""
+
+        @staticmethod
+        def _evaluate_pressure_potential_at_points(
+            coeffs: np.ndarray,
+            x: np.ndarray,
+            y: np.ndarray,
+        ) -> np.ndarray:
+            """Helper function to evaluate the potential of a P2 pressure defined by the
+            given coefficients at the specified points.
+
+            """
+
+        @staticmethod
+        def _evaluate_flux_at_points(
+            coeffs: np.ndarray,
+            x: np.ndarray,
+            y: np.ndarray,
+        ) -> np.ndarray:
+            r"""Helper function to evaluate the RT0 flux defined by the given coefficients
+            at the specified points.
+
+            """
+
+        def global_res_and_flux_est(self) -> float:
+            """Sum local flux and residual error estimators, integrate in time, and sum
+            total and wetting estimators.
+
+            """
+
+        def global_darcy_est(self) -> tuple[float, float]:
+            """Sum local Darcy error estimators and integrate in time."""
+
+        def global_sp_est(self) -> float:
+            """Sum local saturation-pressure error estimators and integrate in time."""
+
+        def global_darcy_and_sp_est(self) -> float:
+            """Sum global Darcy and saturation-pressure error estimators."""
+
+        # SolutionStrategyEstimatesMixin attributes and methods:
+        def set_initial_estimators(self) -> None:
+            """Initialize time step values for error estimators."""
+
+    class HCProtocol(EstimatesProtocol, Protocol):
         _rel_perm_constants_1: RelPermConstants
         """Relative permeability constants for the first phase."""
         _rel_perm_constants_2: RelPermConstants
@@ -380,7 +549,10 @@ else:
 
         """
 
-        nonlinear_solver_statistics: SolverStatisticsHC
+        # Protocols define different types for ``nonlinear_solver_statistics``, causing
+        # mypy errors. This is safe in practice, but ``nonlinear_solver_statistics``
+        # must be used with care. We ignore the error.
+        nonlinear_solver_statistics: SolverStatisticsHC  # type: ignore
 
         hc_is_converged: bool
         """Flag to indicate if the homotopy continuation has converged."""
@@ -400,48 +572,33 @@ else:
         original_time: float
         """Original time before time step cutting."""
 
-        def rel_perm(
-            self, saturation_w: pp.ad.Operator, phase: FluidPhase
-        ) -> pp.ad.Operator:
-            """Phase relative permeability."""
-            ...
-
         @property
         def hc_indices(self) -> list[int]:
             """"""
-            ...
 
         def global_discr_est(self) -> float:
             """Estimate for global discretization error."""
-            ...
 
         def global_spatial_est(self) -> float:
             """Estimate for global spatial discretization error."""
-            ...
 
         def global_temp_est(self) -> float:
             """Estimate for global temporal discretization error."""
-            ...
 
         def global_hc_est(self) -> float:
             """Estimate for global homotopy continuation error."""
-            ...
 
         def global_lin_est(self) -> float:
             """Estimate for global linearization error."""
-            ...
 
         def before_hc_loop(self) -> None:
             """Methods to run for homotopy continuation loop."""
-            ...
 
         def before_hc_iteration(self) -> None:
             """Methods to run for homotopy continuation iteration."""
-            ...
 
         def after_hc_iteration(self) -> None:
             """Methods to run after homotopy continuation iteration."""
-            ...
 
         def hc_check_convergence(
             self,
@@ -450,239 +607,18 @@ else:
             hc_params: dict[str, Any],
         ) -> tuple[bool, bool]:
             """Check if homotopy continuation has converged."""
-            ...
 
         def after_hc_convergence(self) -> None:
             """Methods to run after homotopy continuation convergence."""
-            ...
 
         def after_hc_failure(self) -> None:
             """Methods to run after homotopy continuation failure."""
-            ...
 
-    class ReconstructionProtocol(Protocol):
-        postproc_ad_ops: dict[str, pp.ad.Operator]
-        """Operators to be evaluated during post-processing. Normally provided by a
-        mixin of instance :class:`SolutionStrategyReconstruction`.
-
-        """
-
-        quadpy_elements: np.ndarray
-        """Grid cells in quadpy format."""
-
-        # PressureMixin attributes and methods:
-        def setup_glob_compl_pressure(self) -> None:
-            """Setup global pressure and global pressure interpolants."""
-            ...
-
-        def calc_pressure_interpolants(self) -> None:
-            """Calculate interpolants values for the global and complementary pressure."""
-            ...
-
-        def eval_glob_compl_pressure(
-            self,
-            s_w: np.ndarray,
-            pressure_key: PRESSURE_KEY,
-            entry_pressure: ArrayLike = 1.0,
-            p_n: np.ndarray | None = None,
-        ) -> np.ndarray:
-            """Evaluate the global or complementary pressure field for the given pressure
-            and saturation values.
-
-            """
-            ...
-
-        def eval_saturation(self, q: np.ndarray) -> np.ndarray:
-            """Calculate wetting saturation from global pressure."""
-            ...
-
-        def eval_glob_compl_pressure_on_domain(
-            self,
-            time_step_index: int | None = None,
-        ) -> None:
-            """Evaluate the global and complementary pressure fields on the full domain and
-            store it in the data dictionary.
-
-            """
-            ...
-
-        def global_pressure_integral_part(
-            self, s_0: np.ndarray, s_1: np.ndarray
-        ) -> np.ndarray:
-            r"""Compute the integral in the global pressure formula for given integral
-            boundaries.
-
-            """
-            ...
-
-        def complementary_pressure_integral_part(
-            self, s_0: np.ndarray, s_1: np.ndarray
-        ) -> np.ndarray:
-            r"""Compute complementary pressure from the rel. perm. and capillary pressure
-            functions.
-
-            """
-            ...
-
-        def set_boundary_pressures(self) -> None:
-            """Set boundary pressures for the global and complementary pressure fields."""
-            ...
-
-        # PressureReconstructionMixin attributes and methods:
-        def setup_pressure_reconstruction(self) -> None:
-            """Setup pressure reconstruction."""
-            ...
-
-        def postprocess_pressure_vohralik(
-            self,
-            pressure_key: PRESSURE_KEY,
-            specifier: str = "",
-            prepare_simulation: bool = False,
-        ) -> None:
-            """Postprocess pressure into elementwise P2 polynomials."""
-            ...
-
-        def reconstruct_pressure_vohralik(
-            self,
-            pressure_key: PRESSURE_KEY,
-            prepare_simulation: bool = False,
-        ) -> None:
-            r"""Reconstruct pressures in :math:`H^1_0(\Omega)` by applying the Oswald
-            interpolator."""
-            ...
-
-        # EquilibratedFluxMixin attributes and methods:
-
-        def setup_flux_equilibration(self) -> None:
-            """Setup flux equilibration."""
-            ...
-
-        def equilibrate_flux_during_Newton(
-            self,
-            flux_name: FLUX_NAME,
-            nonlinear_increment: np.ndarray | None = None,
-        ) -> None:
-            """Equilibrate an approximate flux solution at a given Newton iteration."""
-            ...
-
-        def extend_fv_fluxes(
-            self,
-            flux_name: FLUX_NAME,
-            flux_specifier: str = "",
-            prepare_simulation: bool = False,
-        ) -> None:
-            """Extend flux (eqilibrated or non-equilibrated) using RT0 basis functions."""
-            ...
-
-        def equilibrated_flux_mismatch(self) -> dict[str, float]:
-            r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)`
-            and being mass conservative.
-
-            """
-            ...
-
-        # SolutionStrategyReconstructionsMixin attributes and methods:
-        def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
-            """Evaluate additional pressure and flux variables and save in data dictionary
-            after each iteration.
-
-            """
-            ...
-
-        def postprocess_solution(
-            self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
-        ) -> None:
-            """Equilibrate fluxes and reconstruct pressures."""
-            ...
-
-        def local_energy_norm(self) -> None:
-            r"""Calculate the local in space and time energy norm of the numerical
-            solution."""
-            ...
-
-        def global_energy_norm(self) -> float:
-            r"""Calculate the global in space and local in time energy norm of the
-            numerical solution."""
-            ...
-
-    class EstimatesProtocol(Protocol):
-        #  EstimatesMixin attributes and methods:
-        quadrature_est_degree: int
-        quadrature_est: TriangleQuadrature
-        nonlinear_solver_statistics: SolverStatisticsEst
-
-        def setup_estimates(self) -> None:
-            """Setup error estimates."""
-            ...
-
-        def poincare_constant(self) -> float:
-            """Compute the Poincare constant."""
-            ...
-
-        def local_residual_est(self, flux_name: FLUX_NAME) -> None:
-            """Calculate and store the local residual estimate for each element."""
-            ...
-
-        def local_flux_est(self, flux_name: FLUX_NAME) -> None:
-            """Calculate and store the local flux estimate for each element."""
-            ...
-
-        def local_darcy_est(
-            self, flux_name: FLUX_NAME, flux_specifier: str = ""
-        ) -> None:
-            """Calculate and store the local Darcy estimate for each element."""
-            ...
-
-        @staticmethod
-        def _evaluate_pressure_potential_at_points(
-            coeffs: np.ndarray,
-            x: np.ndarray,
-            y: np.ndarray,
-        ) -> np.ndarray:
-            """Helper function to evaluate the potential of a P2 pressure defined by the
-            given coefficients at the specified points.
-
-            """
-            ...
-
-        @staticmethod
-        def _evaluate_flux_at_points(
-            coeffs: np.ndarray,
-            x: np.ndarray,
-            y: np.ndarray,
-        ) -> np.ndarray:
-            r"""Helper function to evaluate the RT0 flux defined by the given coefficients
-            at the specified points.
-
-            """
-            ...
-
-        def global_res_and_flux_est(self) -> float:
-            """Sum local flux and residual error estimators, integrate in time, and sum
-            total and wetting estimators.
-
-            """
-            ...
-
-        def global_darcy_est(self) -> tuple[float, float]:
-            """Sum local Darcy error estimators and integrate in time."""
-            ...
-
-        def global_sp_est(self) -> tuple[float, float]:
-            """Sum local saturation-pressure error estimators and integrate in time."""
-            ...
-
-        def global_darcy_and_sp_est(self) -> float:
-            """Sum global Darcy and saturation-pressure error estimators."""
-            ...
-
-        # SolutionStrategyEstimatesMixin attributes and methods:
-        def set_initial_estimators(self) -> None:
-            """Initialize time step values for error estimators."""
-            ...
-
-    class AdaptiveNewtonProtocol(Protocol):
-        nonlinear_solver_statistics: SolverStatisticsANewton
+    class AdaptiveNewtonProtocol(EstimatesProtocol, Protocol):
+        # Protocols define different types for ``nonlinear_solver_statistics``, causing
+        # mypy errors. This is safe in practice, but ``nonlinear_solver_statistics``
+        # must be used with care. We ignore the error.
+        nonlinear_solver_statistics: SolverStatisticsANewton  # type: ignore
 
         original_dt: Optional[float]
         """Original dt before time step cutting. If None, the time step was not cut."""
@@ -691,19 +627,15 @@ else:
 
         def global_spatial_est(self) -> float:
             """Estimate for global spatial discretization error."""
-            ...
 
         def global_temp_est(self) -> float:
             """Estimate for global temporal discretization error."""
-            ...
 
         def global_discr_est(self) -> float:
             """Estimate for global discretization error."""
-            ...
 
         def global_lin_est(self) -> float:
             """Estimate for global linearization error."""
-            ...
 
     class SPE11Protocol(Protocol):
         """Protocol for the SPE11 derived model."""
@@ -717,12 +649,17 @@ else:
         spe11_params: dict[str, Any]
         """Parameters for the specificSPE11 case."""
 
-    class DataSavingMixinExtendedProtocol(DataSavingProtocol):
+        extended_domain: pp.MixedDimensionalGrid
+        """Domain including inactive cells."""
+
+        active_cells: np.ndarray
+        """Indices of active cells."""
+
+    class IterationDataSavingProtocol(Protocol):
         def data_to_export_iteration(
             self,
         ) -> list[DataInput]:
             """Export data after nonlinear iteration."""
-            ...
 
         def _data_to_export(
             self,
@@ -733,4 +670,3 @@ else:
             ``data_to_export_iteration``
 
             """
-            ...
