@@ -2,6 +2,7 @@ from typing import Literal
 
 import porepy as pp
 import pytest
+from ahc.derived_models.spe10 import SPE10EquationsMixin
 from ahc.derived_models.utils import position_cell_id
 
 
@@ -46,4 +47,4 @@ def test_center_cell_ids(
     grid: Literal["cartesian_grid_2d"] | Literal["cartesian_grid_3d"],
     expected_center: list[int],
 ):
-    assert EquationsSPE10.center_cell_id(grid) == expected_center
+    assert SPE10EquationsMixin.center_cell_id(grid) == expected_center

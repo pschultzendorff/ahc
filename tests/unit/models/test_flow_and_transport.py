@@ -4,8 +4,8 @@ import numpy as np
 import porepy as pp
 import pytest
 from ahc.models.flow_and_transport import TwoPhaseFlow
-from ahc.models.protocol import TPFProtocol
 from ahc.models.phase import FluidPhase
+from ahc.models.protocol import TPFProtocol
 from ahc.utils.constants_and_typing import NONWETTING, WETTING
 
 # TODO Change the residual saturation of one phase and adjust the tests.
@@ -62,15 +62,11 @@ class TwoPhaseFlowEqationsSourceandGravity(TPFProtocol):
         return vals.ravel()
 
 
-class TwoPhaseFlowModifiedSetup(
-    TwoPhaseFlowEqationsSource,
-    TwoPhaseFlow
-): ...
+class TwoPhaseFlowModifiedSetup(TwoPhaseFlowEqationsSource, TwoPhaseFlow): ...
 
 
 class TwoPhaseFlowModifiedSetupGravity(
-    TwoPhaseFlowEqationsSourceandGravity,
-    TwoPhaseFlow()
+    TwoPhaseFlowEqationsSourceandGravity, TwoPhaseFlow()
 ): ...
 
 
@@ -80,7 +76,7 @@ def model() -> TwoPhaseFlowModifiedSetup:
     model.cap_press.cap_pressure_model = "linear"
     model._rel_perm_model = "Brooks-Corey"
     model._limit_rel_perm = "False"
-    model.grid_type() = 2
+    model.grid_type = "simplex"
     model.phys_size = 2
     model.prepare_simulation()
     model.before_nonlinear_loop()
@@ -336,9 +332,7 @@ def mobility_t(
             8,
             9,
         ]
-    ] = (
-        rel_perm_w / model._viscosity_w + rel_perm_n / model._viscosity_n
-    )
+    ] = rel_perm_w / model._viscosity_w + rel_perm_n / model._viscosity_n
     # The :math:`\epsilon=1e-7` is added in the model to prevent division by zero, hence
     # we add it here as well.
     return mobility_t + 1e-7
@@ -381,9 +375,7 @@ def mobility_w(model: TwoPhaseFlowModifiedSetup, rel_perm_w: np.ndarray) -> np.n
             8,
             9,
         ]
-    ] = (
-        rel_perm_w / model._viscosity_w
-    )
+    ] = rel_perm_w / model._viscosity_w
 
     return mobility_w
 
@@ -423,9 +415,7 @@ def mobility_n(model: TwoPhaseFlowModifiedSetup, rel_perm_n: np.ndarray) -> np.n
             8,
             9,
         ]
-    ] = (
-        rel_perm_n / model._viscosity_n
-    )
+    ] = rel_perm_n / model._viscosity_n
     return mobility_n
 
 
@@ -530,7 +520,7 @@ def test_flux_cap_pressure(
     div_flux_system = (div @ cap_flux_tpfa.flux @ model._cap_pressure()).evaluate(
         model.equation_system
     )
-    A, b = div_flux_system.jac, div_flux_system.val
+    A, _ = div_flux_system.jac, div_flux_system.val
     assert np.allclose(A.todense()[:, -4:], flux_cap_jac_wrt_saturation)
 
 
