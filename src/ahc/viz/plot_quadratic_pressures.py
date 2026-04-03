@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
+
+# Ignore missing stubs or types in scipy, mpl_toolkits, and numba.
 import scipy.sparse as sps  # type: ignore[import-untyped]
 from mpl_toolkits.mplot3d import Axes3D  # type: ignore[import-untyped]
 from numba import njit, prange  # type: ignore[import-untyped]

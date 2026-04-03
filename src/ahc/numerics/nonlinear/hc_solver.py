@@ -2,11 +2,14 @@ import logging
 from typing import Any
 
 import porepy as pp
-from ahc.models.protocol import HCProtocol
 from porepy.utils.ui_and_logging import (
     logging_redirect_tqdm_with_level as logging_redirect_tqdm,
 )
-from tqdm.auto import trange  # type: ignore [import-untyped]
+
+# Ignore missing stubs or types tqdm.
+from tqdm.auto import trange  # type: ignore
+
+from ahc.models.protocol import HCProtocol
 
 
 class HCSolver:
@@ -64,7 +67,7 @@ class HCSolver:
         with logging_redirect_tqdm([logging.root]):
             # Initialize a progress bar. Length is the number of maximal Newton
             # iterations.
-            hc_progressbar = trange(  # type: ignore
+            hc_progressbar = trange(
                 self.params["hc_max_iterations"],
                 desc="HC loop",
                 position=self.progress_bar_position,

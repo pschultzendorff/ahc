@@ -8,6 +8,11 @@ from typing import Any
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
+
+# Ignore type checking numba due to missing stubs.
+from numba import njit, prange  # type: ignore
+from porepy.viz.exporter import DataInput
+
 from ahc.models.flow_and_transport import (
     TPFDataSavingMixin,
     TPFEquations,
@@ -29,10 +34,6 @@ from ahc.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
-
-# Ignore type checking numba due to missing stubs.
-from numba import njit, prange  # type: ignore
-from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
@@ -832,9 +833,11 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
             add_to_postproc_ad_ops(name, op)
 
 
-# This could also be a mixin, but by subclassing ``SolutionStrategyTPF``, we avoid
-# having to pay attention to the order of the different solution strategy classes.
-#
+# RecSolutionStrategy could also be a mixin, but by subclassing ``SolutionStrategyTPF``,
+# we avoid having to pay attention to the order of the different solution strategy
+# classes.
+
+
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
 # errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
 # with care. We ignore the error.
@@ -1001,6 +1004,7 @@ class RecSolutionStrategy(  # type: ignore
                 self.equation_system
             )
             val = flux.val
+            # ``jac`` is an ``sps.spmatrix``, which mypy complains about.
             jac = flux.jac[  # type: ignore
                 :, self.g.num_cells : self.g.num_cells * 3
             ]  # Only primary variables.
@@ -1042,6 +1046,7 @@ class RecSolutionStrategy(  # type: ignore
                 )
                 pp.set_solution_values(
                     scalar_name,
+                    # Ignore mypy. scalar_value will be an array.
                     scalar_value,  # type: ignore
                     self.g_data,
                     iterate_index=0,
@@ -1345,4 +1350,4 @@ class ReconstructionTwoPhaseFlow(  # type: ignore
     RecSolutionStrategy,
     RecDataSavingMixin,
     TwoPhaseFlow,
-): ...  # type: ignore
+): ...

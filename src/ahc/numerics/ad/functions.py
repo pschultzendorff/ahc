@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import numpy as np
 import porepy as pp
+
+# Ignore missing stubs or types in scipy.
 import scipy.sparse as sps  # type: ignore[import-untyped]
 from porepy.numerics.ad.forward_mode import AdArray
 from porepy.numerics.ad.functions import FloatType

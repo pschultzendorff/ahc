@@ -4,6 +4,8 @@ from typing import Callable, Literal
 
 import numpy as np
 import porepy as pp
+
+# Ignore missing stubs or types in scipy and numba.
 import scipy.sparse as sps  # type: ignore[import-untyped]
 from numba import njit  # type: ignore[import-untyped]
 

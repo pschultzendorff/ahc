@@ -5,6 +5,8 @@ from typing import Any, Optional
 
 import numpy as np
 import porepy as pp
+from porepy.viz.exporter import DataInput
+
 from ahc.models.constitutive_laws_tpf import (
     CapillaryPressure,
     CapPressConstants,
@@ -28,7 +30,6 @@ from ahc.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
-from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
@@ -70,20 +71,16 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         phase: FluidPhase,
         rel_perm_constants: RelPermConstants | None = None,
     ) -> pp.ad.Operator:
-        # Return homotopy continuation relative permeability.
-        #
-        # mypy incorrectly assumes ``HCProtocol.rel_perm`` exists and is called. At
-        # runtime, ``HCProtocol`` lacks this method, so we ignore type errors, including
-        # wrong argument count and types.
-        rel_perm_1: pp.ad.Operator = super().rel_perm(  # type: ignore
-            saturation_w,  # type: ignore
-            phase,  # type: ignore
-            rel_perm_constants=self._rel_perm_constants_1,  # type: ignore
+        """Calculate homotopy continuation relative permeability."""
+        rel_perm_1: pp.ad.Operator = super().rel_perm(
+            saturation_w,
+            phase,
+            rel_perm_constants=self._rel_perm_constants_1,
         )
-        rel_perm_2: pp.ad.Operator = super().rel_perm(  # type: ignore
-            saturation_w,  # type: ignore
-            phase,  # type: ignore
-            rel_perm_constants=self._rel_perm_constants_2,  # type: ignore
+        rel_perm_2: pp.ad.Operator = super().rel_perm(
+            saturation_w,
+            phase,
+            rel_perm_constants=self._rel_perm_constants_2,
         )
         hc_rel_perm: pp.ad.Operator = (
             self.nonlinear_solver_statistics.hc_lambda_ad * rel_perm_1
@@ -102,15 +99,15 @@ class RelativePermeabilityHC(HCProtocol, RelativePermeability):  # type: ignore
         phase: FluidPhase,
         rel_perm_constants: RelPermConstants | None = None,
     ) -> np.ndarray:
-        rel_perm_1: np.ndarray = super().rel_perm_np(  # type: ignore
-            saturation_w,  # type: ignore
-            phase,  # type: ignore
-            rel_perm_constants=self._rel_perm_constants_1,  # type: ignore
+        rel_perm_1: np.ndarray = super().rel_perm_np(
+            saturation_w,
+            phase,
+            rel_perm_constants=self._rel_perm_constants_1,
         )
-        rel_perm_2: np.ndarray = super().rel_perm_np(  # type: ignore
-            saturation_w,  # type: ignore
-            phase,  # type: ignore
-            rel_perm_constants=self._rel_perm_constants_2,  # type: ignore
+        rel_perm_2: np.ndarray = super().rel_perm_np(
+            saturation_w,
+            phase,
+            rel_perm_constants=self._rel_perm_constants_2,
         )
         hc_rel_perm: np.ndarray = (
             self.nonlinear_solver_statistics.hc_lambda_fl * rel_perm_1
@@ -140,21 +137,16 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):
         saturation_w: pp.ad.Operator,
         cap_press_constants: CapPressConstants | None = None,
         **kwargs,
-        # Ignore mypy complaining about incompatible signature with supertype.
-    ) -> pp.ad.Operator:  # type: ignore[override]
-        # Return homotopy continuation capillary pressure.
-        #
-        # # mypy incorrectly assumes ``HCProtocol.cap_press`` exists and is called. At
-        # runtime, ``HCProtocol`` lacks this method, so we ignore type errors, including
-        # wrong argument count and types.
-        cap_press_1: pp.ad.Operator = super().cap_press(  # type: ignore
-            saturation_w,  # type: ignore
-            cap_press_constants=self._cap_press_constants_1,  # type: ignore
+    ) -> pp.ad.Operator:
+        """Calculate homotopy continuation capillary pressure."""
+        cap_press_1: pp.ad.Operator = super().cap_press(
+            saturation_w,
+            cap_press_constants=self._cap_press_constants_1,
             **kwargs,
         )
-        cap_press_2: pp.ad.Operator = super().cap_press(  # type: ignore
-            saturation_w,  # type: ignore
-            cap_press_constants=self._cap_press_constants_2,  # type: ignore
+        cap_press_2: pp.ad.Operator = super().cap_press(
+            saturation_w,
+            cap_press_constants=self._cap_press_constants_2,
             **kwargs,
         )
         hc_cap_press: pp.ad.Operator = (
@@ -174,14 +166,14 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):
         cap_press_constants: CapPressConstants | None = None,
         **kwargs,
     ) -> np.ndarray:
-        cap_press_1: np.ndarray = super().cap_press_np(  # type: ignore
-            saturation_w,  # type: ignore
-            cap_press_constants=self._cap_press_constants_1,  # type: ignore
+        cap_press_1: np.ndarray = super().cap_press_np(
+            saturation_w,
+            cap_press_constants=self._cap_press_constants_1,
             **kwargs,
         )
-        cap_press_2: np.ndarray = super().cap_press_np(  # type: ignore
-            saturation_w,  # type: ignore
-            cap_press_constants=self._cap_press_constants_2,  # type: ignore
+        cap_press_2: np.ndarray = super().cap_press_np(
+            saturation_w,
+            cap_press_constants=self._cap_press_constants_2,
             **kwargs,
         )
         hc_cap_press: np.ndarray = (
@@ -206,10 +198,7 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):
         )
 
 
-# Protocols define different types for ``nonlinear_solver_statistics``, causing mypy
-# errors. This is safe in practice, but ``nonlinear_solver_statistics`` must be used
-# with care. We ignore the error.
-class EstimatesHCMixin(HCProtocol):  # type: ignore
+class EstimatesHCMixin(HCProtocol):
     def local_nc_est(self, flux_name: FLUX_NAME) -> None:
         """Calculate the local-in-space nonconformity error estimators.
 
@@ -435,7 +424,7 @@ class EstimatesHCMixin(HCProtocol):  # type: ignore
         return self.global_darcy_est()
 
     def global_nc_and_sp_est(self) -> float:
-        # In ``EstimatesProtocol``, this method is abstract, which mypy complains about.
+        # In ``HCProtocol``, this method is abstract, which mypy complains about.
         return super().global_darcy_and_sp_est()  # type: ignore
 
     def global_spatial_est(self) -> float:
@@ -583,9 +572,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         self._hc_is_diverged = value
 
     def prepare_simulation(self) -> None:
-        # This is mixed with more ``SolutionStrategy`` classes that implement
-        # ``prepare_simulation``. We ignore the mypy error.
-        super().prepare_simulation()  # type: ignore
+        super().prepare_simulation()
 
         # Switch to goal cap. press. and rel. perms. to calculate
         # interpolants for global and complementary pressure.
@@ -639,8 +626,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         # NOTE The super call does **NOT** set initial values for the local flux,
         # residual, and nonconformity estimators at the ``hc_index``. This is never
         # needed, hence not an issue.
-        # In ``EstimatesProtocol``, this method is abstract, which mypy complains about.
-        super().set_initial_estimators()  # type: ignore
+        super().set_initial_estimators()
 
         # Initialize iterate values for local estimators.
         # NOTE HC and time step values for the continuation and linearization estimators
@@ -959,8 +945,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
     def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
         """Calculate fluxes and total mobility w.r.t. the goal relative
         permeabilities."""
-        # Ignore Pylance complaining about the method not being implemented.
-        super().eval_postproc_qtys(time_step_index=time_step_index)  # type: ignore
+        super().eval_postproc_qtys(time_step_index=time_step_index)
 
         # Switch const. laws to goal const. laws before evaluating the quantities.
         self.hc_toggle_fl = 0.0
@@ -975,6 +960,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
             quantity = self.postproc_ad_ops[quantity_name].value(self.equation_system)
             pp.set_solution_values(
                 f"{quantity_name}_wrt_goal_const_laws",
+                # Ignore mypy. quantity will be an array.
                 quantity,  # type: ignore
                 self.g_data,
                 time_step_index=time_step_index,
@@ -1086,7 +1072,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
 
         return converged, diverged
 
-    def after_nonlinear_convergence(self) -> None:  # type: ignore
+    def after_nonlinear_convergence(self) -> None:
         """Export and move to the next homotopy continuation step.
 
         When ``self._limit_saturation_change == True``, check if the wetting saturation
@@ -1217,4 +1203,4 @@ class TwoPhaseFlowHC(  # type: ignore
     DataSavingHC,
     # Estimator model:
     ErrorEstimatesTwoPhaseFlow,
-): ...  # type: ignore
+): ...
