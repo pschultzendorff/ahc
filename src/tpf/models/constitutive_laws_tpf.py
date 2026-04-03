@@ -6,11 +6,10 @@ from typing import Literal, TypeGuard
 
 import numpy as np
 import porepy as pp
-
-from tpf.models.phase import FluidPhase
-from tpf.models.protocol import TPFProtocol
-from tpf.numerics.ad.functions import minimum
-from tpf.utils.constants_and_typing import CAP_PRESS_MODEL, REL_PERM_MODEL
+from ahc.models.phase import FluidPhase
+from ahc.models.protocol import TPFProtocol
+from ahc.numerics.ad.functions import minimum
+from ahc.utils.constants_and_typing import CAP_PRESS_MODEL, REL_PERM_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -692,7 +691,7 @@ class CapillaryPressure(TPFProtocol):
         r"""Capillary pressure derivative for saturation of type
          :class:`~numpy.ndarray`.
 
-        This function is required in :meth:`tpf.models.reconstruction.GlobalPressure` to
+        This function is required in :meth:`ahc.models.reconstruction.GlobalPressure` to
         assemble the global and complementary pressure tables. For explanation of the
         implemented models, see :meth:`cap_press`.
 

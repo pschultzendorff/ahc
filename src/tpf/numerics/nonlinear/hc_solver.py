@@ -2,10 +2,10 @@ import logging
 from typing import Any
 
 import porepy as pp
+from ahc.models.protocol import HCProtocol
 from porepy.utils.ui_and_logging import (
     logging_redirect_tqdm_with_level as logging_redirect_tqdm,
 )
-from tpf.models.protocol import HCProtocol
 from tqdm.auto import trange  # type: ignore [import-untyped]
 
 

@@ -6,9 +6,9 @@ For now we provide parameter values for the following fluids:
 * CO2 (at atmospheric pressure & 20°C)
 
 The dictionary containing parameter values is obtained by, e.g.,
-``tpf.spe10.fluid_values.oil.``.
+``ahc.spe10.fluid_values.oil.``.
 They can be used in a simulation by passing, e.g.,
-``NONWETTING: tpf.models.phases.FluidPhase(tpf.spe10.fluid_values.oil)`` as
+``NONWETTING: ahc.models.phases.FluidPhase(ahc.spe10.fluid_values.oil)`` as
 a material parameter during model initiation.
 
 Dead oil:
@@ -36,9 +36,8 @@ pressure and 20°C.
 
 from typing import Any
 
+from ahc.utils.constants_and_typing import FEET, LB, cP
 from porepy.applications.material_values.fluid_values import water as _water
-
-from tpf.utils.constants_and_typing import FEET, LB, cP
 
 # The values in the paper are given in [cP] and [lb ft^-3]. We convert them to [Pa s]
 # and [kg m^-3]. Additionally we convert the density from surface density to reservoir

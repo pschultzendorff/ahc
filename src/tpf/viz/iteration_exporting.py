@@ -8,8 +8,7 @@ and adjusted for homotopy continuation.
 
 import numpy as np
 import porepy as pp
-
-from tpf.models.protocol import (
+from ahc.models.protocol import (
     IterationDataSavingProtocol,
     TPFProtocol,
 )

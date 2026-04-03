@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import porepy as pp
-
-from tpf.utils.constants_and_typing import PHASENAME
+from ahc.utils.constants_and_typing import PHASENAME
 
 
 class FluidPhase(pp.MaterialConstants):

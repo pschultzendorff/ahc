@@ -19,15 +19,14 @@ from typing import Any, Optional
 
 import numpy as np
 import porepy as pp
-
-from tpf.models.error_estimate import (
+from ahc.models.error_estimate import (
     ErrorEstimatesTwoPhaseFlow,
     EstimatesSolutionStrategy,
 )
-from tpf.models.flow_and_transport import TPFSolutionStrategy
-from tpf.models.protocol import AdaptiveNewtonProtocol
-from tpf.numerics.quadrature import Integral
-from tpf.utils.constants_and_typing import FLUX_NAME, TOTAL_FLUX, WETTING_FLUX
+from ahc.models.flow_and_transport import TPFSolutionStrategy
+from ahc.models.protocol import AdaptiveNewtonProtocol
+from ahc.numerics.quadrature import Integral
+from ahc.utils.constants_and_typing import FLUX_NAME, TOTAL_FLUX, WETTING_FLUX
 
 logger = logging.getLogger(__name__)
 

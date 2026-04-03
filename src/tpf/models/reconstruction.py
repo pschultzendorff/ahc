@@ -8,24 +8,19 @@ from typing import Any
 import numpy as np
 import porepy as pp
 import scipy.sparse as sps
-
-# Ignore type checking numba due to missing stubs.
-from numba import njit, prange  # type: ignore
-from porepy.viz.exporter import DataInput
-
-from tpf.models.flow_and_transport import (
+from ahc.models.flow_and_transport import (
     TPFDataSavingMixin,
     TPFEquations,
     TPFSolutionStrategy,
     TwoPhaseFlow,
 )
-from tpf.models.protocol import ReconstructionProtocol
-from tpf.numerics.quadrature import (
+from ahc.models.protocol import ReconstructionProtocol
+from ahc.numerics.quadrature import (
     GaussLegendreQuadrature1D,
     TriangleQuadrature,
     get_quadpy_elements,
 )
-from tpf.utils.constants_and_typing import (
+from ahc.utils.constants_and_typing import (
     CAPILLARY_FLUX,
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
@@ -34,6 +29,10 @@ from tpf.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
+
+# Ignore type checking numba due to missing stubs.
+from numba import njit, prange  # type: ignore
+from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
@@ -579,7 +578,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
 
         # NOTE This requires the variables to be shifted at each nonlinear iteration. By
         # default, this happens in
-        # :meth:`SolutionStrategyTPF.after_nonlinear_iteration`.
+        # :meth:`SolutionStrategyahc.after_nonlinear_iteration`.
         val: np.ndarray = pp.get_solution_values(
             flux_name, self.g_data, iterate_index=1
         )
@@ -702,7 +701,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
         r"""Calculate mismatch of the equilibrated flux from being in :math:`H(div)` and
         being mass conservative.
 
-        Check :meth:`tpf.models.two_phase_flow.EquationsTPF.set_equations` for details.
+        Check :meth:`ahc.models.two_phase_flow.Equationsahc.set_equations` for details.
 
         """
         # Calculate mismatches. The equilibrated flux values are stored in the data

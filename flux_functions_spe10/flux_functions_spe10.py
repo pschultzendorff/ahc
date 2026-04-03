@@ -3,9 +3,9 @@ import pathlib
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
+from ahc.derived_models.fluid_values import oil, water
+from ahc.derived_models.spe10 import HEIGHT
 from numpy.typing import ArrayLike
-from tpf.derived_models.fluid_values import oil, water
-from tpf.derived_models.spe10 import HEIGHT
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
@@ -103,7 +103,7 @@ def k_rw(S: ArrayLike, model: str) -> np.ndarray:
     if model == "Corey_2":
         rel_perm: np.ndarray = S**2
     elif model == "Corey_3":
-        rel_perm: np.ndarray = S**3
+        rel_perm = S**3
     elif model == "linear":
         rel_perm = S
     # Brooks-Corey-Mualem
@@ -131,7 +131,7 @@ def k_rn(S: ArrayLike, model: str) -> np.ndarray:
     if model == "Corey_2":
         rel_perm: np.ndarray = (1 - S) ** 2
     elif model == "Corey_3":
-        rel_perm: np.ndarray = (1 - S) ** 3
+        rel_perm = (1 - S) ** 3
     elif model == "linear":
         rel_perm = 1 - S
     # Brooks-Corey-Mualem

@@ -3,10 +3,10 @@ import pathlib
 import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
+from ahc.derived_models.fluid_values import oil, water
+from ahc.derived_models.spe10 import HEIGHT
+from ahc.derived_models.spe11 import case_B
 from numpy.typing import ArrayLike
-from tpf.derived_models.fluid_values import co2, oil, water
-from tpf.derived_models.spe10 import HEIGHT, WIDTH
-from tpf.derived_models.spe11 import LeverettJfunction, case_B
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 

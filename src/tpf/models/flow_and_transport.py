@@ -10,7 +10,7 @@ The model is implemented in the fractional flow formulation for phase pressures
 with nonwetting pressure and wetting saturation as the primary variables.
 
 Various constitutive relations, i.e., capillary pressure and relative permeability
-models are implemented in :mod:`tpf.models.constitutive_laws_tpf`.
+models are implemented in :mod:`ahc.models.constitutive_laws_tpf`.
 
 Currently, the module supports only no-flow Neumann boundary conditions, and outflow
 Dirichlet boundary conditions, both constant in time. Importantly, the capillary
@@ -57,13 +57,12 @@ from typing import Any
 
 import numpy as np
 import porepy as pp
+from ahc.models.constitutive_laws_tpf import TPFConstitutiveLaws
+from ahc.models.phase import FluidPhase
+from ahc.models.protocol import TPFProtocol
+from ahc.numerics.ad.functions import ad_pow as ad_pow
+from ahc.utils.constants_and_typing import NONWETTING, WETTING
 from porepy.viz.exporter import DataInput
-
-from tpf.models.constitutive_laws_tpf import TPFConstitutiveLaws
-from tpf.models.phase import FluidPhase
-from tpf.models.protocol import TPFProtocol
-from tpf.numerics.ad.functions import ad_pow as ad_pow
-from tpf.utils.constants_and_typing import NONWETTING, WETTING
 
 logger = logging.getLogger(__name__)
 

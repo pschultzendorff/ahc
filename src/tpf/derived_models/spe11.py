@@ -22,19 +22,18 @@ import gmsh  # type: ignore
 import numpy as np
 import porepy as pp
 import requests
+from ahc.derived_models.fluid_values import co2_reservoir as _co2_reservoir
+from ahc.derived_models.fluid_values import co2_surface as _co2_surface
+from ahc.derived_models.fluid_values import water as _water
+from ahc.derived_models.utils import well_cell_id
+from ahc.models.constitutive_laws_tpf import CapPressConstants
+from ahc.models.phase import FluidPhase
+from ahc.models.protocol import SPE11Protocol, TPFProtocol
+from ahc.utils.constants_and_typing import NONWETTING, WETTING
 from numpy.typing import ArrayLike
 from porepy.fracs.fracture_importer import dfm_from_gmsh
 from porepy.grids.partition import extract_subgrid
 from porepy.viz.exporter import DataInput
-
-from tpf.derived_models.fluid_values import co2_reservoir as _co2_reservoir
-from tpf.derived_models.fluid_values import co2_surface as _co2_surface
-from tpf.derived_models.fluid_values import water as _water
-from tpf.derived_models.utils import well_cell_id
-from tpf.models.constitutive_laws_tpf import CapPressConstants
-from tpf.models.phase import FluidPhase
-from tpf.models.protocol import SPE11Protocol, TPFProtocol
-from tpf.utils.constants_and_typing import NONWETTING, WETTING
 
 logger = logging.getLogger(__name__)
 

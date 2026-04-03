@@ -1,8 +1,8 @@
 from typing import TYPE_CHECKING, Any, Optional, Protocol
 
-from tpf.numerics.quadrature import TriangleQuadrature
-from tpf.utils.constants_and_typing import FLUX_NAME
-from tpf.viz.solver_statistics import (
+from ahc.numerics.quadrature import TriangleQuadrature
+from ahc.utils.constants_and_typing import FLUX_NAME
+from ahc.viz.solver_statistics import (
     SolverStatisticsANewton,
     SolverStatisticsEst,
     SolverStatisticsHC,
@@ -37,12 +37,11 @@ else:
     # This branch is accessed by mypy and linters.
     import numpy as np
     import porepy as pp
+    from ahc.models.constitutive_laws_tpf import CapPressConstants, RelPermConstants
+    from ahc.models.phase import FluidPhase
+    from ahc.utils.constants_and_typing import PRESSURE_KEY
     from porepy.models.protocol import PorePyModel
     from porepy.viz.exporter import DataInput
-
-    from tpf.models.constitutive_laws_tpf import CapPressConstants, RelPermConstants
-    from tpf.models.phase import FluidPhase
-    from tpf.utils.constants_and_typing import PRESSURE_KEY
 
     class TPFProtocol(PorePyModel, Protocol):
         # Variables & equations

@@ -5,24 +5,22 @@ from typing import Any, Optional
 
 import numpy as np
 import porepy as pp
-from porepy.viz.exporter import DataInput
-
-from tpf.models.constitutive_laws_tpf import (
+from ahc.models.constitutive_laws_tpf import (
     CapillaryPressure,
     CapPressConstants,
     RelativePermeability,
     RelPermConstants,
 )
-from tpf.models.error_estimate import (
+from ahc.models.error_estimate import (
     ErrorEstimatesTwoPhaseFlow,
     EstimatesDataSavingMixin,
     EstimatesSolutionStrategy,
 )
-from tpf.models.flow_and_transport import TPFSolutionStrategy
-from tpf.models.phase import FluidPhase
-from tpf.models.protocol import HCProtocol
-from tpf.numerics.quadrature import Integral
-from tpf.utils.constants_and_typing import (
+from ahc.models.flow_and_transport import TPFSolutionStrategy
+from ahc.models.phase import FluidPhase
+from ahc.models.protocol import HCProtocol
+from ahc.numerics.quadrature import Integral
+from ahc.utils.constants_and_typing import (
     CAPILLARY_FLUX,
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
@@ -30,6 +28,7 @@ from tpf.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
+from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 

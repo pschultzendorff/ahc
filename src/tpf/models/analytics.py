@@ -7,16 +7,14 @@ from typing import Literal
 
 import numpy as np
 import porepy as pp
-from porepy.viz.exporter import DataInput
-
-from tpf.models.error_estimate import ErrorEstimatesTwoPhaseFlow
-from tpf.models.protocol import EstimatesProtocol
-from tpf.models.reconstruction import (
+from ahc.models.error_estimate import ErrorEstimatesTwoPhaseFlow
+from ahc.models.protocol import EstimatesProtocol
+from ahc.models.reconstruction import (
     RecDataSavingMixin,
     evaluate_poly_at_points,
 )
-from tpf.numerics.quadrature import Integral
-from tpf.utils.constants_and_typing import (
+from ahc.numerics.quadrature import Integral
+from ahc.utils.constants_and_typing import (
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
     GLOBAL_PRESSURE,
@@ -24,7 +22,8 @@ from tpf.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
-from tpf.viz.plot_quadratic_pressures import plot_quadratic_pressures
+from ahc.viz.plot_quadratic_pressures import plot_quadratic_pressures
+from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
