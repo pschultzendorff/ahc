@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12.11-slim
 LABEL title="ahc"
 LABEL description="Adaptive homotopy continuation solver for incompressible two-phase flow in porous media"
 LABEL version="0.1"
