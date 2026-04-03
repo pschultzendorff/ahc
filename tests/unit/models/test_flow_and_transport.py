@@ -3,10 +3,10 @@ from typing import Any
 import numpy as np
 import porepy as pp
 import pytest
-from tpf.models.flow_and_transport import TwoPhaseFlow
-from tpf.models.protocol import TPFProtocol
-from tpf.models.phase import FluidPhase
-from tpf.utils.constants_and_typing import NONWETTING, WETTING
+from ahc.models.flow_and_transport import TwoPhaseFlow
+from ahc.models.protocol import TPFProtocol
+from ahc.models.phase import FluidPhase
+from ahc.utils.constants_and_typing import NONWETTING, WETTING
 
 # TODO Change the residual saturation of one phase and adjust the tests.
 

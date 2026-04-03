@@ -37,10 +37,9 @@ Thus, we need to always multiply the residual by -1.
 
 from typing import Any
 
-import numpy as np
 import porepy as pp
 import pytest
-from tpf.models.flow_and_transport import TwoPhaseFlow
+from ahc.models.flow_and_transport import TwoPhaseFlow
 
 
 @pytest.mark.parametrize("params", [{}])

@@ -5,7 +5,7 @@ import os
 import numpy as np
 import porepy as pp
 import pytest
-from tpf.numerics.quadrature import (
+from ahc.numerics.quadrature import (
     GaussLegendreQuadrature1D,
     GaussLegendreQuadrature2D,
     GaussLegendreQuadrature3D,

@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from tpf.models.reconstruction import EquilibratedFluxMixin, PressureReconstructionMixin
+from ahc.models.reconstruction import PressureReconstructionMixin
 
 
 class TestPressureReconstruction(PressureReconstructionMixin):

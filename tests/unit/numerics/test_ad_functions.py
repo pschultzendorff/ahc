@@ -1,8 +1,7 @@
 import numpy as np
-import pytest
 import scipy.sparse as sps
+from ahc.numerics.ad import functions as af
 from porepy.numerics.ad.forward_mode import AdArray
-from tpf.numerics.ad import functions as af
 
 
 # Function: pow
