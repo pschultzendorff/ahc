@@ -345,7 +345,7 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
         # For convenience, add the porosity and permeability to the iteration exporter
         # if it exists.
         if hasattr(self, "iteration_exporter"):
-            self.iteration_exporter.add_constant_data(data)  # type: ignore
+            self.iteration_exporter.add_constant_data(data)
 
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation."""

@@ -267,7 +267,7 @@ class ErrorEstimateANewtonMixin(AdaptiveNewtonProtocol):
 # with care. We ignore the error.
 class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy):  # type: ignore
     def __init__(self, params=None) -> None:
-        super().__init__(params=params)  # type: ignore
+        super().__init__(params=params)
 
         self.original_dt: Optional[float] = None
         """Original dt before time step cutting. If None, the time step was not cut."""
@@ -276,8 +276,7 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
 
     def set_initial_estimators(self) -> None:
         """Initialize iterate and time step values for additional error estimators."""
-        # In ``EstimatesProtocol``, this method is abstract, which mypy complains about.
-        super().set_initial_estimators()  # type: ignore
+        super().set_initial_estimators()
         for flux_name, estimator_name in itertools.product(
             (TOTAL_FLUX, WETTING_FLUX),
             ["T_estimator", "L_estimator"],
