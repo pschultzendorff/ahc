@@ -3,6 +3,7 @@ name: ahc
 services:
   ahc:
     image: ahc:dev
+    pull_policy: never
     build:
       context: .
       dockerfile: Dockerfile
