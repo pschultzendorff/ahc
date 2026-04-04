@@ -96,6 +96,10 @@ no. 4, pp. 308–317, 2001, doi: 10.2118/72469-PA.
 Society of Petroleum Engineers Comparative Solution Project: Problem Definition," 
 *SPE Journal*, vol. 29, no. 5, pp. 2507–2524, 2024, doi: 10.2118/218015-PA.
 
+[6] X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport in
+heterogeneous porous media,” *Journal of Computational Physics*, vol. 253, pp. 114–137,
+2013, doi: 10.1016/j.jcp.2013.06.041.
+
 ## AI disclosure
 
 Generative AI (GitHub Copilot in VS Code, ChatGPT, and Microsoft Copilot) was used to

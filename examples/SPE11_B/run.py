@@ -1,11 +1,10 @@
-r"""Study convergence of solvers on different grid sizes and with different rel.
+"""Study convergence of solvers on different grid sizes and with different rel.
  perm./cap. pressure models.
 
 The following solvers are employed:
 - Adaptive homotopy continuation (AHC) with Newton
 - Newton
 - Newton with Appleyard chopping
-
 
 
 Model description:

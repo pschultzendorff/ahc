@@ -15,8 +15,8 @@ Dead oil:
 ---------------
 
 The values (except thermal conductivity) are gathered from:
-* https://www.spe.org/web/csp/datasets/set02.htm#dead%20oil
-* M. A. Christie and M. J. Blunt, “Tenth SPE Comparative Solution Project: A Comparison
+- https://www.spe.org/web/csp/datasets/set02.htm#dead%20oil
+- M. A. Christie and M. J. Blunt, “Tenth SPE Comparative Solution Project: A Comparison
 of Upscaling Techniques,” SPE Reservoir Evaluation & Engineering, vol. 4, no. 04, pp.
 308–317, Aug. 2001, doi: 10.2118/72469-PA.
 
@@ -28,16 +28,17 @@ The values are taken from ``porepy.applications.material_values.fluid_values.wat
 CO2:
 ---------------
 
-The values are taken from https://webbook.nist.gov/chemistry/fluid/ at atmospheric
-pressure and 20°C.
+The values are taken from https://www.peacesoftware.de/einigewerte/calc_co2.php7
+at 350 bar and 70° C
 
 
 """
 
 from typing import Any
 
-from ahc.utils.constants_and_typing import FEET, LB, cP
 from porepy.applications.material_values.fluid_values import water as _water
+
+from ahc.utils.constants_and_typing import FEET, LB, cP
 
 # The values in the paper are given in [cP] and [lb ft^-3]. We convert them to [Pa s]
 # and [kg m^-3]. Additionally we convert the density from surface density to reservoir

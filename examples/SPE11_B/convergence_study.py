@@ -1,4 +1,5 @@
-"""Study convergence of spatial and temporal error estimators on SPE11, case B.
+"""Study convergence of spatial, temporal, HC, and linearization error estimators on
+SPE11, case B.
 
 The following solvers are employed:
 - Adaptive homotopy continuation (AHC) with Newton
@@ -150,7 +151,6 @@ if __name__ == "__main__":
             "dt_init": time_step_size,
             "constant_dt": True,
         }
-        continue
         run_simulation(
             config,
             time_manager_params=time_manager_params,

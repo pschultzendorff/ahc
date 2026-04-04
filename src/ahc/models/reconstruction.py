@@ -430,12 +430,16 @@ class PressureReconstructionMixin(ReconstructionProtocol):
                 faces_p, self.cell_faces_map, self.faces_of_cell, nf
             )
 
-            # We assume that all boundaries are no-flow Neumann or Dirichlet with
-            # outflow for both phases. In the latter case, the phase distribution on the
+            # NOTE We assume that all boundaries are no-flow Neumann or Dirichlet with
+            # outflow for both phases.
+            # For no-flow Neumann boundaries, the Oswald interpolator is not changed.
+            # For outflow Dirichlet boundaries, the phase distribution on the
             # boundary is unknown and we can neither infer global nor complementary
             # pressure. Instead, we average internal values.
+            # For inflow Dirichlet boundaries, the Oswald interpolator would have to be
+            # set to the pressure value on the boundary. The commented out code below
+            # can be used as a basis to implement this.
 
-            # Treatment of the boundary points:
             # bg, bg_data = self.mdg.boundaries(return_data=True)[0]
             # bc: pp.BoundaryCondition = self.g_data[pp.PARAMETERS][self.flux_key]["bc"]
 
@@ -802,9 +806,6 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
 
         flux_t_equil_mismatch = div @ flux_t_equil - source_ad_t
         flux_w_equil_mismatch = (
-            # This will not be exact as dt_s is for the current time step, not for the
-            # previous one???
-            # TODO What did I mean by this?
             porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
             + div @ flux_w_equil
             - source_ad_w
@@ -820,22 +821,17 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
         for name, op in [
             (TOTAL_FLUX, flux_t),
             (WETTING_FLUX, flux_w),
-            # ("wetting_mobility", phase_mobilities[self.wetting.name]),
-            # ("wetting_mobility", phase_mobilities[self.wetting.name]),
             ("total_mobility", total_mobility),
-            # ("fractional_flow", fractional_flow),
             (CAPILLARY_FLUX, capillary_flux),
-            # (TOTAL_FLUX + "_equil", flux_t_equil),
-            # (WETTING_FLUX + "_equil", flux_w_equil),
             (TOTAL_FLUX + "_equil_mismatch", flux_t_equil_mismatch),
             (WETTING_FLUX + "_equil_mismatch", flux_w_equil_mismatch),
         ]:
             add_to_postproc_ad_ops(name, op)
 
 
-# RecSolutionStrategy could also be a mixin, but by subclassing ``SolutionStrategyTPF``,
-# we avoid having to pay attention to the order of the different solution strategy
-# classes.
+# NOTE RecSolutionStrategy could also be a mixin, but by subclassing
+# SolutionStrategyTPF,we avoid having to pay attention to the order of the different
+# solution strategy classes.
 
 
 # Protocols define different types for ``nonlinear_solver_statistics``, causing mypy

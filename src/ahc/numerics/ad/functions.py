@@ -175,31 +175,3 @@ def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
         min_jac[inds] = jacs[1][inds]  # type: ignore
 
     return AdArray(min_val, min_jac)
-
-
-def bump_function(var, r_1: float, r_2: float):
-    r"""Bump function needed, e.g., for partition of unity.
-
-    The function equals :math:`y(x)=0` for :math:`x\leq r_1`,  :math:`y(x)=1` for
-    :math:`x\geq r_2` and is smooth on the entire domain.
-
-    .. warning:
-        The function is unfinished at the moment.
-
-    TODO: Finish the implementation.
-
-    Parameters:
-        var: _description_
-        r_1: _description_
-        r_2: _description_
-
-    """
-    if isinstance(var, AdArray):
-        # Restrict the var to 1.
-        # TODO restrict the var to 0 from below.
-        # restrict_var = maximum(var, 1)
-        # # add small epsilon to avoid divison by zero.
-        # phi = exp(-1 / (1 + 1e-8 - pow(restrict_var, 2)))
-        pass
-    else:
-        pass

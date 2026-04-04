@@ -28,8 +28,8 @@ Dirichlet boundaries requires some careful considerations. Check the documentati
 
 
 TODO
-- Make sure that pressure gets scaled with units and any other physical quantities
-    as well.
+- Make sure that pressure (and all other physical quantities) get scaled correctly if
+the PorePy units are changed.
 
 Units:
     Collection of the SI units for all parameters.
@@ -57,12 +57,13 @@ from typing import Any
 
 import numpy as np
 import porepy as pp
+from porepy.viz.exporter import DataInput
+
 from ahc.models.constitutive_laws_tpf import TPFConstitutiveLaws
 from ahc.models.phase import FluidPhase
 from ahc.models.protocol import TPFProtocol
 from ahc.numerics.ad.functions import ad_pow as ad_pow
 from ahc.utils.constants_and_typing import NONWETTING, WETTING
-from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 

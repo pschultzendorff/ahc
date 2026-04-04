@@ -1,4 +1,4 @@
-r"""Run the SPE11 B example with small time steps for plotting.
+"""Run the SPE11 B example with small time steps for plotting.
 
 
 Model description:

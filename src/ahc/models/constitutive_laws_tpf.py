@@ -6,6 +6,7 @@ from typing import Literal, TypeGuard
 
 import numpy as np
 import porepy as pp
+
 from ahc.models.phase import FluidPhase
 from ahc.models.protocol import TPFProtocol
 from ahc.numerics.ad.functions import minimum
@@ -935,8 +936,8 @@ class DarcyFluxes(TPFProtocol):
         #   mobilities are taken from inside the domain and no capillary flux occurs.
 
         # NOTE We use TPFA for discretization of the capillary flux. Don't know the
-        # reason, but apparently this was somehow necessary in 2023. Possibly stability
-        # reasons.
+        # reason, but this was somehow necessary in 2023. Given that capillary flux
+        # across boundaries is always zero it shouldn't matter.
         # NOTE As capillary flux over boundaries is assumed to be zero, it does not
         # matter which flux key is used for TPFA.
         tpfa = self.phase_potential_discretization(g)

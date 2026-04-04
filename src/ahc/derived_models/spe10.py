@@ -1,5 +1,5 @@
-"""This module defines a model for the 10th SPE Comparative Solution Project (SPE10), case
-2A.
+"""This module defines a model for the 10th SPE Comparative Solution Project (SPE10),
+case 2A.
 
 [M. A. Christie and M. J. Blunt, “Tenth SPE Comparative Solution Project: A
 Comparison of Upscaling Techniques,” SPE Reservoir Evaluation & Engineering, vol. 4, no.
@@ -21,13 +21,14 @@ from typing import Any, cast
 import numpy as np
 import porepy as pp
 import requests
+from porepy.viz.exporter import DataInput
+
 from ahc.derived_models.fluid_values import oil as _oil
 from ahc.derived_models.fluid_values import water as _water
 from ahc.derived_models.utils import center_cell_id, corner_faces_id
 from ahc.models.phase import FluidPhase
 from ahc.models.protocol import TPFProtocol
 from ahc.utils.constants_and_typing import FEET, NONWETTING, PSI, WETTING
-from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
