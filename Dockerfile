@@ -18,9 +18,15 @@ RUN git clone https://github.com/pschultzendorff/porepy_hc \
 
 # Copy files into container and install
 COPY . ./ahc
-RUN pip install --no-cache-dir -e /app/ahc
+
+# Normalize Windows CRLF on the run_all.sh script so Bash in Linux containers
+# does not fail with "$'\r': command not found".
+RUN sed -i 's/\r$//' /app/ahc/run_all.sh \
+    && chmod +x /app/ahc/run_all.sh \
+    && pip install --no-cache-dir -e /app/ahc
 
 # Matplotlib backend for .png files
 ENV MPLBACKEND=Agg
 
+# Use bash explicitly because the launcher relies on bash features (e.g. [[ ]]).
 CMD ["bash", "/app/ahc/run_all.sh"]

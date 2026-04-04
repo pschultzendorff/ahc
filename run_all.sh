@@ -30,6 +30,7 @@
 #              the main loop; only the plotting section runs unless edited.
 #     9. debug.py                      — debugging / development runs
 
+# Fail fast on errors/undefined vars and propagate failures through pipes.
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
