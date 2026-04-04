@@ -48,7 +48,7 @@ from ahc.models.protocol import TPFProtocol
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from ..utils import SimulationConfig, setup_params
+from utils import SimulationConfig, setup_params
 
 # region SETUP
 

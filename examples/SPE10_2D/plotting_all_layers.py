@@ -5,12 +5,12 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import LogFormatter, LogLocator, NullFormatter
-from .run import default_time_manager_params
-from .run_all_layers import generate_configs
+from run import default_time_manager_params
+from run_all_layers import generate_configs
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from ..utils import SimulationStatistics, calc_relative_error, flatten, read_data
+from utils import SimulationStatistics, calc_relative_error, flatten, read_data
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 

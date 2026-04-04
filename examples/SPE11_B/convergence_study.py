@@ -13,12 +13,11 @@ import warnings
 
 import numpy as np
 import porepy as pp
-
-from .run import cp_models, rp_models, run_simulation
+from run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from ..utils import (
+from utils import (
     SimulationConfig,
     clean_up_after_simulation,
     plot_convergence,

@@ -6,11 +6,11 @@ import sys
 import warnings
 
 import numpy as np
-from .run import cp_models, rp_models, run_simulation, solvers_and_ratios
+from run import cp_models, rp_models, run_simulation, solvers_and_ratios
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from ..utils import SimulationConfig, clean_up_after_simulation
+from utils import SimulationConfig, clean_up_after_simulation
 
 # region SETUP
 
