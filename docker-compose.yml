@@ -2,7 +2,7 @@ name: ahc
 
 services:
   ahc:
-    image: ahc:dev
+    image: ahc:0.1
     pull_policy: never
     build:
       context: .

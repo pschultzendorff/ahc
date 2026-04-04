@@ -7,8 +7,13 @@ LABEL email="peter.schultzendorff@uib.no"
 
 WORKDIR /app
 
-# Install git (not included in python:3.12-slim)
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# Install git and gmsh dependencies (not included in python:3.12-slim)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    libglu1-mesa \
+    libxft2 \
+    libx11-6 \
+    libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PorePy fork
