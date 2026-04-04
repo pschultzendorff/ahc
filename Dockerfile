@@ -14,6 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxft2 \
     libx11-6 \
     libxext6 \
+    libgl1 \
+    libxcursor1 \
+    libxfixes3 \
+    libxinerama1 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install PorePy fork
