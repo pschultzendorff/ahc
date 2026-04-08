@@ -1,6 +1,6 @@
 # ahc - Adaptive Homotopy Continuation for Two-Phase Flow in PorePy.
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19033382.svg)](https://doi.org/10.5281/zenodo.19033382)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19421277.svg)](https://doi.org/10.5281/zenodo.19421277)
 
 This repository extends the functionality of
 [PorePy](https://github.com/pmgbergen/porepy) with the following:
