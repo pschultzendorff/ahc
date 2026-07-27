@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Any, Protocol
 
-from ahc.models.constitutive_laws_tpf import BuoyancyConstants
 from ahc.numerics.quadrature import TriangleQuadrature
 from ahc.utils.constants_and_typing import FLUX_NAME
 from ahc.viz.solver_statistics import (
@@ -41,7 +40,11 @@ else:
     from porepy.models.protocol import PorePyModel
     from porepy.viz.exporter import DataInput
 
-    from ahc.models.constitutive_laws_tpf import CapPressConstants, RelPermConstants
+    from ahc.models.constitutive_laws_tpf import (
+        BuoyancyConstants,
+        CapPressConstants,
+        RelPermConstants,
+    )
     from ahc.models.phase import FluidPhase
     from ahc.utils.constants_and_typing import PRESSURE_KEY
 
