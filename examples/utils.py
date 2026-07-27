@@ -49,7 +49,7 @@ class SimulationConfig:
     # Only for SPE10
     cell_size: float = 600 * FEET / 30  # Default cell size.
     spe10_layer: int = 0
-    spe10_gravity_separation: bool = False
+    spe10_case: str = "five_spot"
     # Only for SPE11
     refinement_factor: float = 1.0
     spe11_entry_pressure: float = 30 * pp.PASCAL

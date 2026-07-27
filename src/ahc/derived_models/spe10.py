@@ -177,8 +177,14 @@ class SPE10EquationsMixin(TPFProtocol):
     Updates the two-phase flow equations to include:
     - the SPE10 porosity field.
     - the SPE10 permeability field.
-    - A volumetric source term for the water phase in the center cell.
-    - Production wells in the corner cells.
+    - source terms.
+
+    Two setups for the source terms are implemented:
+    - Pure gravity separation:
+        No source terms for either phase.
+    - Five-spot setup:
+        A volumetric source term for the water phase in the center cell, which
+        corresponds to a water injection well. No source term for the oil phase.
 
     """
 
@@ -207,56 +213,86 @@ class SPE10EquationsMixin(TPFProtocol):
     def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         r"""Volumetric phase source term. Given as volumetric flux.
 
-        Five-spot setup. Water (wetting) injection in the center. Mixture production in
-        the corners via Dirichlet bc.
+        - Gravity separation: No source terms for either phase.
+        - Five-spot setup: Water (wetting) injection in the center. Mixture production
+          in the corners via Dirichlet bc.
 
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
-        array: np.ndarray = np.zeros(self.g.num_cells)
+        if self.params["spe10_case"] == "gravity_separation":
+            source: np.ndarray = np.zeros(self.g.num_cells)
+        elif self.params["spe10_case"] == "five_spot":
+            source = np.zeros(self.g.num_cells)
+            if phase.name == self.wetting.name:
+                # Center well injecting water.
+                source[center_cell_id(g)] = phase.convert_units(
+                    INJECTION_RATE, "m^3"
+                ) / phase.convert_units(pp.DAY, "s")  # 87.5 m^3/day in [m^3/s]
+                return source
+            # No injection wells for oil.
+        else:
+            raise ValueError(
+                f"Unknown SPE10 case '{self.params['spe10_case']}'."
+                + " Supported cases are 'gravity_separation' and 'five_spot'."
+            )
 
-        if phase.name == self.wetting.name:
-            # Center well injecting water.
-            array[center_cell_id(g)] = phase.convert_units(
-                INJECTION_RATE, "m^3"
-            ) / phase.convert_units(pp.DAY, "s")  # 87.5 m^3/day in [m^3/s]
-            return array
-
-        # No injection wells for oil.
-        return array
+        return source
 
 
 class SPE10ModifiedBoundaryMixin(TPFProtocol):
+    """Mixin specifying the boundary conditions for the SPE10 model.
+
+    Two setups are implemented:
+    - Pure gravity separation:
+        Neumann conditions for all faces.
+    - Five-spot setup:
+        We assign Dirichlet conditions for the corner cells, which act as production
+        wells. Neumann conditions for all other faces.
+
+    """
+
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
-        """BC type (Dirichlet or Neumann).
-
-        We assign Neumann conditions for all faces. The four corner cells get prescribed
-        a pressure explicitely, which acts as a Dirichlet condition.
-
-        """
-        height: float = (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
-        width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
-        corner_faces: np.ndarray = corner_faces_id(
-            g, height, width, PRODUCTION_WELL_SIZE
-        )
-        return pp.BoundaryCondition(g, corner_faces, "dir")
+        """BC type (Dirichlet or Neumann)."""
+        if self.params["spe10_case"] == "gravity_separation":
+            bc = pp.BoundaryCondition(g)
+        elif self.params["spe10_case"] == "five_spot":
+            height: float = (
+                (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
+            )
+            width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
+            corner_faces: np.ndarray = corner_faces_id(
+                g, height, width, PRODUCTION_WELL_SIZE
+            )
+            bc = pp.BoundaryCondition(g, corner_faces, "dir")
+        else:
+            raise ValueError(
+                f"Unknown SPE10 case '{self.params['spe10_case']}'."
+                + " Supported cases are 'gravity_separation' and 'five_spot'."
+            )
+        return bc
 
     def _bc_dirichlet_pressure_values(
         self, g: pp.Grid, phase: FluidPhase
     ) -> np.ndarray:
-        """Dirichle pressure values.
-
-        We assign Neumann conditions for all faces. The boundaries in all corners get
-        prescribed pressure explicitely and act as wells.
-
-        """
-        height: float = HEIGHT / 2 if self.params["spe10_quarter_domain"] else HEIGHT
-        width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
-        corner_faces: np.ndarray = corner_faces_id(
-            g, height, width, PRODUCTION_WELL_SIZE
-        )
-        bc: np.ndarray = np.zeros(g.num_faces)
-        bc[corner_faces] = phase.convert_units(BHP, "kg*m^-1*s^-2")
+        """Dirichlet pressure values."""
+        if self.params["spe10_case"] == "gravity_separation":
+            bc: np.ndarray = np.zeros(g.num_faces)
+        elif self.params["spe10_case"] == "five_spot":
+            height: float = (
+                (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
+            )
+            width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
+            corner_faces: np.ndarray = corner_faces_id(
+                g, height, width, PRODUCTION_WELL_SIZE
+            )
+            bc = np.zeros(g.num_faces)
+            bc[corner_faces] = phase.convert_units(BHP, "kg*m^-1*s^-2")
+        else:
+            raise ValueError(
+                f"Unknown SPE10 case '{self.params['spe10_case']}'."
+                + " Supported cases are 'gravity_separation' and 'five_spot'."
+            )
         return bc
 
 
@@ -349,9 +385,38 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
             self.iteration_exporter.add_constant_data(data)
 
     def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation."""
+        """Set initial values for pressure and saturation.
+
+        - Gravity separation: The upper half of the domain is fully saturated with the
+          more dense phase (water), lower half is fully saturated with the less dense
+          phase (oil).
+        - Five-spot setup: The saturation in the full domain is set to
+          ``INITIAL_SATURATION``.
+
+        """
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
-        initial_saturation = np.full(self.g.num_cells, INITIAL_SATURATION)
+
+        if self.params["spe10_case"] == "gravity_separation":
+            height: float = (
+                (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
+            )
+            # self.g.cell_centers has shape=(ambient_dimension, num_cells)
+            initial_saturation = np.array(
+                [
+                    INITIAL_SATURATION
+                    if cell[1] >= height / 2
+                    else 1.0 - INITIAL_SATURATION
+                    for cell in np.swapaxes(self.g.cell_centers, 0, 1)
+                ]
+            )
+        elif self.params["spe10_case"] == "five_spot":
+            initial_saturation = np.full(self.g.num_cells, INITIAL_SATURATION)
+        else:
+            raise ValueError(
+                f"Unknown SPE10 case '{self.params['spe10_case']}'."
+                + " Supported cases are 'gravity_separation' and 'five_spot'."
+            )
+
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),
             [self.wetting.p, self.nonwetting.p],

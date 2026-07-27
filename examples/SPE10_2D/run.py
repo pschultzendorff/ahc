@@ -97,18 +97,16 @@ class InitialConditionsMixin(TPFProtocol):
     def initial_condition(self) -> None:
         """Set initial values for pressure and saturation.
 
-        Default is to set the saturation in the full domain to
-        ``self.params["spe10_initial_saturation"]`` if
-        ``self.params["spe10_gravity_separation"]`` is False.
-
-        If ``self.params["spe10_gravity_separation"]`` is True, the upper half of the
-        domain is fully saturated with the more dense phase (water), lower half is
-        fully saturated with the less dense phase (oil).
+        - Gravity separation: The upper half of the domain is fully saturated with the
+          more dense phase (water), lower half is fully saturated with the less dense
+          phase (oil).
+        - Five-spot setup: The saturation in the full domain is set to
+          ``self.params["spe10_initial_saturation"]``.
 
         """
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
 
-        if self.params["spe10_gravity_separation"]:
+        if self.params["spe10_case"] == "gravity_separation":
             height: float = (
                 (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
             )
@@ -121,9 +119,14 @@ class InitialConditionsMixin(TPFProtocol):
                     ]
                 )
             )
-        else:
+        elif self.params["spe10_case"] == "five_spot":
             initial_saturation = self.bound_saturation(
                 np.full(self.g.num_cells, self.params["spe10_initial_saturation"])
+            )
+        else:
+            raise ValueError(
+                f"Unknown SPE10 case '{self.params['spe10_case']}'."
+                + " Supported cases are 'gravity_separation' and 'five_spot'."
             )
 
         self.equation_system.set_variable_values(
@@ -172,6 +175,7 @@ default_solver_params = {
     "grid_type": "simplex",
     "spe10_quarter_domain": False,
     "spe10_isotropic_perm": True,
+    "spe10_case": "five_spot",
     # Nonlinear solver:
     "nl_enforce_physical_saturation": True,
     # Error estimator:
@@ -287,7 +291,7 @@ def run_simulation(
             "buoyancy_constants": buoyancy_constants,
             "spe10_initial_saturation": config.init_s,
             "spe10_layer": config.spe10_layer,
-            "spe10_gravity_separation": config.spe10_gravity_separation,
+            "spe10_case": config.spe10_case,
             "folder_name": config.folder_name,
             "file_name": config.file_name,
             "solver_statistics_file_name": config.folder_name
@@ -480,7 +484,7 @@ def generate_configs() -> list[SimulationConfig]:
                         buoyancy_constants_1=buoyancy_constants["gravity_off"],
                         buoyancy_constants_2=buoyancy_constants["gravity_on"],
                         spe10_layer=spe10_layer,
-                        spe10_gravity_separation=True,
+                        spe10_case="gravity_separation",
                     )
                 )
 
