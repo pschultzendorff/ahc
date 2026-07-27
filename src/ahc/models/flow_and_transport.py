@@ -79,9 +79,6 @@ class TPFEquations(TPFProtocol, pp.BalanceEquation):
 
     """
 
-    def set_buoyancy_constants(self) -> None:
-        self.gravity_acceleration: float = self.params.get("gravity_acceleration", 0.0)
-
     def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         """Volumetric phase source term. Given as volumetric flux. This
         unmodified base function assumes a zero phase source.

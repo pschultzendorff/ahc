@@ -828,7 +828,7 @@ class Buyoancy(TPFProtocol):
         self,
         g: pp.Grid,
         phase: FluidPhase,
-        buoyancy_constants: BuoyancyConstants | None,
+        buoyancy_constants: BuoyancyConstants | None = None,
     ) -> pp.ad.DenseArray:
         """Volumetric phase vector source. Corresponds to the phase buoyancy flux.
 
@@ -839,7 +839,8 @@ class Buyoancy(TPFProtocol):
                 :attr:`self.buoyancy_constants`. Default is ``None``.
 
         Returns:
-            _description_
+            A :class:`~porepy.ad.DenseArray` with the volumetric phase vector source.
+
         """
         # IMPLEMENTATION NOTE: In normal PorePy, the ``vector_source`` function returns
         # a static ``np.ndarray`` and would be more fitting in the ``TPFEquations``
