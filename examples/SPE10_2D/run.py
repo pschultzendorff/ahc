@@ -54,11 +54,10 @@ import pathlib
 import shutil
 import sys
 import warnings
-from typing import Type
 
 import numpy as np
 import porepy as pp
-from ahc.derived_models.spe10 import INITIAL_PRESSURE, SPE10Mixin
+from ahc.derived_models.spe10 import HEIGHT, INITIAL_PRESSURE, SPE10Mixin
 from ahc.models.adaptive_newton import TwoPhaseFlowANewton
 from ahc.models.homotopy_continuation import TwoPhaseFlowHC
 from ahc.models.protocol import TPFProtocol
@@ -96,11 +95,38 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 # region MODEL
 class InitialConditionsMixin(TPFProtocol):
     def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation."""
+        """Set initial values for pressure and saturation.
+
+        Default is to set the saturation in the full domain to
+        ``self.params["spe10_initial_saturation"]`` if
+        ``self.params["spe10_gravity_separation"]`` is False.
+
+        If ``self.params["spe10_gravity_separation"]`` is True, the upper half of the
+        domain is fully saturated with the more dense phase (water), lower half is
+        fully saturated with the less dense phase (oil).
+
+        """
         initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
-        initial_saturation = self.bound_saturation(
-            np.full(self.g.num_cells, self.params["spe10_initial_saturation"])
-        )
+
+        if self.params["spe10_gravity_separation"]:
+            height: float = (
+                (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
+            )
+            initial_saturation = self.bound_saturation(
+                # self.g.cell_centers has shape=(ambient_dimension, num_cells)
+                np.array(
+                    [
+                        1.0
+                        for cell in np.swapaxes(self.g.cell_centers, 0, 1)
+                        if cell[1] >= height / 2
+                    ]
+                )
+            )
+        else:
+            initial_saturation = self.bound_saturation(
+                np.full(self.g.num_cells, self.params["spe10_initial_saturation"])
+            )
+
         self.equation_system.set_variable_values(
             np.concatenate([initial_pressure, initial_pressure]),
             [self.wetting.p, self.nonwetting.p],
@@ -167,7 +193,7 @@ default_time_manager_params = {
 
 def setup_model(
     solver: str, iteration_exporting: bool = False
-) -> Type[SPE10HC] | Type[SPE10Newton]:
+) -> type[SPE10HC] | type[SPE10Newton]:
     """Return a model class based on the solver name.
 
     Parameters:
@@ -183,12 +209,14 @@ def setup_model(
         model_class = SPE10Newton
     else:
         raise ValueError(f"Unknown solver: {solver}")
+
     if iteration_exporting:
         model_class = type(
             f"{model_class.__name__}WithIterationExporting",
             (IterationExportingMixin, model_class),
             {},
         )
+
     return model_class
 
 
@@ -219,6 +247,7 @@ def run_simulation(
         f"RP model 1: {config.rp_model_1}, "
         f"RP model 2: {config.rp_model_2}, \n"
         f"CP model: {config.cp_model_2}."
+        f"Buoyancy: {config.buoyancy_constants_2}"
     )
     model_class = setup_model(config.solver_name, **kwargs)
     updated_solver_params, updated_time_manager_params = setup_params(
@@ -237,6 +266,7 @@ def run_simulation(
     if config.solver_name.startswith("Newton"):
         rel_perm_constants = config.rp_model_2
         cap_press_constants = config.cp_model_2
+        buoyancy_constants = config.buoyancy_constants_2
     else:
         rel_perm_constants = {
             "model_1": config.rp_model_1,
@@ -246,13 +276,19 @@ def run_simulation(
             "model_1": config.cp_model_1,
             "model_2": config.cp_model_2,
         }
+        buoyancy_constants = {
+            "model_1": config.buoyancy_constants_1,
+            "model_2": config.buoyancy_constants_2,
+        }
     solver_params.update(
         {
             "meshing_arguments": {"cell_size": config.cell_size},
             "rel_perm_constants": rel_perm_constants,
             "cap_press_constants": cap_press_constants,
+            "buoyancy_constants": buoyancy_constants,
             "spe10_initial_saturation": config.init_s,
             "spe10_layer": config.spe10_layer,
+            "spe10_gravity_separation": config.spe10_gravity_separation,
             "folder_name": config.folder_name,
             "file_name": config.file_name,
             "solver_statistics_file_name": config.folder_name
@@ -335,6 +371,11 @@ cp_models = {
     },
 }
 
+buoyancy_constants = {
+    "gravity_on": {"gravity_acceleration": pp.GRAVITY_ACCELERATION},
+    "gravity_off": {"gravity_acceleration": 0.0},
+}
+
 
 def generate_configs() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
@@ -345,7 +386,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # region VISCOUS
 
-    if True:
+    if False:
         # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3 with linear capillary
         # pressure.
         for init_s in [0.2, 0.3]:
@@ -372,11 +413,13 @@ def generate_configs() -> list[SimulationConfig]:
                             rp_model_2=rp_model,
                             cp_model_1=cp_models["None"],
                             cp_model_2=cp_models["linear"],
+                            buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                            buoyancy_constants_2=buoyancy_constants["gravity_off"],
                             spe10_layer=spe10_layer,
                         )
                     )
 
-    if True:
+    if False:
         # Varying init_s for the more challenging Brooks-Corey rel. perm. model.
         for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
@@ -399,7 +442,45 @@ def generate_configs() -> list[SimulationConfig]:
                         rp_model_2=rp_models["Brooks-Corey_nb_2"],
                         cp_model_1=cp_models["None"],
                         cp_model_2=cp_models["linear"],
+                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
                         spe10_layer=spe10_layer,
+                    )
+                )
+
+        # endregion
+
+    # region FULL_GRAVITY_SEPARATION
+    # NOTE HC starts with a linear rel. perm. model and zero capillary pressure and zero
+    # gravity.
+    # Varying rel. perm. models  with linear capillary pressure.
+    if True:
+        for rp_model_name, rp_model in rp_models.items():
+            if rp_model_name == "linear":
+                continue
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
+                folder_name = (
+                    results_dir
+                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                    / "gravity_separation"
+                    / "varying_rp"
+                    / rp_model_name
+                )
+                configs.append(
+                    SimulationConfig(
+                        file_name=rp_model_name,
+                        folder_name=folder_name,
+                        solver_name=solver_name,
+                        adaptive_error_ratio=adaptive_error_ratio,
+                        init_s=0.0,
+                        rp_model_1=rp_models["linear"],
+                        rp_model_2=rp_model,
+                        cp_model_1=cp_models["None"],
+                        cp_model_2=cp_models["linear"],
+                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
+                        spe10_layer=spe10_layer,
+                        spe10_gravity_separation=True,
                     )
                 )
 
@@ -408,7 +489,7 @@ def generate_configs() -> list[SimulationConfig]:
     # region VISCOUS_AND_CAPILLARY
     # NOTE HC starts with a linear rel. perm. model and zero capillary pressure.
 
-    if True:
+    if False:
         # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
         # capillary pressure.
         for rp_model_name, rp_model in rp_models.items():
@@ -439,11 +520,13 @@ def generate_configs() -> list[SimulationConfig]:
                         rp_model_2=rp_model,
                         cp_model_1=cp_models["None"],
                         cp_model_2=cp_model_2,
+                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
                         spe10_layer=spe10_layer,
                     )
                 )
 
-    if True:
+    if False:
         # Varying init_s for the less challenging Brooks-Corey model.
         for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
@@ -466,11 +549,13 @@ def generate_configs() -> list[SimulationConfig]:
                         rp_model_2=rp_models["Brooks-Corey_nb_4"],
                         cp_model_1=cp_models["None"],
                         cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
                         spe10_layer=spe10_layer,
                     )
                 )
 
-    if True:
+    if False:
         # Less challenging Brooks-Corey cap. pressure with different entry pressures.
         for entry_pressure in [100, 200, 300]:
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
@@ -495,6 +580,8 @@ def generate_configs() -> list[SimulationConfig]:
                         rp_model_2=rp_models["Brooks-Corey_nb_4"],
                         cp_model_1=cp_models["None"],
                         cp_model_2=cp_model_2,
+                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
                         spe10_layer=spe10_layer,
                     )
                 )

@@ -44,9 +44,12 @@ class SimulationConfig:
     rp_model_2: dict[str, Any]
     cp_model_1: dict[str, Any]
     cp_model_2: dict[str, Any]
+    buoyancy_constants_1: dict[str, Any]
+    buoyancy_constants_2: dict[str, Any]
     # Only for SPE10
     cell_size: float = 600 * FEET / 30  # Default cell size.
     spe10_layer: int = 0
+    spe10_gravity_separation: bool = False
     # Only for SPE11
     refinement_factor: float = 1.0
     spe11_entry_pressure: float = 30 * pp.PASCAL
@@ -324,9 +327,7 @@ def calc_relative_error(stats: SimulationStatistics) -> dict[str, float]:
                 ) / energy_norm
         elif error_name == "hc":
             if solver_type == "HC":
-                result[error_name] = (
-                    getattr(stats, "hc_estimator")[-1][-1][-1] / energy_norm
-                )
+                result[error_name] = stats.hc_estimator[-1][-1][-1] / energy_norm
         else:
             if solver_type == "Newton":
                 result[error_name] = (
@@ -667,7 +668,7 @@ def plot_estimators(
     if uses_hc:
         ax2.set_yscale("log")
         ax2.set_ylim(
-            0.8 * min((min(hc_step) for hc_step in stats.lambdas)), 1.1
+            0.8 * min(min(hc_step) for hc_step in stats.lambdas), 1.1
         )  # Set y-limits for better visibility of beta values.])
         ax2.tick_params(axis="y", labelsize=12, labelcolor="black")
         ax2.set_ylabel(
