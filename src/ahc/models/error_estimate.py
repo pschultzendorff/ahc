@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 import numpy as np
 import porepy as pp
+from porepy.viz.exporter import DataInput
+
 from ahc.models.protocol import EstimatesProtocol
 from ahc.models.reconstruction import (
     RecDataSavingMixin,
@@ -21,7 +23,6 @@ from ahc.utils.constants_and_typing import (
     TOTAL_FLUX,
     WETTING_FLUX,
 )
-from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +280,8 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                     * total_mobility[..., None]
                     * global_pressure_pot
                 )
+
+        # FIXME Include buoyancy!
 
         elif flux_name == WETTING_FLUX:
 
@@ -684,7 +687,7 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 f"{flux_name}_energy_norm", self.g_data, time_step_index=0
             )
             global_energies.append(
-                (self.time_manager.dt / 2 * (local_energy_new + local_energy_old).sum())
+                self.time_manager.dt / 2 * (local_energy_new + local_energy_old).sum()
             )
 
         global_energy: float = sum(global_energies) ** (1 / 2)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import porepy as pp
+
 from ahc.utils.constants_and_typing import PHASENAME
 
 
@@ -9,17 +10,17 @@ class FluidPhase(pp.MaterialConstants):
 
     mobility_key: str
     """Keyword to define parameters and discretizations for the phase mobility. Normally
-    set by a mixin of instance :class:`two_phase_flow.SolutionStrategyTPF`.
+    set by a instance of mixin :class:`two_phase_flow.SolutionStrategyTPF`.
 
     """
     p: pp.ad.MixedDimensionalVariable
-    """Ad representation of the phase pressure. Normally initialized by a mixin of
-    instance :class:`~porepy.models.abstract_equations.VariableMixin`.
+    """Ad representation of the phase pressure. Normally initialized by a instance of
+    mixin :class:`~porepy.models.abstract_equations.VariableMixin`.
 
     """
     s: pp.ad.MixedDimensionalVariable
-    """Ad representation of the phase saturation. Normally initialized by a mixin of
-    instance :class:`~porepy.models.abstract_equations.VariableMixin`.
+    """Ad representation of the phase saturation. Normally initialized by a instance of
+    mixin :class:`~porepy.models.abstract_equations.VariableMixin`.
 
     """
 

@@ -15,10 +15,11 @@ doi: 10.1007/s10596-013-9356-0.]
 
 import itertools
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import porepy as pp
+
 from ahc.models.error_estimate import (
     ErrorEstimatesTwoPhaseFlow,
     EstimatesSolutionStrategy,
@@ -269,7 +270,7 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
     def __init__(self, params=None) -> None:
         super().__init__(params=params)
 
-        self.original_dt: Optional[float] = None
+        self.original_dt: float | None = None
         """Original dt before time step cutting. If None, the time step was not cut."""
         self.original_time: float = self.time_manager.time
         """Original time before time step cutting."""
