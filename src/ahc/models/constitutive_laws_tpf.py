@@ -1053,6 +1053,7 @@ class DarcyFluxes(TPFProtocol):
 class TPFConstitutiveLaws(
     RelativePermeability,
     CapillaryPressure,
+    Buyoancy,
     DarcyFluxes,
     pp.constitutive_laws.DimensionReduction,
 ): ...

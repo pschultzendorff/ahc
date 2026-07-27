@@ -1235,7 +1235,7 @@ class TwoPhaseFlowHC(  # type: ignore
     # HC constitutive laws mixins:
     RelativePermeabilityHC,
     CapillaryPressureHC,
-    # DarcyFluxesHC,
+    BuoyancyHC,
     # Adaptive HC mixins:
     EstimatesHCMixin,
     SolutionStrategyHC,

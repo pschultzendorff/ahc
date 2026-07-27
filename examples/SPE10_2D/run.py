@@ -116,9 +116,8 @@ class InitialConditionsMixin(TPFProtocol):
                 # self.g.cell_centers has shape=(ambient_dimension, num_cells)
                 np.array(
                     [
-                        1.0
+                        1.0 if cell[1] >= height / 2 else 0.0
                         for cell in np.swapaxes(self.g.cell_centers, 0, 1)
-                        if cell[1] >= height / 2
                     ]
                 )
             )
@@ -307,6 +306,7 @@ def run_simulation(
         model = model_class(solver_params)
         pp.run_time_dependent_model(model=model, params=solver_params)
     except Exception as e:
+        raise e
         logger.error(f"Run failed with error: {e}.")
 
     # Save number of grid cells to a file.
