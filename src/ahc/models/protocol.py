@@ -1,5 +1,6 @@
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
+from ahc.models.constitutive_laws_tpf import BuoyancyConstants
 from ahc.numerics.quadrature import TriangleQuadrature
 from ahc.utils.constants_and_typing import FLUX_NAME
 from ahc.viz.solver_statistics import (
@@ -37,26 +38,27 @@ else:
     # This branch is accessed by mypy and linters.
     import numpy as np
     import porepy as pp
+    from porepy.models.protocol import PorePyModel
+    from porepy.viz.exporter import DataInput
+
     from ahc.models.constitutive_laws_tpf import CapPressConstants, RelPermConstants
     from ahc.models.phase import FluidPhase
     from ahc.utils.constants_and_typing import PRESSURE_KEY
-    from porepy.models.protocol import PorePyModel
-    from porepy.viz.exporter import DataInput
 
     class TPFProtocol(PorePyModel, Protocol):
         # Variables & equations
         primary_pressure_var: str
-        """Name of primary pressure variable. Normally provided by a mixin of instance
+        """Name of primary pressure variable. Normally provided by a instance of mixin
         :class:`VariablesTPF`.
 
         """
         primary_saturation_var: str
-        """Name of primary saturation variable. Normally provided by a mixin of instance
+        """Name of primary saturation variable. Normally provided by a instance of mixin
         :class:`VariablesTPF`.
 
         """
         secondary_pressure_var: str
-        """Name of secondary pressure variable. Normally provided by a mixin of instance
+        """Name of secondary pressure variable. Normally provided by a instance of mixin
         :class:`VariablesTPF`.
 
         """
@@ -66,12 +68,12 @@ else:
 
         """
         flow_equation: str
-        """Name of the flow equation. Normally provided by a mixin of instance
+        """Name of the flow equation. Normally provided by a instance of mixin
         :class:`EquationsTPF`.
 
         """
         transport_equation: str
-        """Name of the transport equation. Normally provided by a mixin of instance
+        """Name of the transport equation. Normally provided by a instance of mixin
         :class:`EquationsTPF`.
 
         """
@@ -89,44 +91,39 @@ else:
         # Phases
         wetting: FluidPhase
         """Wetting phase class, providing phase name, constants, variables, and bc.
-        Normally set by a mixin of instance :class:`SolutionStrategyTPF`.
+        Normally set by a instance of mixin :class:`SolutionStrategyTPF`.
 
         """
         nonwetting: FluidPhase
         """Nonwetting phase class, providing phase name, constants, variables, and bc.
-        Normally set by a mixin of instance :class:`SolutionStrategyTPF`.#
+        Normally set by a instance of mixin :class:`SolutionStrategyTPF`.#
 
         """
         phases: dict[str, FluidPhase]
         """List of fluid phases, providing phase names, constants, variables, and bc.
-        Normally set by a mixin of instance :class:`SolutionStrategyTPF`.
+        Normally set by a instance of mixin :class:`SolutionStrategyTPF`.
 
         """
         _cap_press_constants: CapPressConstants
-        """Capillary pressure constants. Normally set by a mixin of instance
+        """Capillary pressure constants. Normally set by a instance of mixin
         :class:`CapillaryPressure`.
 
         """
 
-        flow_equation_weight: float
-        """Weighting factor for the flow equation in the residual and Jacobian."""
-        transport_equation_weight: float
-        """Weighting factor for the transport equation in the residual and Jacobian."""
-
         # Discretization keywords
         flux_key: str
         """Keyword to define parameters and discretizations for the total flux. Normally
-        provided by a mixin of instance :class:`SolutionStrategyTPF`.
+        provided by a instance of mixin :class:`SolutionStrategyTPF`.
 
         """
         cap_potential_key: str
         """Keyword to define parameters and discretizations for the capillary pressure
-        potential flux. Normally provided by a mixin of instance
+        potential flux. Normally provided by a instance of mixin
         :class:`SolutionStrategyTPF`.
 
         """
         params_key: str
-        """Normally set by a mixin of instance :class:`SolutionStrategyTPF`."""
+        """Normally set by a instance of mixin :class:`SolutionStrategyTPF`."""
 
         # Nonlinear solver
         nonlinear_solver_statistics: SolverStatisticsTPF
@@ -151,26 +148,29 @@ else:
             saturation: pp.ad.Operator,
             phase: FluidPhase | None = None,
         ) -> pp.ad.Operator:
-            """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
+            """Normallly provided by a instance of mixin :class:`VariablesTPF`."""
 
         def normalize_saturation_np(
             self,
             saturation: np.ndarray,
             phase: FluidPhase,
         ) -> np.ndarray:
-            """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
+            """Normallly provided by a instance of mixin :class:`VariablesTPF`."""
 
         def normalize_saturation_deriv(
             self,
             phase: FluidPhase,
         ) -> pp.ad.Operator:
-            """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
+            """Normallly provided by a instance of mixin :class:`VariablesTPF`."""
 
         def normalize_saturation_deriv_np(
             self,
             phase: FluidPhase,
         ) -> float:
-            """Normallly provided by a mixin of instance :class:`VariablesTPF`."""
+            """Normallly provided by a instance of mixin :class:`VariablesTPF`."""
+
+        def set_buoyancy_constants(self) -> None:
+            """Normally provided by a instance of mixin :class:`EquationsTPF`."""
 
         # Constitutive laws
         def rel_perm(
@@ -179,7 +179,7 @@ else:
             phase: FluidPhase,
             rel_perm_constants: RelPermConstants | None = None,
         ) -> pp.ad.Operator:
-            """Phase relative permeability. Normally provided by a mixin of instance
+            """Phase relative permeability. Normally provided by a instance of mixin
             :class:`RelativePermeability`.
 
             """
@@ -191,13 +191,13 @@ else:
             rel_perm_constants: RelPermConstants | None = None,
         ) -> np.ndarray:
             """Phase relative permeability for saturations of type
-            :class:`~numpy.ndarray`. Normally provided by a mixin of instance
+            :class:`~numpy.ndarray`. Normally provided by a instance of mixin
             :class:`CapillaryPressure`.
 
             """
 
         def set_rel_perm_constants(self) -> None:
-            """Normally provided by a mixin of instance
+            """Normally provided by a instance of mixin
             :class:`RelativePermeability`.
 
             """
@@ -218,7 +218,7 @@ else:
             cap_press_constants: CapPressConstants | None = None,
             **kwargs: Any,
         ) -> pp.ad.Operator:
-            """Capillary pressure. Normally provided by a mixin of instance
+            """Capillary pressure. Normally provided by a instance of mixin
             :class:`CapillaryPressure`.
 
             """
@@ -230,7 +230,7 @@ else:
             **kwargs: Any,
         ) -> np.ndarray:
             """Capillary pressure for saturations of type
-            :class:`~numpy.ndarray`. Normally provided by a mixin of instance
+            :class:`~numpy.ndarray`. Normally provided by a instance of mixin
             :class:`CapillaryPressure`.
 
             """
@@ -241,7 +241,7 @@ else:
             cap_press_constants: CapPressConstants | None = None,
             **kwargs: Any,
         ) -> pp.ad.Operator:
-            """Capillary pressure derivative. Normally provided by a mixin of instance
+            """Capillary pressure derivative. Normally provided by a instance of mixin
             :class:`CapillaryPressure`.
 
             """
@@ -253,15 +253,25 @@ else:
             **kwargs: Any,
         ) -> np.ndarray:
             """Capillary pressure derivative for saturations of type
-            :class:`~numpy.ndarray`. Normally provided by a mixin of instance
+            :class:`~numpy.ndarray`. Normally provided by a instance of mixin
             :class:`CapillaryPressure`.
 
             """
 
         def set_cap_press_constants(self) -> None:
-            """Normally provided by a mixin of instance :class:`CapillaryPressure`."""
+            """Normally provided by a instance of mixin :class:`CapillaryPressure`."""
 
         # DarcyFluxes attributes and methods:
+
+        def vector_source(
+            self,
+            g: pp.Grid,
+            phase: FluidPhase,
+            buoyancy_constants: BuoyancyConstants | None = None,
+        ) -> pp.ad.DenseArray:
+            """Volumetric phase vector source. Normally provided by an instance of
+            :class:`Buoyancy`."""
+
         def phase_mobility_discretization(
             self, g: pp.Grid, phase: FluidPhase
         ) -> pp.ad.UpwindAd:
@@ -293,9 +303,6 @@ else:
         def total_fluid_source(self, g: pp.Grid) -> np.ndarray:
             """Volumetric total source."""
 
-        def vector_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
-            """Volumetric phase vector source."""
-
         def permeability(self, g: pp.Grid) -> np.ndarray | dict[str, np.ndarray]:
             """Solid permeability."""
 
@@ -305,7 +312,7 @@ else:
         # BoundaryConditionsTPF attributes and methods:
         def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
             """BC type (Neumann or Dirichlet) for flux and mobility discretization. Normally
-            provided by a mixin of instance :class:`BoundaryConditionsTPF`.
+            provided by a instance of mixin :class:`BoundaryConditionsTPF`.
 
             """
 
@@ -339,7 +346,7 @@ else:
     class ReconstructionProtocol(TPFProtocol, Protocol):
         postproc_ad_ops: dict[str, pp.ad.Operator]
         """Operators to be evaluated during post-processing. Normally provided by a
-        mixin of instance :class:`SolutionStrategyReconstruction`.
+        instance of mixin :class:`SolutionStrategyReconstruction`.
 
         """
 
@@ -566,7 +573,7 @@ else:
         hc_decay_recomp_max: int
         hc_decay_recomp_counter: int
 
-        original_dt: Optional[float]
+        original_dt: float | None
         """Original dt before time step cutting. If None, the time step was not cut."""
         original_time: float
         """Original time before time step cutting."""
@@ -619,7 +626,7 @@ else:
         # must be used with care. We ignore the error.
         nonlinear_solver_statistics: SolverStatisticsANewton  # type: ignore
 
-        original_dt: Optional[float]
+        original_dt: float | None
         """Original dt before time step cutting. If None, the time step was not cut."""
         original_time: float
         """Original time before time step cutting."""
@@ -641,7 +648,7 @@ else:
 
         # SPE11 attributes and methods:
         spe11_case: str
-        """SPE11 case name. Normally provided by a mixin of instance
+        """SPE11 case name. Normally provided by a instance of mixin
         :class:`SolutionStrategySPE11`.
 
         """

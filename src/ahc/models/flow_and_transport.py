@@ -79,6 +79,9 @@ class TPFEquations(TPFProtocol, pp.BalanceEquation):
 
     """
 
+    def set_buoyancy_constants(self) -> None:
+        self.gravity_acceleration: float = self.params.get("gravity_acceleration", 0.0)
+
     def phase_fluid_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
         """Volumetric phase source term. Given as volumetric flux. This
         unmodified base function assumes a zero phase source.
@@ -104,20 +107,6 @@ class TPFEquations(TPFProtocol, pp.BalanceEquation):
         return sum(  # type: ignore
             [self.phase_fluid_source(g, phase) for phase in self.phases.values()]
         )
-
-    def vector_source(self, g: pp.Grid, phase: FluidPhase) -> np.ndarray:
-        """Volumetric phase vector source. Corresponds to the phase buoyancy flux. This
-        unmodified base function assumes a zero vector source.
-
-        To assign a gravity-like vector source, add a non-zero contribution in
-        the last dimension:
-            vals[..., -1] = pp.GRAVITY_ACCELERATION * self._w_density
-
-        """
-        vals = np.zeros((g.num_cells, self.mdg.dim_max()))
-        # vals[-1] = pp.GRAVITY_ACCELERATION * self.wetting_phase.density
-        # For some reason this needs to be a flat array.
-        return vals.ravel()
 
     # More matrix and phase parameters.
     def permeability(self, g: pp.Grid) -> np.ndarray | dict[str, np.ndarray]:
@@ -158,10 +147,8 @@ class TPFEquations(TPFProtocol, pp.BalanceEquation):
         flux_t = self.total_flux(self.g)
         flux_w = self.wetting_flux(self.g)
 
-        flow_equation = pp.ad.Scalar(self.flow_equation_weight) * (
-            div @ flux_t - source_ad_t
-        )
-        transport_equation = pp.ad.Scalar(self.transport_equation_weight) * (
+        flow_equation = div @ flux_t - source_ad_t
+        transport_equation = (
             porosity_ad * (self.volume_integral(dt_s, [self.g], 1))
             + div @ flux_w
             - source_ad_w
@@ -482,25 +469,6 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
     def __init__(self, params: dict | None) -> None:
         super().__init__(params)
 
-        flow_equation_weight = self.params.get("flow_equation_weight", 1.0)
-        if isinstance(flow_equation_weight, float):
-            self.flow_equation_weight: float = flow_equation_weight
-        else:
-            raise ValueError(
-                f"expected flow_equation_weight to be float, got {flow_equation_weight}"
-            )
-        """Weighting factor for the flow equation in the residual and Jacobian."""
-
-        transport_equation_weight = self.params.get("transport_equation_weight", 1.0)
-        if isinstance(transport_equation_weight, float):
-            self.transport_equation_weight: float = transport_equation_weight
-        else:
-            raise ValueError(
-                "expected transport_equation_weight to be float, got "
-                + f"{transport_equation_weight}"
-            )
-        """Weighting factor for the transport equation in the residual and Jacobian."""
-
         # Initialize fluid phases. NOTE This is already done during initialization and
         # not prepare simulation s.t. the keywords can be defined based on the phase
         # names. See below.
@@ -521,7 +489,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         """
 
         for phase in self.phases.values():
-            setattr(phase, "mobility_key", f"{phase.name}_mobility")
+            phase.mobility_key = f"{phase.name}_mobility"
             """Keyword to define parameters and discretizations for the phase mobility.
 
             As phase flows can have opposite signs, independent upwind discretization
@@ -644,6 +612,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         # Set the model parameters.
         self.set_rel_perm_constants()
         self.set_cap_press_constants()
+        self.set_buoyancy_constants()
         self.set_materials()
         self.set_geometry()
 
@@ -741,7 +710,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                 phase_potential = -np.ones(self.g.num_faces)
             else:
                 # Use previous values at the start of a new time step.
-                return None
+                return
             pp.initialize_data(
                 self.g,
                 self.g_data,

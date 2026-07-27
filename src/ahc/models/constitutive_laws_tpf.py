@@ -435,7 +435,6 @@ class CapillaryPressure(TPFProtocol):
         consistent.
 
         """
-        ...
 
     def entry_pressure(
         self, g: pp.Grid, cap_press_constants: CapPressConstants | None = None
@@ -811,10 +810,50 @@ class CapillaryPressure(TPFProtocol):
 def validate_constants() -> None:
     """Check that the relative permeability and capillary pressure models go in hand."""
     # TODO: Implement this function.
-    pass
 
 
 # region CONSTITUTIVE LAWS
+@dataclass
+class BuoyancyConstants:
+    gravity_acceleration: float = 0.0
+
+
+class Buyoancy(TPFProtocol):
+    def set_buoyancy_constants(self) -> None:
+        self._buoyancy_constants = BuoyancyConstants(
+            **self.params.get("buoyancy_constants", {})
+        )
+
+    def vector_source(
+        self,
+        g: pp.Grid,
+        phase: FluidPhase,
+        buoyancy_constants: BuoyancyConstants | None,
+    ) -> pp.ad.DenseArray:
+        """Volumetric phase vector source. Corresponds to the phase buoyancy flux.
+
+        Parameters:
+            g: Grid object.
+            phase: Fluid phase for which the vector source is calculated.
+            buoyancy_constants: Buoyancy constants. If set, overrides
+                :attr:`self.buoyancy_constants`. Default is ``None``.
+
+        Returns:
+            _description_
+        """
+        # IMPLEMENTATION NOTE: In normal PorePy, the ``vector_source`` function returns
+        # a static ``np.ndarray`` and would be more fitting in the ``TPFEquations``
+        # class. To facilitate the strength of the gravity acceleration when using
+        # homotopy continuation, we instead define it to be a method that directly
+        # returns a ``DenseArray`` and can accept ``BuoyancyConstants``.
+        if buoyancy_constants is None:
+            buoyancy_constants = self._buoyancy_constants
+
+        vals = np.zeros((g.num_cells, self.mdg.dim_max()))
+        vals[-1] = buoyancy_constants.gravity_acceleration * phase.density
+
+        # NOTE For some reason this needs to be a flat array.
+        return pp.ad.DenseArray(vals.ravel())
 
 
 class DarcyFluxes(TPFProtocol):
@@ -893,6 +932,10 @@ class DarcyFluxes(TPFProtocol):
         permeability in the TPFA discretization. However, this does not matter when used
         to determine the upwinding direction.
 
+        Note: Capillary pressure is implicitly included, via the derivation of the
+        secondary variable ``self.wetting.p`` from ``self.nonwetting.p`` and the
+        capillary pressure.
+
         Note: This is zero at Neumann boundaries.
 
         """
@@ -900,7 +943,7 @@ class DarcyFluxes(TPFProtocol):
         pressure_phase_bc_dir = pp.ad.DenseArray(
             self.bc_dirichlet_pressure_values(g, phase)
         )
-        phase_vector_source = pp.ad.DenseArray(self.vector_source(g, phase))
+        phase_vector_source = self.vector_source(g, phase)
         tpfa = self.phase_potential_discretization(g)
 
         # Phase flux terms.
@@ -925,8 +968,8 @@ class DarcyFluxes(TPFProtocol):
 
         """
         # Get data and discretizations.
-        vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
-        vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+        vector_source_w = self.vector_source(g, self.wetting)
+        vector_source_n = self.vector_source(g, self.nonwetting)
 
         # NOTE Some notes on the boundary conditions of the potential discretizations
         # and the total flux:
@@ -982,8 +1025,8 @@ class DarcyFluxes(TPFProtocol):
         # Get data and spatial discretization.
         tpfa = self.phase_potential_discretization(g)
         tpfa_cap_press = self.capillary_potential_discretization(g)
-        vector_source_w = pp.ad.DenseArray(self.vector_source(g, self.wetting))
-        vector_source_n = pp.ad.DenseArray(self.vector_source(g, self.nonwetting))
+        vector_source_w = self.vector_source(g, self.wetting)
+        vector_source_n = self.vector_source(g, self.nonwetting)
 
         # Compute cap pressure and mobilities.
         pressure_c = self.cap_press(self.wetting.s)
@@ -1003,7 +1046,7 @@ class DarcyFluxes(TPFProtocol):
         wetting_flux = fractional_flow * flux_t + fractional_flow * mobility_n * (
             capillary_potential + buoyancy_potential_w - buoyancy_potential_n
         )
-        wetting_flux.set_name(("Wetting flux from fractional flow"))
+        wetting_flux.set_name("Wetting flux from fractional flow")
         return wetting_flux
 
 

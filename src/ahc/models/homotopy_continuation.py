@@ -1,13 +1,14 @@
 import itertools
 import logging
 import typing
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import porepy as pp
 from porepy.viz.exporter import DataInput
 
 from ahc.models.constitutive_laws_tpf import (
+    BuoyancyConstants,
     CapillaryPressure,
     CapPressConstants,
     RelativePermeability,
@@ -18,7 +19,7 @@ from ahc.models.error_estimate import (
     EstimatesDataSavingMixin,
     EstimatesSolutionStrategy,
 )
-from ahc.models.flow_and_transport import TPFSolutionStrategy
+from ahc.models.flow_and_transport import TPFEquations, TPFSolutionStrategy
 from ahc.models.phase import FluidPhase
 from ahc.models.protocol import HCProtocol
 from ahc.numerics.quadrature import Integral
@@ -195,6 +196,44 @@ class CapillaryPressureHC(HCProtocol, CapillaryPressure):
     ) -> np.ndarray:
         return super().cap_press_deriv_np(
             saturation_w, cap_press_constants=self._cap_press_constants_2, **kwargs
+        )
+
+
+class BuoyancyHC(HCProtocol, TPFEquations):
+    @typing.override
+    def set_buoyancy_constants(self) -> None:
+        buoyancy_constants: dict[str, dict] = self.params.get("buoyancy_constants", {})
+        buoyancy_1_constants: dict[str, Any] = buoyancy_constants.get("model_1", {})
+        buoyancy_2_constants: dict[str, Any] = buoyancy_constants.get("model_2", {})
+
+        self._buoyancy_constants_1 = BuoyancyConstants(**buoyancy_1_constants)
+        self._buoyancy_constants_2 = BuoyancyConstants(**buoyancy_2_constants)
+
+    @typing.override
+    def vector_source(
+        self,
+        g: pp.Grid,
+        phase: FluidPhase,
+        buoyancy_constants: BuoyancyConstants | None = None,
+    ) -> pp.ad.Operator:
+        vector_source_1: pp.ad.DenseArray = super().vector_source(
+            g,
+            phase,
+            buoyancy_constants=self._buoyancy_constants_1,
+        )
+        vector_source_2: pp.ad.DenseArray = super().vector_source(
+            g,
+            phase,
+            buoyancy_constants=self._buoyancy_constants_2,
+        )
+        hc_vector_source: pp.ad.Operator = (
+            self.nonlinear_solver_statistics.hc_lambda_ad * vector_source_1
+            + (pp.ad.Scalar(1.0) - self.nonlinear_solver_statistics.hc_lambda_ad)
+            * vector_source_2
+        )
+        return (
+            self.hc_toggle_ad * hc_vector_source
+            + (pp.ad.Scalar(1.0) - self.hc_toggle_ad) * vector_source_2
         )
 
 
@@ -541,7 +580,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         self.hc_toggle_fl: float = 1.0
         self.hc_toggle_ad: pp.ad.Scalar = pp.ad.Scalar(1.0)
 
-        self.original_dt: Optional[float] = None
+        self.original_dt: float | None = None
         """Original dt before time step cutting. If None, the time step was not cut."""
         self.original_time: float = self.time_manager.time
         """Original time before time step cutting."""
@@ -856,7 +895,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
 
         """
         if self.hc_constant_decay:
-            return None
+            return
         else:
             if nl_iterations is not None:
                 self._hc_adaptation_based_on_iterations(nl_iterations)
@@ -882,7 +921,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
             )
             logger.info(msg)
             self.hc_is_diverged = True
-            return None
+            return
         elif self.hc_decay_recomp_counter == self.hc_decay_recomp_max:
             msg = (
                 "Reached maximum number of recomputations"
@@ -890,7 +929,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
             )
             logger.info(msg)
             self.hc_is_diverged = True
-            return None
+            return
         self.hc_decay *= self.nl_iter_relax_factors[1]
         self._hc_correction_based_on_hc_decay_min_max()
         self.hc_decay_recomp_counter += 1
