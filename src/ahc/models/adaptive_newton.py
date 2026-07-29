@@ -24,8 +24,8 @@ from ahc.models.error_estimate import (
     ErrorEstimatesTwoPhaseFlow,
     EstimatesSolutionStrategy,
 )
-from ahc.models.flow_and_transport import TPFSolutionStrategy
 from ahc.models.protocol import AdaptiveNewtonProtocol
+from ahc.models.reconstruction import RecSolutionStrategy
 from ahc.numerics.quadrature import Integral
 from ahc.utils.constants_and_typing import FLUX_NAME, TOTAL_FLUX, WETTING_FLUX
 
@@ -309,10 +309,10 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
         # NOTE Here, we explicitely do NOT want to call
-        # ``SolutionStrategyEstMixin.check_convergence``, but
-        # ``TwoPhaseFlow.check_convergence``. The former logs estimators we are not
-        # interested in.
-        converged, diverged = TPFSolutionStrategy.check_convergence(
+        # ``EstimatesSolutionStrategy.check_convergence``, but
+        # ``RecSolutionStrategy.check_convergence``. The former logs estimators we are
+        # not interested in.
+        converged, diverged = RecSolutionStrategy.check_convergence(
             self,  # type: ignore
             nonlinear_increment,
             residual,
@@ -385,7 +385,7 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
 
         if self.time_manager.is_constant:
             # We cannot decrease the constant time step.
-            raise ValueError("HC iterations did not converge.")
+            raise ValueError("Newton iterations did not converge.")
         else:
             # Store ``self.original_dt`` if the time step is going to be cut and hadn't
             # been cut before.

@@ -1,5 +1,4 @@
-"""
-This module contains functions to be wrapped in a pp.ad.Function and used as part
+"""This module contains functions to be wrapped in a pp.ad.Function and used as part
 of compound pp.ad.Operators, i.e. as (terms of) equations.
 
 Some functions depend on non-ad objects. This requires that the function (f) be wrapped
@@ -102,7 +101,8 @@ def minimum(var_0: FloatType, var_1: FloatType) -> FloatType:
 
     # If neither var_0 or var_1 are ``AdArrays``, return the ``np.minimum`` function.
     if not isinstance(var_0, AdArray) and not isinstance(var_1, AdArray):
-        # FIXME: According to the type hints, this should not be possible.
+        # NOTE: Mypy complains that this should not be possible, but it is exactly how
+        # PorePy does it in the maximum function.
         return np.minimum(var_0, var_1, dtype=np.float64)  # type: ignore
 
     # Make a fall-back zero Jacobian for constant arguments.

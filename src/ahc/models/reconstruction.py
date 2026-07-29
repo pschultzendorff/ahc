@@ -292,6 +292,8 @@ class PressureReconstructionMixin(ReconstructionProtocol):
 
             # Retrieve RT0 flux coefficients depending on pressure type.
             if pressure_key == GLOBAL_PRESSURE:
+                # Global pressure gradient x total mobility x permeability = -total flux.
+                # Divide by total mobility already here.
                 total_mobility: np.ndarray = pp.get_solution_values(
                     f"total_mobility{specifier}", self.g_data, iterate_index=0
                 )
@@ -305,6 +307,7 @@ class PressureReconstructionMixin(ReconstructionProtocol):
                 )
 
             elif pressure_key == COMPLEMENTARY_PRESSURE:
+                # Complementary pressure gradient x permeability = - capillary flux.
                 coeffs_flux = pp.get_solution_values(
                     f"{CAPILLARY_FLUX}{specifier}_RT0_coeffs",
                     self.g_data,
@@ -314,13 +317,13 @@ class PressureReconstructionMixin(ReconstructionProtocol):
             else:
                 raise ValueError(f"Unknown pressure key: {pressure_key}")
 
-            # Multiply by inverse of the permeability and total mobility to obtain
-            # pressure potential.
+            # Now, retrieve the permeability.
             perm: np.ndarray = self.g_data[pp.PARAMETERS][self.flux_key][
                 "second_order_tensor"
             ].values
 
-            # Compute pressure coefficients without constant term.
+            # Compute pressure coefficients without constant term. The gradient is
+            # divided by permeability in this step.
             coeffs = compute_pressure_coeffs(
                 self.g.num_cells, self.g.dim, perm, coeffs_flux
             )
@@ -552,7 +555,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
               the previous nonlinear iteration.
 
         The following entries in ``iterate_dictionary` will be updated:
-            - ``{flux_name}_flux_equilibrated``, storing the equilibrated flux.
+            - ``{flux_name}_flux_equil``, storing the equilibrated flux.
 
         Parameters:
             flux_field: Name flux field to be equilibrated.
@@ -583,7 +586,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
 
         # NOTE This requires the variables to be shifted at each nonlinear iteration. By
         # default, this happens in
-        # :meth:`SolutionStrategyahc.after_nonlinear_iteration`.
+        # :meth:`SolutionStrategy.after_nonlinear_iteration`.
         val: np.ndarray = pp.get_solution_values(
             flux_name, self.g_data, iterate_index=1
         )
@@ -712,19 +715,15 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
         # Calculate mismatches. The equilibrated flux values are stored in the data
         # dictionary were updated by :meth:`eval_postproc_qtys`.
         # Ignore mypy type check for *.value(*).
-        flux_t_equil_mismatch: float = np.sum(
-            np.abs(
-                self.postproc_ad_ops[TOTAL_FLUX + "_equil_mismatch"].value(
-                    self.equation_system
-                )  # type: ignore
-            )
+        flux_t_equil_mismatch: float = np.linalg.norm(
+            self.postproc_ad_ops[TOTAL_FLUX + "_equil_mismatch"].value(
+                self.equation_system
+            )  # type: ignore
         )
-        flux_w_equil_mismatch: float = np.sum(
-            np.abs(
-                self.postproc_ad_ops[WETTING_FLUX + "_equil_mismatch"].value(
-                    self.equation_system
-                )  # type: ignore
-            )
+        flux_w_equil_mismatch: float = np.linalg.norm(
+            self.postproc_ad_ops[WETTING_FLUX + "_equil_mismatch"].value(
+                self.equation_system
+            )  # type: ignore
         )
 
         logger.info(f"Total flux equilibration mismatch {flux_t_equil_mismatch}")
@@ -791,6 +790,14 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
 
         # Discretization operators.
         div = pp.ad.Divergence([self.g])
+        # NOTE The equilibrated wetting flux, calculated with Jacobian and value of the
+        # wetting flux from Newton step k - 1, solves the transport equation at Newton
+        # step k. This is basically, because the Jacobian of the full transport equation
+        # has a \phi/\tau^n term which is multiplied with the saturation Newton update.
+        # We therefore calculate the mismatch for the CURRENT saturation.
+        # Cf. [M. Vohralík and M. F. Wheeler, “A posteriori error estimates, stopping
+        # criteria, and adaptivity for two-phase flows,” Comput Geosci, vol. 17, no. 5,
+        # pp. 789–812, Oct. 2013, doi: 10.1007/s10596-013-9356-0] for the equations.
         dt_s = pp.ad.time_derivatives.dt(self.wetting.s, self.ad_time_step)
 
         # Ad source.
@@ -881,7 +888,6 @@ class RecSolutionStrategy(  # type: ignore
         the operators are rediscretized after the nonlinear iteration.
 
         """
-        pass
 
     @typing.override
     def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
@@ -918,6 +924,7 @@ class RecSolutionStrategy(  # type: ignore
                 + " Skipping postprocessing this iteration."
             )
             logger.warning(e)
+        print("f")
 
     @typing.override
     def check_convergence(

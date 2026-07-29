@@ -977,9 +977,9 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         self.equation_system.set_variable_values(
             assembled_variables, iterate_index=0, additive=False
         )
-        # FIXME Check convergence once before starting the Newton loop. Perhaps the
-        # solution from the previous HC iteration is already good enough. This way, we
-        # would avoid one Newton iteration.
+        # NOTE One could check convergence once before starting the Newton loop. Perhaps
+        # the solution from the previous HC iteration is already good enough. This way,
+        # we would avoid one Newton iteration.
 
     def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
         """Calculate fluxes and total mobility w.r.t. the goal relative

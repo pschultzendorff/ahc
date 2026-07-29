@@ -22,6 +22,11 @@ import gmsh  # type: ignore
 import numpy as np
 import porepy as pp
 import requests
+from numpy.typing import ArrayLike
+from porepy.fracs.fracture_importer import dfm_from_gmsh
+from porepy.grids.partition import extract_subgrid
+from porepy.viz.exporter import DataInput
+
 from ahc.derived_models.fluid_values import co2_reservoir as _co2_reservoir
 from ahc.derived_models.fluid_values import co2_surface as _co2_surface
 from ahc.derived_models.fluid_values import water as _water
@@ -30,10 +35,6 @@ from ahc.models.constitutive_laws_tpf import CapPressConstants
 from ahc.models.phase import FluidPhase
 from ahc.models.protocol import SPE11Protocol, TPFProtocol
 from ahc.utils.constants_and_typing import NONWETTING, WETTING
-from numpy.typing import ArrayLike
-from porepy.fracs.fracture_importer import dfm_from_gmsh
-from porepy.grids.partition import extract_subgrid
-from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ case_A: dict[str, Any] = {
         "facies 4": 25.0,
         "facies 5": 10.0,
         "facies 6": 1.0,
-        "facies 7": 1e-20,  # Epsilon to avoid ill-defined problem.
+        "facies 7": 0.0,
     },
     "SCALE_FACTOR_X": 1.0,
     "SCALE_FACTOR_Y": 1.0,
