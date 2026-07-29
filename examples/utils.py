@@ -81,25 +81,28 @@ def setup_params(
             "hc_constant_decay": False,
             "hc_lambda_decay": 0.9,
             "hc_decay_min_max": (0.1, 0.95),
-            "nl_iter_optimal_range": (7, 10),
+            "nl_iter_optimal_range": (6, 9),
             "nl_iter_relax_factors": (0.7, 1.3),
             "hc_decay_recomp_max": 5,
             # Non-adaptive stopping criteria:
             "hc_adaptive": False,
-            "hc_max_iterations": 100,
+            "hc_max_iterations": 30,
             "hc_lambda_min": 0.01,
-            # Nonlinear solver parameters:
-            "nl_convergence_tol": 5e-5,
+            # Newton solver parameters:
+            "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
-            "max_iterations": 20,
+            "max_iterations": 30,
             "nl_appleyard_chopping": False,
         }
         # Update adaptive time stepping parameters for HC.
         time_manager_params = {
-            "iter_optimal_range": (30, 80),
+            "iter_optimal_range": (
+                8,
+                20,
+            ),  # Default value is (4, 7), which is used for the Newton solvers.
             "iter_relax_factors": (0.7, 1.3),
-            "iter_max": 100,  # This has to be the same as "hc_max_iterations", but
-            # the TimeManager does not know about that.
+            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            # TimeManager does not know about.
         }
     elif solver == "AHC":
         solver_params = {
@@ -121,18 +124,21 @@ def setup_params(
             "extrapolate_temp_estimator_after_cutting": kwargs.get(
                 "extrapolate_temp_estimator_after_cutting", True
             ),
-            # Nonlinear solver parameters:
+            # Newton solver parameters:
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
-            "max_iterations": 20,
+            "max_iterations": 30,
             "nl_appleyard_chopping": False,
         }
         # Update adaptive time stepping parameters for AHC.
         time_manager_params = {
-            "iter_optimal_range": (8, 20),
-            "iter_relax_factors": (0.7, 1.3),
-            "iter_max": 100,  # This has to be the same as "hc_max_iterations", but
-            # the TimeManager does not know about that.
+            "iter_optimal_range": (
+                8,
+                20,
+            ),  # Default value is (4, 7).
+            "iter_relax_factors": (0.7, 1.3),  # Default value.
+            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            # TimeManager does not know about.
         }
     elif solver == "Newton":
         solver_params = {
@@ -150,9 +156,18 @@ def setup_params(
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": False,
-            "max_iterations": 50,
+            "max_iterations": 30,
         }
-        time_manager_params = {}
+        # Update adaptive time stepping parameters for Newton.
+        time_manager_params = {
+            "iter_optimal_range": (
+                8,
+                20,
+            ),  # Default value is (4, 7).
+            "iter_relax_factors": (0.7, 1.3),  # Default value.
+            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            # TimeManager does not know about.
+        }
     elif solver == "NewtonAppleyard":
         solver_params = {
             # Newton solver params with Appleyard chopping:
@@ -167,9 +182,18 @@ def setup_params(
             "nl_convergence_tol": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,
-            "max_iterations": 50,
+            "max_iterations": 30,
         }
-        time_manager_params = {}
+        # Update adaptive time stepping parameters for Newton.
+        time_manager_params = {
+            "iter_optimal_range": (
+                8,
+                20,
+            ),  # Default value is (4, 7).
+            "iter_relax_factors": (0.7, 1.3),  # Default value.
+            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            # TimeManager does not know about.
+        }
     else:
         raise ValueError(f"Unknown solver: {solver}")
     return solver_params, time_manager_params
