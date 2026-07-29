@@ -829,7 +829,7 @@ class Buyoancy(TPFProtocol):
         g: pp.Grid,
         phase: FluidPhase,
         buoyancy_constants: BuoyancyConstants | None = None,
-    ) -> pp.ad.DenseArray:
+    ) -> pp.ad.Operator:
         """Volumetric phase vector source. Corresponds to the phase buoyancy flux.
 
         Parameters:
@@ -850,11 +850,25 @@ class Buyoancy(TPFProtocol):
         if buoyancy_constants is None:
             buoyancy_constants = self._buoyancy_constants
 
-        vals = np.zeros((g.num_cells, self.mdg.dim_max()))
-        vals[-1] = buoyancy_constants.gravity_acceleration * phase.density
+        # NOTE The following is mostly copied from the original PorePy implementation of
+        # the vector source. In particular we adopt the same sign convention for the
+        # gravity term in relation to the pressure term here and in
+        # ``DarcyFluxes.total_flux`` and ``DarcyFluxes.wetting_flux`` as in
+        # ``GravityForce.gravity_force`` and ``DarcysLaw.darcy_flux``
+        # BEGIN COPIED CODE
+        val = phase.convert_units(buoyancy_constants.gravity_acceleration, "m*s^-2")
+        size = g.num_cells
+        gravity = pp.wrap_as_dense_ad_array(val, size=size, name="gravity")
 
-        # NOTE For some reason this needs to be a flat array.
-        return pp.ad.DenseArray(vals.ravel())
+        # Gravity acts along the last coordinate direction (z in 3d, y in 2d). Ignore
+        # type error, can't get mypy to understand keyword-only arguments in mixin.
+        e_n = self.e_i([g], i=self.nd - 1, dim=self.nd)
+        # e_n is a matrix, thus we need @ for it.
+        gravity = pp.ad.Scalar(-1.0) * (e_n @ (pp.ad.Scalar(phase.density) * gravity))
+        gravity.set_name("gravity_force")
+        # END COPIED CODE
+
+        return gravity
 
 
 class DarcyFluxes(TPFProtocol):
@@ -890,8 +904,6 @@ class DarcyFluxes(TPFProtocol):
                     \lambda_{alpha}(s_{w,K'}) & \text{if } \Delta p_{\alpha,K,K'} +
                         g_{\alpha,K,K'} \geq 0 < 0.\\
                 \end{cases}
-
-        TODO Implement upwinding in the gravity case.
 
         Parameters:
             g: Model grid.
@@ -929,15 +941,16 @@ class DarcyFluxes(TPFProtocol):
     def phase_potential(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
         """Phase potential times permeability. Combines pressure and buoyancy potential.
 
-        Note: This is not the phase potential itself, as we multiply with the medium's
+        See :meth:`phase_mobility` for a detailed description of the upwinding scheme.
+
+        Note:
+        - This is not exactly the phase potential, as we multiply with the medium's
         permeability in the TPFA discretization. However, this does not matter when used
         to determine the upwinding direction.
-
-        Note: Capillary pressure is implicitly included, via the derivation of the
+        - Capillary pressure is implicitly included, via the derivation of the
         secondary variable ``self.wetting.p`` from ``self.nonwetting.p`` and the
         capillary pressure.
-
-        Note: This is zero at Neumann boundaries.
+        - This is zero at Neumann boundaries.
 
         """
         # Get phase data & discretization.
@@ -948,13 +961,16 @@ class DarcyFluxes(TPFProtocol):
         tpfa = self.phase_potential_discretization(g)
 
         # Phase flux terms.
+        # NOTE The sign of pressure and buoyancy terms has to be identical to the one in
+        # Darcy's law. See the comment on the signs for the different flux terms in
+        # ``total_flux``.
         pressure_potential = (
             tpfa.flux() @ phase.p + tpfa.bound_flux() @ pressure_phase_bc_dir
         )
-        buyoancy_potential = -tpfa.vector_source() @ phase_vector_source
+        buoyancy_potential = tpfa.vector_source() @ phase_vector_source
 
         # Add together:
-        potential = pressure_potential + buyoancy_potential
+        potential = pressure_potential + buoyancy_potential
         potential.set_name(f"{phase.name} potential")
         return potential
 
@@ -1003,12 +1019,16 @@ class DarcyFluxes(TPFProtocol):
 
         # Finally, we can combine all viscous and buoyancy fluxes multiplied with phase
         # mobilities to the total flux.
-        # FIXME Fix buoyancy potential.
+        # NOTE TPFA.flux() is the transmissibility-scaled negative of the pressure
+        # gradient. However, tpfa.vector_flux() the transmissibility-scaled positive of
+        # the buoyancy term. Hence, the signs of the viscous and capillary terms are
+        # switched from the description in the paper, while the signs of the buoyancy
+        # terms stay the same
         total_flux = (
             mobility_t * viscous_potential_n
             - mobility_w * capillary_potential
-            - mobility_w * buoyancy_potential_w
-            - mobility_n * buoyancy_potential_n
+            + mobility_w * buoyancy_potential_w
+            + mobility_n * buoyancy_potential_n
         )
         total_flux.set_name("Total volume flux")
         return total_flux
@@ -1043,9 +1063,13 @@ class DarcyFluxes(TPFProtocol):
         flux_t = self.total_flux(g)
         fractional_flow = mobility_w / mobility_t
 
-        # FIXME Fix buoyancy potential.
+        # NOTE The comment on the signs for the different flux terms in ``total_flux``
+        # also applies here.
+        # IN PARTICULAR, the capillary contribution is negative as in the total flux.
         wetting_flux = fractional_flow * flux_t + fractional_flow * mobility_n * (
-            capillary_potential + buoyancy_potential_w - buoyancy_potential_n
+            pp.ad.Scalar(-1.0) * capillary_potential
+            + buoyancy_potential_w
+            - buoyancy_potential_n
         )
         wetting_flux.set_name("Wetting flux from fractional flow")
         return wetting_flux

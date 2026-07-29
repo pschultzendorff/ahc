@@ -271,7 +271,7 @@ else:
             g: pp.Grid,
             phase: FluidPhase,
             buoyancy_constants: BuoyancyConstants | None = None,
-        ) -> pp.ad.DenseArray:
+        ) -> pp.ad.Operator:
             """Volumetric phase vector source. Normally provided by an instance of
             :class:`Buoyancy`."""
 

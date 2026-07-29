@@ -62,7 +62,6 @@ from porepy.viz.exporter import DataInput
 from ahc.models.constitutive_laws_tpf import TPFConstitutiveLaws
 from ahc.models.phase import FluidPhase
 from ahc.models.protocol import TPFProtocol
-from ahc.numerics.ad.functions import ad_pow as ad_pow
 from ahc.utils.constants_and_typing import NONWETTING, WETTING
 
 logger = logging.getLogger(__name__)
@@ -125,7 +124,8 @@ class TPFEquations(TPFProtocol, pp.BalanceEquation):
             self.equation_system.remove_equation("Flow equation")
             self.equation_system.remove_equation("Transport equation")
         except ValueError:
-            ValueError("Equations not found.")
+            # Ignore if the equations do not exist yet.
+            pass
 
         # Spatial discretization operators.
         div = pp.ad.Divergence([self.g])
@@ -899,6 +899,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             additive=True,
             iterate_index=0,
         )
+
         self.eval_secondary_variables()
         self.nonlinear_solver_statistics.num_iteration += 1
 
