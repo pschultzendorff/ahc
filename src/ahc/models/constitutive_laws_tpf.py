@@ -872,6 +872,8 @@ class Buyoancy(TPFProtocol):
 
 
 class DarcyFluxes(TPFProtocol):
+    total_mobility_epsilon = pp.ad.Scalar(1e-7, name="total mobility epsilon")
+
     def phase_potential_discretization(self, g: pp.Grid) -> pp.ad.TpfaAd:
         return pp.ad.TpfaAd(self.flux_key, [g])
 
@@ -902,8 +904,12 @@ class DarcyFluxes(TPFProtocol):
                     \lambda_{alpha}(s_{w,K}) & \text{if } \Delta p_{\alpha,K,K'} +
                         g_{\alpha,K,K'} \geq 0,\\
                     \lambda_{alpha}(s_{w,K'}) & \text{if } \Delta p_{\alpha,K,K'} +
-                        g_{\alpha,K,K'} \geq 0 < 0.\\
+                        g_{\alpha,K,K'} \geq 0 < 0,\\
                 \end{cases}
+
+        where :math:`\Delta p_{\alpha,K,K'}` is the
+        phase pressure gradient and :math:`g_{\alpha,K,K'}=\rho_\alpha*\mathbf{g}` is
+        the buoyancy potential.
 
         Parameters:
             g: Model grid.
@@ -933,20 +939,27 @@ class DarcyFluxes(TPFProtocol):
             Total mobility.
 
         """
-        return pp.ad.sum_operator_list(
-            [self.phase_mobility(g, phase) for phase in self.phases.values()],
-            name="total mobility",
-        ) + pp.ad.Scalar(1e-7)
+        return (
+            pp.ad.sum_operator_list(
+                [self.phase_mobility(g, phase) for phase in self.phases.values()],
+                name="total mobility",
+            )
+            + self.total_mobility_epsilon
+        )
 
     def phase_potential(self, g: pp.Grid, phase: FluidPhase) -> pp.ad.Operator:
-        """Phase potential times permeability. Combines pressure and buoyancy potential.
+        """Negative phase potential times permeability. Combines pressure and buoyancy
+        potential.
 
         See :meth:`phase_mobility` for a detailed description of the upwinding scheme.
 
         Note:
-        - This is not exactly the phase potential, as we multiply with the medium's
-        permeability in the TPFA discretization. However, this does not matter when used
-        to determine the upwinding direction.
+        - Evaluating with TPFA multiplies the pressure and gravity terms with the
+        medium's permeability in the TPFA discretization. However, this does not matter
+        when used to determine the upwinding direction.
+        - In addition TPFA returns the flux, that is the negative of the pressure
+        gradient. However, this is exactly what we want in :meth:`total_flux` and
+        :meth:`wetting_flux` and what PorePy needs for the upwind discretization.
         - Capillary pressure is implicitly included, via the derivation of the
         secondary variable ``self.wetting.p`` from ``self.nonwetting.p`` and the
         capillary pressure.
@@ -962,8 +975,8 @@ class DarcyFluxes(TPFProtocol):
 
         # Phase flux terms.
         # NOTE The sign of pressure and buoyancy terms has to be identical to the one in
-        # Darcy's law. See the comment on the signs for the different flux terms in
-        # ``total_flux``.
+        # Darcy's law. Cf. ``DarcyFlux.darcy_flux`` in PorePy and the comment on the
+        # signs for the different flux terms in ``total_flux``.
         pressure_potential = (
             tpfa.flux() @ phase.p + tpfa.bound_flux() @ pressure_phase_bc_dir
         )
@@ -1006,11 +1019,12 @@ class DarcyFluxes(TPFProtocol):
         # Capillary pressure and phase mobilities.
         pressure_c = self.cap_press(self.wetting.s)
         mobility_w = self.phase_mobility(g, self.wetting)
-        mobility_n = self.phase_mobility(g, self.nonwetting)
         mobility_t = self.total_mobility(g)
 
         # Compute nonwetting & capillary pressure potential.
-        viscous_potential_n = self.phase_potential(g, self.nonwetting)
+        # NOTE The nonwetting phase potential includes both the pressure and the
+        # buoyancy potential.
+        phase_potential_n = self.phase_potential(g, self.nonwetting)
         capillary_potential = tpfa_cap_press.flux() @ pressure_c
 
         # Gravity terms.
@@ -1025,10 +1039,15 @@ class DarcyFluxes(TPFProtocol):
         # switched from the description in the paper, while the signs of the buoyancy
         # terms stay the same
         total_flux = (
-            mobility_t * viscous_potential_n
+            mobility_t * phase_potential_n
             - mobility_w * capillary_potential
             + mobility_w * buoyancy_potential_w
-            + mobility_n * buoyancy_potential_n
+            # NOTE mobility_t * phase_potential_n includes mobility_t *
+            # buoyancy_potential_n, hence we need to subtract it here to get mobility_n
+            # * buoyancy_potential_n in the total flux. We also substract the epsilon
+            #   term in mobility_t.
+            - mobility_w * buoyancy_potential_n
+            - self.total_mobility_epsilon * buoyancy_potential_n
         )
         total_flux.set_name("Total volume flux")
         return total_flux
