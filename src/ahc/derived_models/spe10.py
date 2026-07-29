@@ -255,7 +255,8 @@ class SPE10ModifiedBoundaryMixin(TPFProtocol):
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann)."""
         if self.params["spe10_case"] == "gravity_separation":
-            bc = pp.BoundaryCondition(g)
+            domain_sides = self.domain_boundary_sides(g)
+            bc = pp.BoundaryCondition(g, domain_sides.north, "dir")
         elif self.params["spe10_case"] == "five_spot":
             height: float = (
                 (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
@@ -371,6 +372,10 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
                 self._permeability[j, i] = perm[j, layer, y_ind, x_ind]
             self._porosity[i] = poro[layer, y_ind, x_ind]
 
+        if self.params["spe10_case"] == "gravity_separation":
+            self._permeability = np.full(self._permeability.shape, 1e-11)  # [m^2]
+            self._porosity = np.full(self._porosity.shape, 0.3)  # [-]
+
     def add_constant_spe10_data(self) -> None:
         """Save the SPE10 data to the exporter."""
         data: list[DataInput] = []
@@ -394,22 +399,26 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
           ``INITIAL_SATURATION``.
 
         """
-        initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
 
         if self.params["spe10_case"] == "gravity_separation":
+            initial_pressure = np.full(self.g.num_cells, 0.0)
             height: float = (
                 (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
             )
+            width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
             # self.g.cell_centers has shape=(ambient_dimension, num_cells)
+            # Choose initial saturation depending on whether cell is above or below
+            # slanted line
             initial_saturation = np.array(
                 [
                     INITIAL_SATURATION
-                    if cell[1] >= height / 2
+                    if cell[1] >= height / 2 + 10 * (1 - 2 * cell[0] / width)
                     else 1.0 - INITIAL_SATURATION
                     for cell in np.swapaxes(self.g.cell_centers, 0, 1)
                 ]
             )
         elif self.params["spe10_case"] == "five_spot":
+            initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
             initial_saturation = np.full(self.g.num_cells, INITIAL_SATURATION)
         else:
             raise ValueError(
@@ -482,40 +491,55 @@ class SPE10ModelGeometryMixin(TPFProtocol):
         self._domain = pp.Domain(bounding_box)
 
     def set_fractures(self) -> None:
-        """Use fractures as constraints to ensure that the grid is conforming at the
-        well boundaries.
+        """Use fractures as constraints to ensure that the grid is conforming at
+
+        - Gravity separation: the slanted line at half the height of the domain,
+          which separates the two phases in the initial condition.
+        - Five spot setup: the production well boundaries.
 
         """
-        self._fractures = [
-            pp.LineFracture(
-                np.array([[0, WIDTH], [PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE]])
-            ),
-            pp.LineFracture(
-                np.array(
-                    [
-                        [0, WIDTH],
-                        [
-                            HEIGHT - PRODUCTION_WELL_SIZE,
-                            HEIGHT - PRODUCTION_WELL_SIZE,
-                        ],
-                    ]
+        if self.params["spe10_case"] == "gravity_separation":
+            height = (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
+            width = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
+            self._fractures = [
+                pp.LineFracture(
+                    np.array([[0, width], [height / 2 + 10, height / 2 - 10]])
                 )
-            ),
-            pp.LineFracture(
-                np.array([[PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE], [0, HEIGHT]])
-            ),
-            pp.LineFracture(
-                np.array(
-                    [
+            ]
+
+        elif self.params["spe10_case"] == "five_spot":
+            self._fractures = [
+                pp.LineFracture(
+                    np.array([[0, WIDTH], [PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE]])
+                ),
+                pp.LineFracture(
+                    np.array(
                         [
-                            WIDTH - PRODUCTION_WELL_SIZE,
-                            WIDTH - PRODUCTION_WELL_SIZE,
-                        ],
-                        [0, HEIGHT],
-                    ]
-                )
-            ),
-        ]
+                            [0, WIDTH],
+                            [
+                                HEIGHT - PRODUCTION_WELL_SIZE,
+                                HEIGHT - PRODUCTION_WELL_SIZE,
+                            ],
+                        ]
+                    )
+                ),
+                pp.LineFracture(
+                    np.array(
+                        [[PRODUCTION_WELL_SIZE, PRODUCTION_WELL_SIZE], [0, HEIGHT]]
+                    )
+                ),
+                pp.LineFracture(
+                    np.array(
+                        [
+                            [
+                                WIDTH - PRODUCTION_WELL_SIZE,
+                                WIDTH - PRODUCTION_WELL_SIZE,
+                            ],
+                            [0, HEIGHT],
+                        ]
+                    )
+                ),
+            ]
 
     def meshing_kwargs(self) -> dict:
         """Keyword arguments for md-grid creation.

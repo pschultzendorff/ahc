@@ -57,7 +57,7 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from ahc.derived_models.spe10 import HEIGHT, INITIAL_PRESSURE, SPE10Mixin
+from ahc.derived_models.spe10 import HEIGHT, INITIAL_PRESSURE, WIDTH, SPE10Mixin
 from ahc.models.adaptive_newton import TwoPhaseFlowANewton
 from ahc.models.homotopy_continuation import TwoPhaseFlowHC
 from ahc.models.protocol import TPFProtocol
@@ -104,22 +104,28 @@ class InitialConditionsMixin(TPFProtocol):
           ``self.params["spe10_initial_saturation"]``.
 
         """
-        initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
 
         if self.params["spe10_case"] == "gravity_separation":
+            initial_pressure = np.full(self.g.num_cells, 0.0)
             height: float = (
                 (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
             )
+            width: float = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
+            # Choose initial saturation depending on whether cell is above or below
+            # slanted line
             initial_saturation = self.bound_saturation(
                 # self.g.cell_centers has shape=(ambient_dimension, num_cells)
                 np.array(
                     [
-                        1.0 if cell[1] >= height / 2 else 0.0
+                        0.7
+                        if cell[1] >= height / 2 + 10 * (1 - 2 * cell[0] / width)
+                        else 0.3
                         for cell in np.swapaxes(self.g.cell_centers, 0, 1)
                     ]
                 )
             )
         elif self.params["spe10_case"] == "five_spot":
+            initial_pressure = np.full(self.g.num_cells, INITIAL_PRESSURE)
             initial_saturation = self.bound_saturation(
                 np.full(self.g.num_cells, self.params["spe10_initial_saturation"])
             )
@@ -362,14 +368,14 @@ cp_models = {
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey",
         "n_b": 4.0,
-        "entry_pressure": 100 * pp.PASCAL,
+        "entry_pressure": 200 * pp.PASCAL,
         "limit": True,
         "max": 1e6 * pp.PASCAL,
     },
     "Brooks-Corey_nb_2": {
         "model": "Brooks-Corey",
         "n_b": 2.0,
-        "entry_pressure": 100 * pp.PASCAL,
+        "entry_pressure": 200 * pp.PASCAL,
         "limit": True,
         "max": 1e6 * pp.PASCAL,
     },
@@ -458,7 +464,7 @@ def generate_configs() -> list[SimulationConfig]:
     # NOTE HC starts with a linear rel. perm. model and zero capillary pressure and zero
     # gravity.
     # Varying rel. perm. models  with linear capillary pressure.
-    if True:
+    if False:
         for rp_model_name, rp_model in rp_models.items():
             if rp_model_name == "linear":
                 continue
@@ -559,9 +565,9 @@ def generate_configs() -> list[SimulationConfig]:
                     )
                 )
 
-    if False:
+    if True:
         # Less challenging Brooks-Corey cap. pressure with different entry pressures.
-        for entry_pressure in [100, 200, 300]:
+        for entry_pressure in [200, 500, 1000]:
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
                 file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
                 folder_name = (
