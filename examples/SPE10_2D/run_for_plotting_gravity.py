@@ -1,4 +1,4 @@
-r"""Run the simulation with small uniform time steps for fancy plotting.
+"""Run the simulation with small uniform time steps for fancy plotting.
 
 We loosely follow the setup of Wang and Tchelepi (2013). The considered model is similar
 to the heterogeneous 3D models in the article (section 4.6.4), but on a 2D domain.
@@ -9,10 +9,6 @@ X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport
 
 Model description:
 - 1200x2200 ft domain
-- Constant water injection in the center: 87.5 m^3/day
-- Oil production at the four corners: 4000 psi bhp
-    - This is simulated by prescribing the bottom hole pressure and saturation (residual
-      oil saturation) in the corner cells. We do NOT use a well model.
 - Simulation time: 30 days
 - Solid properties:
     - Porosity: Layers 10 and 55 of SPE10, case 2A.
@@ -22,7 +18,9 @@ Model description:
     - Oil: PVT table from the SPE10, case 2A. We use the values at 8000 psi.
       Residual saturation is 0.2.
 - Initial values:
-    - Saturation: 0.3.
+    - Saturation: fully saturated in the upper half of the domain with the more dense
+      phase (water), and fully saturated in the lower half of the domain with the less
+      dense phase (oil).
 - Rel. perm. model:
     - Brooks-Corey-Mualem
 - Capillary pressure model:
@@ -38,7 +36,7 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import cp_models, rp_models, run_simulation
+from run import buoyancy_constants, cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -71,7 +69,7 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # region RUN
 time_manager_params = {
-    "schedule": np.array([0.0, 30.0 * pp.DAY]),
+    "schedule": np.array([0.0, 300.0 * pp.DAY]),
     "dt_init": 1.0 * pp.DAY,
     "constant_dt": True,
 }
@@ -83,8 +81,8 @@ if __name__ == "__main__":
 
     for spe10_layer in [10, 55]:
         config = SimulationConfig(
-            file_name=f"plotting_layer_{spe10_layer}",
-            folder_name=results_dir / f"plotting_layer_{spe10_layer}",
+            file_name=f"plotting_layer_{spe10_layer}_gravity",
+            folder_name=results_dir / f"plotting_layer_{spe10_layer}_gravity",
             solver_name="NewtonAppleyard",
             adaptive_error_ratio=0.0,  # Disregarded
             init_s=0.3,
@@ -92,8 +90,13 @@ if __name__ == "__main__":
             rp_model_2=rp_models["Brooks-Corey_nb_4"],
             cp_model_1=cp_models["linear"],
             cp_model_2=cp_models["linear"],
+            buoyancy_constants_1=buoyancy_constants["gravity_on"],
+            buoyancy_constants_2=buoyancy_constants["gravity_on"],
             spe10_layer=spe10_layer,
+            spe10_case="gravity_separation",
         )
-        run_simulation(config, time_manager_params=time_manager_params)
+        run_simulation(
+            config, time_manager_params=time_manager_params, iteration_exporting=True
+        )
 
 # endregion
