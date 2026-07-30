@@ -938,7 +938,6 @@ class RecSolutionStrategy(  # type: ignore
                 + " Skipping postprocessing this iteration."
             )
             logger.warning(e)
-        print("f")
 
     @typing.override
     def check_convergence(
