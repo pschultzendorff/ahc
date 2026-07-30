@@ -275,6 +275,12 @@ else:
             """Volumetric phase vector source. Normally provided by an instance of
             :class:`Buoyancy`."""
 
+        def phase_potential_discretization(self, g: pp.Grid) -> pp.ad.TpfaAd:
+            """Normally provided by an instance of :class:`DarcyFluxes`"""
+
+        def capillary_potential_discretization(self, g: pp.Grid) -> pp.ad.TpfaAd:
+            """Normally provided by an instance of :class:`DarcyFluxes`"""
+
         def phase_mobility_discretization(
             self, g: pp.Grid, phase: FluidPhase
         ) -> pp.ad.UpwindAd:

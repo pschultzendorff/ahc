@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import logging
 import typing
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import porepy as pp
@@ -26,6 +26,7 @@ from ahc.numerics.quadrature import (
     get_quadpy_elements,
 )
 from ahc.utils.constants_and_typing import (
+    BUOYANCY_FLUX,
     CAPILLARY_FLUX,
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
@@ -292,7 +293,8 @@ class PressureReconstructionMixin(ReconstructionProtocol):
 
             # Retrieve RT0 flux coefficients depending on pressure type.
             if pressure_key == GLOBAL_PRESSURE:
-                # Global pressure gradient x total mobility x permeability = -total flux.
+                # - Global pressure gradient x total mobility x permeability = total
+                #   flux - buoyancy contribution.
                 # Divide by total mobility already here.
                 total_mobility: np.ndarray = pp.get_solution_values(
                     f"total_mobility{specifier}", self.g_data, iterate_index=0
@@ -303,11 +305,15 @@ class PressureReconstructionMixin(ReconstructionProtocol):
                         self.g_data,
                         iterate_index=0,
                     )
+                    - pp.get_solution_values(
+                        f"{BUOYANCY_FLUX}{specifier}_RT0_coeffs",
+                        self.g_data,
+                        iterate_index=0,
+                    )
                     / total_mobility[..., None]
                 )
-
             elif pressure_key == COMPLEMENTARY_PRESSURE:
-                # Complementary pressure gradient x permeability = - capillary flux.
+                # - Complementary pressure gradient x permeability = capillary flux.
                 coeffs_flux = pp.get_solution_values(
                     f"{CAPILLARY_FLUX}{specifier}_RT0_coeffs",
                     self.g_data,
@@ -768,20 +774,27 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
         # fractional_flow = phase_mobilities[self.wetting.name] / total_mobility
 
         # Get data and spatial discretization.
-        tpfa_cap_press = pp.ad.TpfaAd(self.cap_potential_key, [self.g])
+        tpfa = self.phase_potential_discretization(self.g)
+        tpfa_cap_press = self.capillary_potential_discretization(self.g)
 
         # Compute cap pressure and mobilities.
         pressure_c = self.cap_press(self.wetting.s)
         mobility_w = self.phase_mobility(self.g, self.wetting)
         mobility_n = self.phase_mobility(self.g, self.nonwetting)
         mobility_t = self.total_mobility(self.g)
-
-        # Compute capillary and buoyancy potential.
-        capillary_potential = tpfa_cap_press.flux() @ pressure_c
-
         fractional_flow_upwinded = mobility_w / mobility_t
 
+        # Compute capillary and buoyancy flux.
+        capillary_potential = tpfa_cap_press.flux() @ pressure_c
+        vector_source_w = self.vector_source(self.g, self.wetting)
+        vector_source_n = self.vector_source(self.g, self.nonwetting)
+        buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
+        buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
+
         capillary_flux = fractional_flow_upwinded * mobility_n * capillary_potential
+        buoyancy_flux = (
+            mobility_w * buoyancy_potential_w + mobility_n * buoyancy_potential_n
+        )
 
         # Equilibrated fluxes and mismatches.
         # TODO This copies 90% of the code from ``set_equations``. Make
@@ -830,6 +843,7 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
             (WETTING_FLUX, flux_w),
             ("total_mobility", total_mobility),
             (CAPILLARY_FLUX, capillary_flux),
+            (BUOYANCY_FLUX, buoyancy_flux),
             (TOTAL_FLUX + "_equil_mismatch", flux_t_equil_mismatch),
             (WETTING_FLUX + "_equil_mismatch", flux_w_equil_mismatch),
         ]:
@@ -1043,7 +1057,7 @@ class RecSolutionStrategy(  # type: ignore
         # Evaluate scaled fluxes required for pressure post-processing. Only if the
         # post-processed pressures are required.
         if not self.params.get("disable_spatial_est", False):
-            for scalar_name in ["total_mobility", CAPILLARY_FLUX]:
+            for scalar_name in ["total_mobility", CAPILLARY_FLUX, BUOYANCY_FLUX]:
                 scalar_value = self.postproc_ad_ops[scalar_name].value(
                     self.equation_system
                 )
@@ -1074,7 +1088,9 @@ class RecSolutionStrategy(  # type: ignore
 
         # Reconstruct pressures if spatial estimator is enabled.
         if not self.params.get("disable_spatial_est", False):
-            self.extend_fv_fluxes(CAPILLARY_FLUX)
+            for flux_name in [CAPILLARY_FLUX, BUOYANCY_FLUX]:
+                flux_name = cast(FLUX_NAME, flux_name)
+                self.extend_fv_fluxes(flux_name)
 
             for pressure_key in (GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE):
                 self.postprocess_pressure_vohralik(

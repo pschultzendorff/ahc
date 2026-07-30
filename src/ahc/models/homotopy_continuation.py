@@ -24,6 +24,7 @@ from ahc.models.phase import FluidPhase
 from ahc.models.protocol import HCProtocol
 from ahc.numerics.quadrature import Integral
 from ahc.utils.constants_and_typing import (
+    BUOYANCY_FLUX,
     CAPILLARY_FLUX,
     COMPLEMENTARY_PRESSURE,
     FLUX_NAME,
@@ -216,17 +217,17 @@ class BuoyancyHC(HCProtocol, TPFEquations):
         phase: FluidPhase,
         buoyancy_constants: BuoyancyConstants | None = None,
     ) -> pp.ad.Operator:
-        vector_source_1: pp.ad.DenseArray = super().vector_source(
+        vector_source_1 = super().vector_source(
             g,
             phase,
             buoyancy_constants=self._buoyancy_constants_1,
         )
-        vector_source_2: pp.ad.DenseArray = super().vector_source(
+        vector_source_2 = super().vector_source(
             g,
             phase,
             buoyancy_constants=self._buoyancy_constants_2,
         )
-        hc_vector_source: pp.ad.Operator = (
+        hc_vector_source = (
             self.nonlinear_solver_statistics.hc_lambda_ad * vector_source_1
             + (pp.ad.Scalar(1.0) - self.nonlinear_solver_statistics.hc_lambda_ad)
             * vector_source_2
@@ -994,6 +995,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
             TOTAL_FLUX,
             WETTING_FLUX,
             CAPILLARY_FLUX,
+            BUOYANCY_FLUX,
             "total_mobility",
         ]:
             quantity = self.postproc_ad_ops[quantity_name].value(self.equation_system)
@@ -1027,7 +1029,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
 
         # NOTE The fluxes w.r.t. goal const. laws are only used in the contination
         # estimators and do not require equilibration.
-        for flux_name in (TOTAL_FLUX, WETTING_FLUX, CAPILLARY_FLUX):
+        for flux_name in (TOTAL_FLUX, WETTING_FLUX, CAPILLARY_FLUX, BUOYANCY_FLUX):
             self.extend_fv_fluxes(
                 flux_name,
                 flux_specifier="_wrt_goal_const_laws",
