@@ -623,23 +623,29 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self.set_equation_system_manager()
         self.create_variables()
         self.initial_condition()
-        self.set_discretization_parameters()
+        # NOTE This will initialize phase potentials with dummy values as it cannot yet
+        # be computed due to TPFA not being discretized yet.
+        self.set_discretization_parameters(initialize=True)
         self.set_equations()
 
         self.discretize()
         self._initialize_linear_solver()
         self.set_nonlinear_discretizations()
 
+        # Reset the discretization parameters with the correct phase potential and
+        # rediscretize.
+        self.set_discretization_parameters()
+        self.rediscretize()
+
         # Save the initial values.
         self.save_data_time_step()
 
     @typing.override
-    def set_discretization_parameters(self) -> None:
+    def set_discretization_parameters(self, initialize: bool = False) -> None:
         """Set constant bc and darcy flux based on phase potentials.
 
         The parameter fields of the data dictionaries are updated for all
         subdomains and interfaces (of codimension 1).
-
 
         Upwinding needs to be rediscretized at each nonlinear iteration, as the phase
         flux changes. See the last sentence on page 686 of [Y. Brenier, J. Jaffré,
@@ -647,16 +653,18 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         Numer. Anal. 28 (3) (1991) 685–696.] for details.
 
         To evaluate the phase-mobilities separately, both the wetting, as well as the
-        nonwetting flux need to be computed.
+        nonwetting phase potential need to be computed.
+
+        Parameters:
+            initialize: Whether this is called the first time in a simulation setup.
+            Default is ``False``.
 
         """
         super().set_discretization_parameters()
 
-        # Constant parameters for TPFA discretizations.
-        if (
-            self.nonlinear_solver_statistics.num_iteration == 0
-            and self.time_manager.time_index == 0
-        ):
+        # Constant parameters for TPFA discretizations only have to be set at the start
+        # of the simulation.
+        if initialize:
             perm = self.permeability(self.g)
             # Different treatment for scalar and tensor permeability.
             if isinstance(perm, np.ndarray):
@@ -671,6 +679,8 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                     "bc": self.bc_type(self.g),
                     "second_order_tensor": diffusivity,
                     "ambient_dimension": self.g.dim,
+                    # NOTE For some reason we need to set the darcy flux here, but the
+                    # values should not influence the solution.
                     "darcy_flux": np.ones(self.g.num_faces),
                 },
             )
@@ -691,23 +701,22 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         # Update phase potentials for upwinding each nonlinear iteration. Newton starts
         # from the previous timestep, improving the guess each step.
+        # NOTE It may be tempting to skip this at the start of a new time step and just
+        # use the previous phase potential values, but this may lead to a worse initial
+        # guess if the previous time step diverged.
         logger.info(
             "Recalculate Darcy flux for upwind discretization."
             + f" Iteration {self.nonlinear_solver_statistics.num_iteration}"
         )
         for phase in self.phases.values():
-            if self.nonlinear_solver_statistics.num_iteration > 0:
-                # Ignore mypy. Evaluating the phase potential will always return an
-                # array.
+            if initialize:
+                # self.phase_potential cannot be evaluated at the start of a simulation,
+                # as TPFA is not yet discretized.
+                phase_potential: np.ndarray = np.ones(self.g.num_faces)
+            else:
                 phase_potential: np.ndarray = self.phase_potential(self.g, phase).value(  # type: ignore
                     self.equation_system
                 )
-            elif self.time_manager.time_index == 0:
-                # Use unit values for the potential at the start of the simulation.
-                phase_potential = -np.ones(self.g.num_faces)
-            else:
-                # Use previous values at the start of a new time step.
-                return
             pp.initialize_data(
                 self.g,
                 self.g_data,
