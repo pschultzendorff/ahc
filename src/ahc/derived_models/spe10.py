@@ -372,10 +372,6 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
                 self._permeability[j, i] = perm[j, layer, y_ind, x_ind]
             self._porosity[i] = poro[layer, y_ind, x_ind]
 
-        if self.params["spe10_case"] == "gravity_separation":
-            self._permeability = np.full(self._permeability.shape, 1e-11)  # [m^2]
-            self._porosity = np.full(self._porosity.shape, 0.3)  # [-]
-
     def add_constant_spe10_data(self) -> None:
         """Save the SPE10 data to the exporter."""
         data: list[DataInput] = []
