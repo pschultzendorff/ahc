@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import porepy as pp
 import seaborn as sns
+from ahc.derived_models.spe10 import water
 from ahc.numerics.nonlinear.hc_solver import HCSolver
 from ahc.utils.constants_and_typing import FEET
 from ahc.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
@@ -50,6 +51,7 @@ class SimulationConfig:
     cell_size: float = 600 * FEET / 30  # Default cell size.
     spe10_layer: int = 0
     spe10_case: str = "five_spot"
+    spe10_water_density: float = water["density"]  # kg/m^3
     # Only for SPE11
     refinement_factor: float = 1.0
     spe11_entry_pressure: float = 30 * pp.PASCAL

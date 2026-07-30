@@ -57,10 +57,19 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from ahc.derived_models.spe10 import HEIGHT, INITIAL_PRESSURE, WIDTH, SPE10Mixin
+from ahc.derived_models.spe10 import (
+    HEIGHT,
+    INITIAL_PRESSURE,
+    WIDTH,
+    SPE10Mixin,
+    oil,
+    water,
+)
 from ahc.models.adaptive_newton import TwoPhaseFlowANewton
 from ahc.models.homotopy_continuation import TwoPhaseFlowHC
+from ahc.models.phase import FluidPhase
 from ahc.models.protocol import TPFProtocol
+from ahc.utils.constants_and_typing import NONWETTING, WETTING
 from ahc.viz.iteration_exporting import IterationExportingMixin
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
@@ -93,9 +102,23 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 
 # region MODEL
-class InitialConditionsMixin(TPFProtocol):
+class EditableSPE10ParametersMixin(TPFProtocol):
+    def set_phases(self) -> None:
+        """Change oil density"""
+        self.phases: dict[str, FluidPhase] = {}
+        for phase_name, constants in zip([WETTING, NONWETTING], [water, oil]):
+            if phase_name == WETTING:
+                constants.update(
+                    {"density": self.params.get("spe10_water_density")}
+                )  # kg/m^3
+
+            phase = FluidPhase(constants)
+            phase.set_units(self.units)
+            setattr(self, phase_name, phase)
+            self.phases[phase_name] = phase
+
     def initial_condition(self) -> None:
-        """Set initial values for pressure and saturation.
+        """Change initial values for pressure and saturation.
 
         - Gravity separation: The upper half of the domain is fully saturated with the
           more dense phase (water), lower half is fully saturated with the less dense
@@ -152,7 +175,7 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class SPE10HC(
-    InitialConditionsMixin,
+    EditableSPE10ParametersMixin,
     SPE10Mixin,
     TwoPhaseFlowHC,
 ):  # type: ignore
@@ -160,7 +183,7 @@ class SPE10HC(
 
 
 class SPE10Newton(
-    InitialConditionsMixin,
+    EditableSPE10ParametersMixin,
     SPE10Mixin,
     TwoPhaseFlowANewton,
 ):  # type: ignore
@@ -298,6 +321,7 @@ def run_simulation(
             "spe10_initial_saturation": config.init_s,
             "spe10_layer": config.spe10_layer,
             "spe10_case": config.spe10_case,
+            "spe10_water_density": config.spe10_water_density,
             "folder_name": config.folder_name,
             "file_name": config.file_name,
             "solver_statistics_file_name": config.folder_name
@@ -316,7 +340,6 @@ def run_simulation(
         model = model_class(solver_params)
         pp.run_time_dependent_model(model=model, params=solver_params)
     except Exception as e:
-        raise e
         logger.error(f"Run failed with error: {e}.")
 
     # Save number of grid cells to a file.
@@ -565,7 +588,7 @@ def generate_configs() -> list[SimulationConfig]:
                     )
                 )
 
-    if True:
+    if False:
         # Less challenging Brooks-Corey cap. pressure with different entry pressures.
         for entry_pressure in [200, 500, 1000]:
             for solver_name, adaptive_error_ratio in solvers_and_ratios:
@@ -595,6 +618,80 @@ def generate_configs() -> list[SimulationConfig]:
                         spe10_layer=spe10_layer,
                     )
                 )
+    # endregion
+
+    # region VISCOUS_AND_CAPILLARY_AND_GRAVITY
+    # NOTE Run with the 5-spot setup and additional gravity.
+    # NOTE HC starts with a linear rel. perm. model and zero capillary pressure and zero
+    # gravity.
+
+    if False:
+        # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
+        # capillary pressure and gravity
+        for rp_model_name, rp_model in rp_models.items():
+            if rp_model_name == "linear":
+                continue
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
+                folder_name = (
+                    results_dir
+                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                    / "viscous_and_capillary_and_gravity"
+                    / "varying_rp"
+                    / f"init_s_{0.3}"
+                    / rp_model_name
+                )
+                cp_model_2 = (
+                    cp_models["Brooks-Corey_nb_2"]
+                    if rp_model_name == "Brooks-Corey_nb_2"
+                    else cp_models["Brooks-Corey_nb_4"]
+                )
+                configs.append(
+                    SimulationConfig(
+                        file_name=rp_model_name,
+                        folder_name=folder_name,
+                        solver_name=solver_name,
+                        adaptive_error_ratio=adaptive_error_ratio,
+                        init_s=0.3,
+                        rp_model_1=rp_models["linear"],
+                        rp_model_2=rp_model,
+                        cp_model_1=cp_models["None"],
+                        cp_model_2=cp_model_2,
+                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
+                        spe10_layer=spe10_layer,
+                    )
+                )
+
+    if True:
+        # Varying density contrast.
+        for water_density in [10000.0, 5000.0, 200.0]:
+            for solver_name, adaptive_error_ratio in solvers_and_ratios:
+                file_name = f"water_density_{water_density:.2f}"
+                folder_name = (
+                    results_dir
+                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
+                    / "viscous_and_capillary_and_gravity"
+                    / "varying_water_density"
+                    / file_name
+                )
+                configs.append(
+                    SimulationConfig(
+                        file_name=file_name,
+                        folder_name=folder_name,
+                        solver_name=solver_name,
+                        adaptive_error_ratio=adaptive_error_ratio,
+                        init_s=0.3,
+                        rp_model_1=rp_models["linear"],
+                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                        cp_model_1=cp_models["None"],
+                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
+                        spe10_layer=spe10_layer,
+                        spe10_water_density=water_density,  # kg/m^3
+                    )
+                )
+
     # endregion
 
     return configs
