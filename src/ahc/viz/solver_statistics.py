@@ -33,6 +33,10 @@ class SolverStatisticsTPF(pp.SolverStatistics):
             ValueError: If neither the time step information nor the norms are provided.
 
         """
+        if nonlinear_increment_norm is not None:
+            self.nonlinear_increment_norms.append(nonlinear_increment_norm)
+        if residual_norm is not None:
+            self.residual_norms.append(residual_norm)
         if (
             "time_step_index" in kwargs
             and "time" in kwargs
@@ -41,10 +45,6 @@ class SolverStatisticsTPF(pp.SolverStatistics):
             self.time_step_index = kwargs["time_step_index"]
             self.time = kwargs["time"]
             self.time_step_size = kwargs["time_step_size"]
-        elif nonlinear_increment_norm is not None and residual_norm is not None:
-            super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
-        else:
-            raise ValueError("Either provide all time step information or norms.")
 
     @typing.override
     def save(self) -> None:

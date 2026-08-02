@@ -767,11 +767,16 @@ class EstimatesSolutionStrategy(  # type: ignore
         self,
         nonlinear_increment: np.ndarray,
         residual: np.ndarray,
+        reference_increment: np.ndarray,
         reference_residual: np.ndarray,
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
         converged, diverged = super().check_convergence(
-            nonlinear_increment, residual, reference_residual, nl_params
+            nonlinear_increment,
+            residual,
+            reference_increment,
+            reference_residual,
+            nl_params,
         )
         residual_and_flux_est = self.global_res_and_flux_est()
         total_darcy_est, wetting_darcy_est = self.global_darcy_est()

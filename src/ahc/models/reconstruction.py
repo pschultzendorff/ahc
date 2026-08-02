@@ -944,11 +944,16 @@ class RecSolutionStrategy(  # type: ignore
         self,
         nonlinear_increment: np.ndarray,
         residual: np.ndarray,
+        reference_increment: np.ndarray,
         reference_residual: np.ndarray,
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
         converged, diverged = super().check_convergence(
-            nonlinear_increment, residual, reference_residual, nl_params
+            nonlinear_increment,
+            residual,
+            reference_increment,
+            reference_residual,
+            nl_params,
         )
         equilibrated_flux_mismatch: dict[str, float] = self.equilibrated_flux_mismatch()
         self.nonlinear_solver_statistics.log_error(

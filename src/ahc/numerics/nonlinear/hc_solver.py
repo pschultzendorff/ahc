@@ -1,7 +1,6 @@
 import logging
 from typing import Any
 
-import porepy as pp
 from porepy.utils.ui_and_logging import (
     logging_redirect_tqdm_with_level as logging_redirect_tqdm,
 )
@@ -10,6 +9,7 @@ from porepy.utils.ui_and_logging import (
 from tqdm.auto import trange  # type: ignore
 
 from ahc.models.protocol import HCProtocol
+from ahc.numerics.nonlinear.newton import ModifiedNewtonSolver
 
 
 class HCSolver:
@@ -40,7 +40,7 @@ class HCSolver:
         )
 
         self.params["progress_bar_position"] += 1
-        self.nonlinear_solver = pp.NewtonSolver(self.params)
+        self.nonlinear_solver = ModifiedNewtonSolver(self.params)
 
     def solve(self, model: HCProtocol) -> tuple[bool, bool]:
         """Solve the nonlinaer problem using the homotopy continuation (HC) algorithm.
