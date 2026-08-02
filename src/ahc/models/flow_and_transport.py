@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import math
 import time
 import typing
 from typing import Any
@@ -978,8 +979,10 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             # is returned. We check for this.
             diverged = bool(np.any(np.isnan(nonlinear_increment)))
             converged: bool = not diverged
-            residual_norm: float = np.nan if diverged else 0.0
-            nonlinear_increment_norm: float = np.nan if diverged else 0.0
+            nl_increment_sat_norm: float = np.nan if diverged else 0.0
+            nl_increment_press_norm: float = np.nan if diverged else 0.0
+            residual_flow_norm: float = np.nan if diverged else 0.0
+            residual_transp_norm: float = np.nan if diverged else 0.0
         else:
             # First a simple check for nan values.
             if np.any(np.isnan(nonlinear_increment)):
@@ -1041,11 +1044,16 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             diverged = False
 
         # Additional divergence check
-        if nonlinear_increment_norm > nl_params["nl_divergence_tol"]:
+        nl_increment_norm = math.sqrt(
+            nl_increment_sat_norm**2 + nl_increment_press_norm**2
+        )
+        residual_norm = math.sqrt(residual_flow_norm**2 + residual_transp_norm**2)
+
+        if nl_increment_norm > nl_params["nl_divergence_tol"]:
             diverged = True
 
         self.nonlinear_solver_statistics.log_error(
-            nonlinear_increment_norm=nonlinear_increment_norm,
+            nonlinear_increment_norm=nl_increment_norm,
             residual_norm=residual_norm,
             time_step_index=self.time_manager.time_index,
             time=self.time_manager.time,
