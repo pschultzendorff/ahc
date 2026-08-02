@@ -1053,6 +1053,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         self,
         nonlinear_increment: np.ndarray,
         residual: np.ndarray,
+        reference_increment: np.ndarray,
         reference_residual: np.ndarray,
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
@@ -1061,7 +1062,12 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         # ``TwoPhaseFlow.check_convergence``. The former logs estimators we are not
         # interested in.
         converged, diverged = TPFSolutionStrategy.check_convergence(
-            self, nonlinear_increment, residual, reference_residual, nl_params
+            self,
+            nonlinear_increment,
+            residual,
+            reference_increment,
+            reference_residual,
+            nl_params,
         )
 
         # NOTE The following does not need to be evaluated when hc_params["hc_adaptive"]
@@ -1093,16 +1099,26 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
 
         # Adaptive stopping criterion.
         if not diverged and nl_params["hc_adaptive"]:
-            nonlinear_increment_norm: float = self.compute_nonlinear_increment_norm(
-                nonlinear_increment
+            nl_increment_sat_norm, nl_increment_press_norm = (
+                self.compute_nonlinear_increment_norm(nonlinear_increment)
+            )
+            ref_increment_sat_norm, ref_increment_press_norm = (
+                self.compute_nonlinear_increment_norm(reference_increment)
+            )
+            rel_increment_sat_norm: float = (
+                nl_increment_sat_norm / ref_increment_sat_norm
+            )
+            rel_increment_press_norm: float = (
+                nl_increment_press_norm / ref_increment_press_norm
             )
 
             # If Newton diverges, the estimators lose their meaning and the adaptive
             # criterion might incorrectly stop the HC loop. Hence, we check that the
-            # nonlinear increment norm is not too large.
+            # relative nonlinear increment norm is not too large.
             if (
-                lin_est <= nl_params["nl_error_ratio"] * hc_est
-                and nonlinear_increment_norm <= nl_params["hc_nl_convergence_tol"]
+                rel_increment_sat_norm <= nl_params["adaptive_threshold_rel"]
+                and rel_increment_press_norm <= nl_params["adaptive_threshold_rel"]
+                and lin_est <= nl_params["nl_error_ratio"] * hc_est
             ):
                 logger.info(
                     f"Linearization error {lin_est} smaller than"

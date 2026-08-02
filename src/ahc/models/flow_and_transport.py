@@ -938,22 +938,115 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self,
         nonlinear_increment: np.ndarray,
         residual: np.ndarray,
+        reference_increment: np.ndarray,
         reference_residual: np.ndarray,
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
-        """Implement an additional divergence check that returns true if the nonlinear
-        increment is unreasonably large."""
-        converged, diverged = super().check_convergence(
-            nonlinear_increment, residual, reference_residual, nl_params
-        )
-        nonlinear_increment_norm: float = self.compute_nonlinear_increment_norm(
-            nonlinear_increment
-        )
+        r"""Check for convergence and divergence
+
+        Extends
+        :meth:`~porepy.models.solution_strategy.SolutionStrategy.check_convergence` with
+        a combined relative & absolution criterion and an additional divergence check
+        that returns true if the nonlinear increment is unreasonably large.
+
+        The combined convergence check is inspired by :meth:`~numpy.allclose` and checks
+
+        .. math::
+            \|v\| \leq \epsilon_{\mathrm{abs}} + \epsilon_{\mathrm{rel}} \|r\|,
+
+        where :math:`v` is the nonlinear increment or residual and :math:`r` is the
+        reference increment or reference residual, respectively.
+
+        """
+        if reference_increment.flatten().shape[0] != self.g.num_cells * 2:
+            raise ValueError(
+                "reference_increment must have shape (g.num_cells * 2,)"
+                + f", got {reference_increment.flatten().shape}"
+            )
+        if reference_residual.flatten().shape[0] != self.g.num_cells * 2:
+            raise ValueError(
+                "reference_residual must have shape (g.num_cells * 2,)"
+                + f", got {reference_residual.flatten().shape}"
+            )
+
+        # The next code block is mostly copied from
+        # porepy.models.solution_strategy.SolutionStrategy.check_convergence.
+        # BEGIN COPIED CODE
+        if not self._is_nonlinear_problem():
+            # At least for the default direct solver, scipy.sparse.linalg.spsolve, no
+            # error (but a warning) is raised for singular matrices, but a nan solution
+            # is returned. We check for this.
+            diverged = bool(np.any(np.isnan(nonlinear_increment)))
+            converged: bool = not diverged
+            residual_norm: float = np.nan if diverged else 0.0
+            nonlinear_increment_norm: float = np.nan if diverged else 0.0
+        else:
+            # First a simple check for nan values.
+            if np.any(np.isnan(nonlinear_increment)):
+                # If the solution contains nan values, we have diverged.
+                return False, True
+
+            # Nonlinear increment based norm
+            nl_increment_sat_norm, nl_increment_press_norm = (
+                self.compute_nonlinear_increment_norm(nonlinear_increment)
+            )
+            # Residual based norm
+            residual_flow_norm, residual_transp_norm = self.compute_residual_norm(
+                residual
+            )
+
+            logger.debug(
+                f"Nonlinear increment saturation norm: {nl_increment_sat_norm:.2e}, "
+                f"Nonlinear increment pressure norm: {nl_increment_press_norm:.2e}, "
+                f"Nonlinear residual flow norm: {residual_flow_norm:.2e}, "
+                f"Nonlinear residual transport norm: {residual_transp_norm:.2e}"
+            )
+            # END COPIED CODE
+
+            ref_increment_sat_norm, ref_increment_press_norm = (
+                self.compute_nonlinear_increment_norm(reference_increment)
+            )
+            ref_residual_flow_norm, ref_residual_transp_norm = (
+                self.compute_residual_norm(reference_residual)
+            )
+
+            # Check convergence requiring all increments and residuals to be either
+            # absolutely or relatively small.
+            converged_inc_sat = (
+                nl_increment_sat_norm
+                < nl_params["nl_convergence_tol_abs"]
+                + nl_params["nl_convergence_tol_rel"] * ref_increment_sat_norm
+            )
+            converged_inc_press = (
+                nl_increment_press_norm
+                < nl_params["nl_convergence_tol_abs"]
+                + nl_params["nl_convergence_tol_rel"] * ref_increment_press_norm
+            )
+            converged_res_flow = (
+                residual_flow_norm
+                < nl_params["nl_convergence_tol_abs"]
+                + nl_params["nl_convergence_tol_rel"] * ref_residual_flow_norm
+            )
+            converged_res_transp = (
+                residual_transp_norm
+                < nl_params["nl_convergence_tol_abs"]
+                + nl_params["nl_convergence_tol_rel"] * ref_residual_transp_norm
+            )
+            converged = (
+                converged_inc_sat
+                and converged_inc_press
+                and converged_res_flow
+                and converged_res_transp
+            )
+            diverged = False
+
+        # Additional divergence check
         if nonlinear_increment_norm > nl_params["nl_divergence_tol"]:
             diverged = True
+
         self.nonlinear_solver_statistics.log_error(
-            nonlinear_increment_norm=None,
-            residual_norm=None,
+            nonlinear_increment_norm=nonlinear_increment_norm,
+            residual_norm=residual_norm,
             time_step_index=self.time_manager.time_index,
             time=self.time_manager.time,
             time_step_size=self.time_manager.dt,
@@ -961,49 +1054,56 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         return converged, diverged
 
-    def compute_nonlinear_increment_norm(
-        self, nonlinear_increment: np.ndarray
-    ) -> float:
-        """Compute the norm based on the update increment for a nonlinear iteration
+    def compute_residual_norm(self, residual: np.ndarray) -> tuple[float, float]:
+        """Compute the residual norm for a nonlinear iteration.
 
-        Note: The pressure and saturation parts can get scaled independently.
-            Depending on the simulation setup, the pressure values might be several
-            orders of magnitude larger than the saturation values.
-            In the model parameters, pass the following keywords:
-            - ``"nl_sat_increment_norm_scaling"`` to scale the saturation increment.
-            - ``"nl_press_increment_norm_scaling"`` to scale the pressure increment.
+        Note: This is somewhat brittle at the moment, as the order of the equations in
+            the residual is assumed to be fixed for all calls.
 
         Parameters:
-            nonlinear_increment: Solution to the linearization.
+            residual: Residual of current iteration. The first half
+                (``residual[:g.num_cells]``) is assumed to correspond to the flow
+                equation and the second half (``residual[g.num_cells:]``) to the
+                transport equation.
 
         Returns:
-            float: Update increment norm.
+            residual_norms: Residual norms for flow and transport equations.
 
         """
-        # The saturation comes first in the nonlinear increment.
-        nonlinear_increment_sat = nonlinear_increment[: self.g.num_cells]
-        nonlinear_increment_press = nonlinear_increment[self.g.num_cells :]
+        residual_flow = residual[: self.g.num_cells]
+        residual_transp = residual[self.g.num_cells :]
 
-        nl_sat_increment_norm_scaling_raw = self.params.get(
-            "nl_sat_increment_norm_scaling", 1.0
-        )
-        if isinstance(nl_sat_increment_norm_scaling_raw, float):
-            nl_sat_increment_norm_scaling: float = nl_sat_increment_norm_scaling_raw
-        else:
-            raise TypeError(
-                "expected params[nl_sat_increment_norm_scaling] to be float"
-                f", got {nl_sat_increment_norm_scaling_raw}"
-            )
+        residual_flow_norm = np.linalg.norm(residual_flow).item()
+        residual_transp_norm = np.linalg.norm(residual_transp).item()
 
-        nonlinear_increment_sat_norm = (
-            np.linalg.norm(nonlinear_increment_sat) / nl_sat_increment_norm_scaling
-        )
-        nonlinear_increment_press_norm = np.linalg.norm(nonlinear_increment_press) / (
-            nl_sat_increment_norm_scaling
-        )
-        return np.sqrt(
-            nonlinear_increment_sat_norm**2 + nonlinear_increment_press_norm**2
-        ) / np.sqrt(nonlinear_increment.size)
+        return residual_flow_norm, residual_transp_norm
+
+    def compute_nonlinear_increment_norm(
+        self, nonlinear_increment: np.ndarray
+    ) -> tuple[float, float]:
+        """Compute the norm based on the update increment for a nonlinear iteration
+
+        Note: This is somewhat brittle at the moment, as the order of the variables in
+            the increment is assumed to be fixed for all calls.
+
+        Parameters:
+            nonlinear_increment: Solution to the linearization. The first half
+                (``nonlinear_increment[:g.num_cells]``) is assumed to correspond to the
+                wetting saturation variable and the second half
+                (``nonlinear_increment[g.num_cells:]``) to the nonwetting pressure
+                variable.
+
+        Returns:
+            increment_norms: Update increment norms for flow and transport equations.
+
+        """
+        nl_increment_sat = nonlinear_increment[: self.g.num_cells]
+        nl_increment_press = nonlinear_increment[self.g.num_cells :]
+
+        nl_increment_sat_norm = np.linalg.norm(nl_increment_sat).item()
+        nl_increment_press_norm = np.linalg.norm(nl_increment_press).item()
+
+        return nl_increment_sat_norm, nl_increment_press_norm
 
     # endregion
 

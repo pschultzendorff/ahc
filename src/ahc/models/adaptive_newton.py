@@ -209,14 +209,16 @@ class ErrorEstimateANewtonMixin(AdaptiveNewtonProtocol):
         # If an interpolated temporal estimator is used, project the temporal estimator
         # onto the original time step length (before cutting). The temporal convergence
         # is assumed to be sublinear in the time step length.
-        if self.params.get("extrapolate_temp_estimator_after_cutting", False):
-            if self.original_dt is not None:
-                scaling = (self.original_dt / self.time_manager.dt) ** (0.75)
-                est *= scaling
-                logger.info(
-                    "Projected temporal estimator onto original time step length"
-                    + f" with scaling factor {scaling:.2f}."
-                )
+        if (
+            self.params.get("extrapolate_temp_estimator_after_cutting", False)
+            and self.original_dt is not None
+        ):
+            scaling = (self.original_dt / self.time_manager.dt) ** (0.75)
+            est *= scaling
+            logger.info(
+                "Projected temporal estimator onto original time step length"
+                + f" with scaling factor {scaling:.2f}."
+            )
 
         logger.info(f"Global temporal discretization error estimator: {est}")
         return est
@@ -305,6 +307,7 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
         self,
         nonlinear_increment: np.ndarray,
         residual: np.ndarray,
+        reference_increment: np.ndarray,
         reference_residual: np.ndarray,
         nl_params: dict[str, Any],
     ) -> tuple[bool, bool]:
@@ -316,6 +319,7 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
             self,  # type: ignore
             nonlinear_increment,
             residual,
+            reference_increment,
             reference_residual,
             nl_params,
         )
@@ -340,16 +344,29 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
 
         # Adaptive stopping criterion.
         if not diverged and nl_params["nl_adaptive"]:
-            nonlinear_increment_norm: float = self.compute_nonlinear_increment_norm(  # type: ignore
-                nonlinear_increment
+            nl_increment_sat_norm, nl_increment_press_norm = (
+                self.compute_nonlinear_increment_norm(  # type: ignore
+                    nonlinear_increment
+                )
             )
+            ref_increment_sat_norm, ref_increment_press_norm = (
+                self.compute_nonlinear_increment_norm(reference_increment)
+            )
+            rel_increment_sat_norm: float = (
+                nl_increment_sat_norm / ref_increment_sat_norm
+            )
+            rel_increment_press_norm: float = (
+                nl_increment_press_norm / ref_increment_press_norm
+            )
+
             discretization_est: float = self.global_discr_est()
             # If Newton diverges, the estimators lose their meaning and the adaptive
-            # criterion might incorrectly stop the HC loop. Hence, we check that the
-            # nonlinear increment norm is not too large.
+            # criterion might incorrectly stop the Newton loop. Hence, we check that the
+            # relative nonlinear increment norms are not too large.
             if (
-                lin_est <= nl_params["nl_error_ratio"] * discretization_est
-                and nonlinear_increment_norm <= nl_params["nl_adaptive_convergence_tol"]
+                rel_increment_sat_norm <= nl_params["adaptive_threshold_rel"]
+                and rel_increment_press_norm <= nl_params["adaptive_threshold_rel"]
+                and lin_est <= nl_params["nl_error_ratio"] * discretization_est
             ):
                 logger.info(
                     f"Linearization error {lin_est} smaller than"
