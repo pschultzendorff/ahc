@@ -17,6 +17,7 @@ setup(
         "scikit-image==0.26.0",
         "seaborn==0.13.2",
         "tqdm==4.67.1",
+        "pypardiso==0.4.7",
     ],
     extras_require={
         "dev": [
