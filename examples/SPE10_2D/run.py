@@ -433,7 +433,7 @@ def generate_configs() -> list[SimulationConfig]:
                 for solver_name, hc_tol, nl_tol in solvers_and_tols:
                     folder_name = (
                         results_dir
-                        / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                        / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                         / "viscous"
                         / "varying_rp"
                         / f"init_s_{init_s}"
@@ -464,7 +464,7 @@ def generate_configs() -> list[SimulationConfig]:
                 file_name = f"init_s_{init_s:.2f}"
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous"
                     / "varying_init_s"
                     / file_name
@@ -500,7 +500,7 @@ def generate_configs() -> list[SimulationConfig]:
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "gravity_separation"
                     / "varying_rp"
                     / rp_model_name
@@ -538,7 +538,7 @@ def generate_configs() -> list[SimulationConfig]:
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous_and_capillary"
                     / "varying_rp"
                     / f"init_s_{0.3}"
@@ -574,7 +574,7 @@ def generate_configs() -> list[SimulationConfig]:
                 file_name = f"init_s_{init_s:.2f}"
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous_and_capillary"
                     / "varying_init_s"
                     / file_name
@@ -604,7 +604,7 @@ def generate_configs() -> list[SimulationConfig]:
                 file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous_and_capillary"
                     / "varying_entry_pressure"
                     / file_name
@@ -644,7 +644,7 @@ def generate_configs() -> list[SimulationConfig]:
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous_and_capillary_and_gravity"
                     / "varying_rp"
                     / f"init_s_{0.3}"
@@ -680,7 +680,7 @@ def generate_configs() -> list[SimulationConfig]:
                 file_name = f"water_density_{water_density:.2f}"
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous_and_capillary_and_gravity"
                     / "varying_water_density"
                     / file_name
@@ -714,7 +714,7 @@ def generate_configs() -> list[SimulationConfig]:
                 file_name = f"water_density_{water_density:.2f}"
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.3f}"
+                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous_and_capillary_and_gravity"
                     / "varying_water_density"
                     / file_name
