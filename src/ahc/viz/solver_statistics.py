@@ -318,16 +318,28 @@ class SolverStatisticsHC(SolverStatisticsTPF):
     """Number of non-linear iterations performed for current homotopy continuation step.
 
     """
-    nonlinear_increment_norms_hc: list[list[float]] = field(default_factory=list)
-    """List of list of increment magnitudes for each non-linear iteration. Outer list
-    are HC iterations, inner list are non-linear iterations.
+
+    nl_increment_sat_norms_hc: list[list[float]] = field(default_factory=list)
+    """List of list of saturation increment magnitudes for each non-linear iteration.
+    Outer list are HC iterations, inner list are non-linear iterations.
 
     """
-    residual_norms_hc: list[list[float]] = field(default_factory=list)
-    """List of list of residual norms. Outer list are HC iterations, inner list are
-    non-linear iterations.
+    nl_increment_press_norms_hc: list[list[float]] = field(default_factory=list)
+    """List of list of pressure increment magnitudes for each non-linear iteration.
+    Outer list are HC iterations, inner list are non-linear iterations.
 
     """
+    residual_flow_norms_hc: list[list[float]] = field(default_factory=list)
+    """List of list of flow residual magnitudes for each non-linear iteration. Outer
+    list are HC iterations, inner list are non-linear iterations.
+
+    """
+    residual_transp_norms_hc: list[list[float]] = field(default_factory=list)
+    """List of list of transport residual magnitudes for each non-linear iteration. Outer
+    list are HC iterations, inner list are non-linear iterations.
+
+    """
+
     spatial_est: list[list[float]] = field(default_factory=list)
     """List of list of spatial discretization error estimates. Outer list are HC
     iterations, inner list are non-linear iterations.
@@ -392,10 +404,14 @@ class SolverStatisticsHC(SolverStatisticsTPF):
             self.nums_iteration.append(self.num_iteration)
             # Append a deep copy of the lists; otherwise only a reference to the mutable
             # object is appended.
-            self.nonlinear_increment_norms_hc.append(
-                deepcopy(self.nonlinear_increment_norms)
+            self.nl_increment_sat_norms_hc.append(
+                deepcopy(self.nl_increment_sat_norms),
             )
-            self.residual_norms_hc.append(deepcopy(self.residual_norms))
+            self.nl_increment_press_norms_hc.append(
+                deepcopy(self.nl_increment_press_norms)
+            )
+            self.residual_flow_norms_hc.append(deepcopy(self.residual_flow_norms))
+            self.residual_transp_norms_hc.append(deepcopy(self.residual_transp_norms))
         super().reset()
         self.spatial_est.append([])
         self.temp_est.append([])
@@ -410,8 +426,10 @@ class SolverStatisticsHC(SolverStatisticsTPF):
 
         """
         self.nums_iteration.clear()
-        self.nonlinear_increment_norms_hc.clear()
-        self.residual_norms_hc.clear()
+        self.nl_increment_sat_norms_hc.clear()
+        self.nl_increment_press_norms_hc.clear()
+        self.residual_flow_norms_hc.clear()
+        self.residual_transp_norms_hc.clear()
         self.spatial_est.clear()
         self.hc_est.clear()
         self.temp_est.clear()
@@ -443,16 +461,20 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                 # :meth:`reset` is called at the start of each Newton loop, so we have to
                 # append some of the last Newton loop data.
                 self.nums_iteration.append(self.num_iteration)
-                self.nonlinear_increment_norms_hc.append(self.nonlinear_increment_norms)
-                self.residual_norms_hc.append(self.residual_norms)
+                self.nl_increment_sat_norms_hc.append(self.nl_increment_sat_norms)
+                self.nl_increment_press_norms_hc.append(self.nl_increment_press_norms)
+                self.residual_flow_norms_hc.append(self.residual_flow_norms)
+                self.residual_transp_norms_hc.append(self.residual_transp_norms)
 
             # The data is organized into dictionaries for each hc step. Each hc step
             # contains lists with values for all Newton steps.
             data[ind] = {
                 i: {
                     "num_iteration": n,
-                    "nonlinear_increment_norms": nin,
-                    "residual_norms": rn,
+                    "nl_increment_sat_norms": nisn,
+                    "nl_increment_press_norms": nipn,
+                    "residual_flow_norms": rfn,
+                    "residual_transp_norms": rtn,
                     "spatial_error_estimates": se,
                     "temporal_error_estimates": te,
                     "hc_error_estimates": hce,
@@ -460,11 +482,25 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                     "global_energy_norm": gen,
                     "equilibrated_flux_mismatch": efm,
                 }
-                for i, (n, nin, rn, se, te, hce, le, gen, efm) in enumerate(
+                for i, (
+                    n,
+                    nisn,
+                    nipn,
+                    rfn,
+                    rtn,
+                    se,
+                    te,
+                    hce,
+                    le,
+                    gen,
+                    efm,
+                ) in enumerate(
                     zip(
                         self.nums_iteration,
-                        self.nonlinear_increment_norms_hc,
-                        self.residual_norms_hc,
+                        self.nl_increment_sat_norms_hc,
+                        self.nl_increment_press_norms_hc,
+                        self.residual_flow_norms_hc,
+                        self.residual_transp_norms_hc,
                         self.spatial_est,
                         self.temp_est,
                         self.hc_est,
