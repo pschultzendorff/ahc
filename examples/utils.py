@@ -11,6 +11,7 @@ import porepy as pp
 import seaborn as sns
 from ahc.derived_models.spe10 import water
 from ahc.numerics.nonlinear.hc_solver import HCSolver
+from ahc.numerics.nonlinear.newton import ModifiedNewtonSolver
 from ahc.utils.constants_and_typing import FEET
 from ahc.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 from matplotlib.ticker import (
@@ -38,8 +39,16 @@ class SimulationConfig:
 
     folder_name: pathlib.Path
     file_name: str
+    # Solver parameters.
     solver_name: str
-    adaptive_error_ratio: float
+    hc_tol: float
+    r"""Adaptive error ratio for AHC. Minimum :math:`\beta` for HC."""
+    nl_tol: float
+    """Adaptive error ratio for AHC and the Newton solvers. Absolute and relative
+    tolerance for HC. 
+    
+    """
+    # Model parameters for the two-phase flow problem.
     init_s: float
     rp_model_1: dict[str, Any]
     rp_model_2: dict[str, Any]
@@ -58,13 +67,16 @@ class SimulationConfig:
 
 
 def setup_params(
-    solver: str, adaptive_error_ratio: float | None, **kwargs
+    solver: str, hc_tol: float | None, nl_tol: float | None, **kwargs
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Select correct solver and time manager parameters.
+    r"""Select correct solver and time manager parameters.
 
     Parameters:
         solver: The name of the solver ("AHC", "HC", "Newton", or "NewtonAppleyard").
-        adaptive_error_ratio: The error ratio used for adaptive parameter settings.
+        hc_tol: The tolerance for the homotopy continuation solver. Adaptive error
+            ratio for AHC. Minimum :math:`\beta` for HC.
+        nl_tol: The tolerance for the nonlinear solver. Adaptive error ratio for AHC and
+            the Newton solvers. Absolute and relative tolerance for HC.
         kwargs: Additional keyword arguments, e.g., for extrapolation time error
             estimator after time step cutting.
 
@@ -74,13 +86,16 @@ def setup_params(
         contains parameters for the time manager.
 
     """
-    logger.info(f"solver: {solver}, adaptive error ratio: {adaptive_error_ratio:.2f}.")
+    logger.info(
+        f"solver: {solver}, HC tolerance: {hc_tol:.2f}, NL tolerance: {nl_tol:.2f}."
+    )
     if solver == "HC":
         solver_params = {
             # Homotopy Continuation (HC) parameters:
             "nonlinear_solver_statistics": SolverStatisticsHC,
             "nonlinear_solver": HCSolver,
             "hc_constant_decay": False,
+            "hc_max_iterations": 50,
             "hc_lambda_decay": 0.9,
             "hc_decay_min_max": (0.1, 0.95),
             "nl_iter_optimal_range": (6, 9),
@@ -88,10 +103,10 @@ def setup_params(
             "hc_decay_recomp_max": 5,
             # Non-adaptive stopping criteria:
             "hc_adaptive": False,
-            "hc_max_iterations": 30,
-            "hc_lambda_min": 0.01,
+            "hc_lambda_min": hc_tol,  # Minimum :math:`\beta` for HC.
             # Newton solver parameters:
-            "nl_convergence_tol": 1e-5,
+            "nl_convergence_tol_abs": nl_tol,  # Absolute tolerance for inner loop.
+            "nl_convergence_tol_rel": nl_tol,  # Relative tolerance for inner loop.
             "nl_divergence_tol": 1e30,
             "max_iterations": 30,
             "nl_appleyard_chopping": False,
@@ -99,11 +114,11 @@ def setup_params(
         # Update adaptive time stepping parameters for HC.
         time_manager_params = {
             "iter_optimal_range": (
-                8,
-                20,
+                15,
+                30,
             ),  # Default value is (4, 7), which is used for the Newton solvers.
             "iter_relax_factors": (0.7, 1.3),
-            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            "iter_max": 50,  # This should be the same as "hc_max_iterations", which the
             # TimeManager does not know about.
         }
     elif solver == "AHC":
@@ -111,7 +126,7 @@ def setup_params(
             # Homotopy Continuation (HC) parameters:
             "nonlinear_solver_statistics": SolverStatisticsHC,
             "nonlinear_solver": HCSolver,
-            "hc_max_iterations": 30,
+            "hc_max_iterations": 50,
             "hc_constant_decay": False,
             "hc_lambda_decay": 0.9,
             "hc_decay_min_max": (0.1, 0.95),
@@ -120,14 +135,15 @@ def setup_params(
             "hc_decay_recomp_max": 5,
             # Adaptivity:
             "hc_adaptive": True,
-            "hc_error_ratio": adaptive_error_ratio,  # adaptive error for homotopy
-            "nl_error_ratio": 0.1,
-            "hc_nl_convergence_tol": 1e2,
+            "hc_error_ratio": hc_tol,  # Adaptive error ratio for outer loop.
+            "nl_error_ratio": nl_tol,  # Adaptive error ratio for inner loop.
+            "adaptive_threshold_rel": 1e2,
             "extrapolate_temp_estimator_after_cutting": kwargs.get(
                 "extrapolate_temp_estimator_after_cutting", True
             ),
             # Newton solver parameters:
-            "nl_convergence_tol": 1e-5,
+            "nl_convergence_tol_abs": 1e-8,
+            "nl_convergence_tol_rel": 1e-8,
             "nl_divergence_tol": 1e30,
             "max_iterations": 30,
             "nl_appleyard_chopping": False,
@@ -135,27 +151,28 @@ def setup_params(
         # Update adaptive time stepping parameters for AHC.
         time_manager_params = {
             "iter_optimal_range": (
-                8,
-                20,
+                15,
+                30,
             ),  # Default value is (4, 7).
             "iter_relax_factors": (0.7, 1.3),  # Default value.
-            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            "iter_max": 50,  # This should be the same as "hc_max_iterations", which the
             # TimeManager does not know about.
         }
     elif solver == "Newton":
         solver_params = {
             # Newton solver parameters:
             "nonlinear_solver_statistics": SolverStatisticsANewton,
-            "nonlinear_solver": pp.NewtonSolver,
+            "nonlinear_solver": ModifiedNewtonSolver,
             # Adaptivity:
             "nl_adaptive": True,
-            "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e2,
+            "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
+            "adaptive_threshold_rel": 1e2,
             "extrapolate_temp_estimator_after_cutting": kwargs.get(
                 "extrapolate_temp_estimator_after_cutting", True
             ),
             # Further parameters:
-            "nl_convergence_tol": 1e-5,
+            "nl_convergence_tol_abs": 1e-8,
+            "nl_convergence_tol_rel": 1e-8,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": False,
             "max_iterations": 30,
@@ -167,21 +184,22 @@ def setup_params(
                 20,
             ),  # Default value is (4, 7).
             "iter_relax_factors": (0.7, 1.3),  # Default value.
-            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            "iter_max": 30,  # This should be the same as "max_iterations", which the
             # TimeManager does not know about.
         }
     elif solver == "NewtonAppleyard":
         solver_params = {
             # Newton solver params with Appleyard chopping:
             "nonlinear_solver_statistics": SolverStatisticsANewton,
-            "nonlinear_solver": pp.NewtonSolver,
+            "nonlinear_solver": ModifiedNewtonSolver,
             "nl_adaptive": True,
-            "nl_error_ratio": adaptive_error_ratio,
-            "nl_adaptive_convergence_tol": 1e2,
+            "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
+            "adaptive_threshold_rel": 1e2,
             "extrapolate_temp_estimator_after_cutting": kwargs.get(
                 "extrapolate_temp_estimator_after_cutting", True
             ),
-            "nl_convergence_tol": 1e-5,
+            "nl_convergence_tol_abs": 1e-8,
+            "nl_convergence_tol_rel": 1e-8,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,
             "max_iterations": 30,
@@ -193,7 +211,7 @@ def setup_params(
                 20,
             ),  # Default value is (4, 7).
             "iter_relax_factors": (0.7, 1.3),  # Default value.
-            "iter_max": 30,  # This should be the same as "hc_max_iterations", which the
+            "iter_max": 30,  # This should be the same as "max_iterations", which the
             # TimeManager does not know about.
         }
     else:

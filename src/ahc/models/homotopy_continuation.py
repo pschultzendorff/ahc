@@ -1112,6 +1112,19 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
                 nl_increment_press_norm / ref_increment_press_norm
             )
 
+            logger.info(
+                f"Nonlinear increment norm: saturation = {nl_increment_sat_norm:.2e},"
+                + f" pressure = {nl_increment_press_norm:.2e}."
+            )
+            logger.info(
+                f"Reference nonlinear increment norm: saturation = {ref_increment_sat_norm:.2e},"
+                + f" pressure = {ref_increment_press_norm:.2e}."
+            )
+            logger.info(
+                f"Relative nonlinear increment norm: saturation = {rel_increment_sat_norm:.2e},"
+                + f" pressure = {rel_increment_press_norm:.2e}."
+            )
+
             # If Newton diverges, the estimators lose their meaning and the adaptive
             # criterion might incorrectly stop the HC loop. Hence, we check that the
             # relative nonlinear increment norm is not too large.
