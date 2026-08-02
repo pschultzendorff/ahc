@@ -957,8 +957,6 @@ class RecSolutionStrategy(  # type: ignore
         )
         equilibrated_flux_mismatch: dict[str, float] = self.equilibrated_flux_mismatch()
         self.nonlinear_solver_statistics.log_error(
-            nonlinear_increment_norm=None,
-            residual_norm=None,
             equilibrated_flux_mismatch=equilibrated_flux_mismatch,
         )
         return converged, diverged

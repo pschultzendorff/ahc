@@ -784,8 +784,6 @@ class EstimatesSolutionStrategy(  # type: ignore
         global_energy_norm: float = self.global_energy_norm()
 
         self.nonlinear_solver_statistics.log_error(
-            nonlinear_increment_norm=None,
-            residual_norm=None,
             residual_and_flux_est=residual_and_flux_est,
             darcy_est={
                 TOTAL_FLUX: total_darcy_est,
