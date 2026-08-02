@@ -158,7 +158,8 @@ class ModifiedNewtonSolver(NewtonSolver):
                         # Ignore line being too long, because we would need an
                         # additional variable to fix this.
                         solver_progressbar.set_postfix_str(
-                            f"Increment {model.nonlinear_solver_statistics.nonlinear_increment_norms[-1]:.2e}"
+                            f"increments: s={model.nonlinear_solver_statistics.nl_increment_sat_norms[-1]:.2e}"
+                            f" p={model.nonlinear_solver_statistics.nl_increment_press_norms[-1]:.2e}"
                         )
 
                     if is_diverged:

@@ -1044,17 +1044,15 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             diverged = False
 
         # Additional divergence check
-        nl_increment_norm = math.sqrt(
-            nl_increment_sat_norm**2 + nl_increment_press_norm**2
-        )
-        residual_norm = math.sqrt(residual_flow_norm**2 + residual_transp_norm**2)
-
-        if nl_increment_norm > nl_params["nl_divergence_tol"]:
+        if (
+            math.sqrt(nl_increment_sat_norm**2 + nl_increment_press_norm**2)
+            > nl_params["nl_divergence_tol"]
+        ):
             diverged = True
 
         self.nonlinear_solver_statistics.log_error(
-            nonlinear_increment_norm=nl_increment_norm,
-            residual_norm=residual_norm,
+            nonlinear_increment_norm=(nl_increment_sat_norm, nl_increment_press_norm),
+            residual_norm=(residual_flow_norm, residual_transp_norm),
             time_step_index=self.time_manager.time_index,
             time=self.time_manager.time,
             time_step_size=self.time_manager.dt,

@@ -7,6 +7,7 @@ from typing import Any
 import porepy as pp
 
 
+@dataclass
 class SolverStatisticsTPF(pp.SolverStatistics):
     time_step_index: int = 0
     """Time step count."""
@@ -15,18 +16,29 @@ class SolverStatisticsTPF(pp.SolverStatistics):
     time_step_size: float = 0.0
     """Time step size."""
 
+    nl_increment_sat_norms: list[float] = field(default_factory=list)
+    """List of saturation increment norms for each non-linear iteration."""
+    nl_increment_press_norms: list[float] = field(default_factory=list)
+    """List of pressure increment norms for each non-linear iteration."""
+    residual_flow_norms: list[float] = field(default_factory=list)
+    """List of flow residual norms for each non-linear iteration."""
+    residual_transp_norms: list[float] = field(default_factory=list)
+    """List of transport residual norms for each non-linear iteration."""
+
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: float | None = None,
-        residual_norm: float | None = None,
+        nonlinear_increment_norm: tuple[float, float] | None = None,
+        residual_norm: tuple[float, float] | None = None,
         **kwargs,
     ) -> None:
         """Log errors produced from convergence criteria.
 
         Parameters:
-            nonlinear_increment_norm (float): Error in the increment.
-            residual_norm (float): Error in the residual.
+            nonlinear_increment_norm (tuple[float, float]): Error in the saturation and
+                pressure increment.
+            residual_norm (tuple[float, float]): Error in the flow and transport
+                residual.
             **kwargs: Additional keyword arguments, for potential extension.
 
         Raises:
@@ -34,9 +46,11 @@ class SolverStatisticsTPF(pp.SolverStatistics):
 
         """
         if nonlinear_increment_norm is not None:
-            self.nonlinear_increment_norms.append(nonlinear_increment_norm)
+            self.nl_increment_sat_norms.append(nonlinear_increment_norm[0])
+            self.nl_increment_press_norms.append(nonlinear_increment_norm[1])
         if residual_norm is not None:
-            self.residual_norms.append(residual_norm)
+            self.residual_flow_norms.append(residual_norm[0])
+            self.residual_transp_norms.append(residual_norm[1])
         if (
             "time_step_index" in kwargs
             and "time" in kwargs
@@ -45,6 +59,15 @@ class SolverStatisticsTPF(pp.SolverStatistics):
             self.time_step_index = kwargs["time_step_index"]
             self.time = kwargs["time"]
             self.time_step_size = kwargs["time_step_size"]
+
+    @typing.override
+    def reset(self) -> None:
+        """Reset the mismatch list."""
+        super().reset()
+        self.nl_increment_sat_norms.clear()
+        self.nl_increment_press_norms.clear()
+        self.residual_flow_norms.clear()
+        self.residual_transp_norms.clear()
 
     @typing.override
     def save(self) -> None:
@@ -64,8 +87,10 @@ class SolverStatisticsTPF(pp.SolverStatistics):
                 "current time": self.time,
                 "time step size": self.time_step_size,
                 "num_iteration": self.num_iteration,
-                "nonlinear_increment_norms": self.nonlinear_increment_norms,
-                "residual_norms": self.residual_norms,
+                "nl_increment_sat_norms": self.nl_increment_sat_norms,
+                "nl_increment_press_norms": self.nl_increment_press_norms,
+                "residual_flow_norms": self.residual_flow_norms,
+                "residual_transp_norms": self.residual_transp_norms,
             }
 
             # Save to file
@@ -81,8 +106,8 @@ class SolverStatisticsRec(SolverStatisticsTPF):
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: float | None = None,
-        residual_norm: float | None = None,
+        nonlinear_increment_norm: tuple[float, float] | None = None,
+        residual_norm: tuple[float, float] | None = None,
         **kwargs,
     ) -> None:
         if "equilibrated_flux_mismatch" in kwargs:
@@ -148,8 +173,8 @@ class SolverStatisticsEst(SolverStatisticsRec):
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: float | None = None,
-        residual_norm: float | None = None,
+        nonlinear_increment_norm: tuple[float, float] | None = None,
+        residual_norm: tuple[float, float] | None = None,
         **kwargs,
     ) -> None:
         if (
@@ -218,8 +243,8 @@ class SolverStatisticsANewton(SolverStatisticsRec):
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: float | None = None,
-        residual_norm: float | None = None,
+        nonlinear_increment_norm: tuple[float, float] | None = None,
+        residual_norm: tuple[float, float] | None = None,
         **kwargs,
     ) -> None:
         if "spatial_est" in kwargs and "temp_est" in kwargs and "lin_est" in kwargs:
@@ -333,8 +358,8 @@ class SolverStatisticsHC(SolverStatisticsTPF):
     @typing.override
     def log_error(
         self,
-        nonlinear_increment_norm: float | None = None,
-        residual_norm: float | None = None,
+        nonlinear_increment_norm: tuple[float, float] | None = None,
+        residual_norm: tuple[float, float] | None = None,
         **kwargs,
     ) -> None:
         if (
