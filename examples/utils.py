@@ -142,8 +142,8 @@ def setup_params(
                 "extrapolate_temp_estimator_after_cutting", True
             ),
             # Newton solver parameters:
-            "nl_convergence_tol_abs": 1e-8,
-            "nl_convergence_tol_rel": 1e-8,
+            "nl_convergence_tol_abs": 1e-5,
+            "nl_convergence_tol_rel": 1e-5,
             "nl_divergence_tol": 1e30,
             "max_iterations": 30,
             "nl_appleyard_chopping": False,
@@ -171,8 +171,8 @@ def setup_params(
                 "extrapolate_temp_estimator_after_cutting", True
             ),
             # Further parameters:
-            "nl_convergence_tol_abs": 1e-8,
-            "nl_convergence_tol_rel": 1e-8,
+            "nl_convergence_tol_abs": 1e-5,
+            "nl_convergence_tol_rel": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": False,
             "max_iterations": 30,
@@ -198,8 +198,8 @@ def setup_params(
             "extrapolate_temp_estimator_after_cutting": kwargs.get(
                 "extrapolate_temp_estimator_after_cutting", True
             ),
-            "nl_convergence_tol_abs": 1e-8,
-            "nl_convergence_tol_rel": 1e-8,
+            "nl_convergence_tol_abs": 1e-5,
+            "nl_convergence_tol_rel": 1e-5,
             "nl_divergence_tol": 1e30,
             "nl_appleyard_chopping": True,
             "max_iterations": 30,
