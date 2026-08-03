@@ -356,8 +356,9 @@ solvers_and_tols: list[tuple[str, float, float]] = [
     ("AHC", 0.1, 0.1),
     ("AHC", 0.1, 0.01),
     ("AHC", 0.01, 0.01),
+    ("HC", 0.05, 1e-3),
+    ("HC", 0.01, 1e-3),
     ("HC", 0.01, 1e-5),
-    ("HC", 0.01, 1e-8),
     ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]
@@ -423,7 +424,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     # region VISCOUS
 
-    if False:
+    if True:
         # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3 with linear capillary
         # pressure.
         for init_s in [0.2, 0.3]:
@@ -457,7 +458,7 @@ def generate_configs() -> list[SimulationConfig]:
                         )
                     )
 
-    if False:
+    if True:
         # Varying init_s for the more challenging Brooks-Corey rel. perm. model.
         for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
@@ -493,7 +494,7 @@ def generate_configs() -> list[SimulationConfig]:
     # NOTE HC starts with a linear rel. perm. model and zero capillary pressure and zero
     # gravity.
     # Varying rel. perm. models  with linear capillary pressure.
-    if False:
+    if True:
         for rp_model_name, rp_model in rp_models.items():
             if rp_model_name == "linear":
                 continue
@@ -512,7 +513,7 @@ def generate_configs() -> list[SimulationConfig]:
                         solver_name=solver_name,
                         hc_tol=hc_tol,
                         nl_tol=nl_tol,
-                        init_s=0.0,
+                        init_s=0.0,  # Does not matter for this case.
                         rp_model_1=rp_models["linear"],
                         rp_model_2=rp_model,
                         cp_model_1=cp_models["None"],
@@ -529,7 +530,7 @@ def generate_configs() -> list[SimulationConfig]:
     # region VISCOUS_AND_CAPILLARY
     # NOTE HC starts with a linear rel. perm. model and zero capillary pressure.
 
-    if False:
+    if True:
         # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
         # capillary pressure.
         for rp_model_name, rp_model in rp_models.items():
@@ -567,7 +568,7 @@ def generate_configs() -> list[SimulationConfig]:
                     )
                 )
 
-    if False:
+    if True:
         # Varying init_s for the less challenging Brooks-Corey model.
         for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
@@ -597,7 +598,7 @@ def generate_configs() -> list[SimulationConfig]:
                     )
                 )
 
-    if False:
+    if True:
         # Less challenging Brooks-Corey cap. pressure with different entry pressures.
         for entry_pressure in [200, 500, 1000]:
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
@@ -635,7 +636,7 @@ def generate_configs() -> list[SimulationConfig]:
     # NOTE HC starts with a linear rel. perm. model and zero capillary pressure and zero
     # gravity.
 
-    if False:
+    if True:
         # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
         # capillary pressure and gravity
         for rp_model_name, rp_model in rp_models.items():
@@ -674,6 +675,47 @@ def generate_configs() -> list[SimulationConfig]:
                 )
 
     if True:
+        # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
+        # capillary pressure and gravity
+        # AHC AND HC FROM GRAVITY ON.
+        for rp_model_name, rp_model in rp_models.items():
+            if rp_model_name == "linear":
+                continue
+            for solver_name, hc_tol, nl_tol in solvers_and_tols:
+                if solver_name.startswith("Newton"):
+                    continue
+                folder_name = (
+                    results_dir
+                    / f"{solver_name}_from_gravity_on_{hc_tol:.3f}_{nl_tol:.2e}"
+                    / "viscous_and_capillary_and_gravity"
+                    / "varying_rp"
+                    / f"init_s_{0.3}"
+                    / rp_model_name
+                )
+                cp_model_2 = (
+                    cp_models["Brooks-Corey_nb_2"]
+                    if rp_model_name == "Brooks-Corey_nb_2"
+                    else cp_models["Brooks-Corey_nb_4"]
+                )
+                configs.append(
+                    SimulationConfig(
+                        file_name=rp_model_name,
+                        folder_name=folder_name,
+                        solver_name=solver_name,
+                        hc_tol=hc_tol,
+                        nl_tol=nl_tol,
+                        init_s=0.3,
+                        rp_model_1=rp_models["linear"],
+                        rp_model_2=rp_model,
+                        cp_model_1=cp_models["None"],
+                        cp_model_2=cp_model_2,
+                        buoyancy_constants_1=buoyancy_constants["gravity_on"],
+                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
+                        spe10_layer=spe10_layer,
+                    )
+                )
+
+    if True:
         # Varying density contrast.
         for water_density in [10000.0, 5000.0, 200.0]:
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
@@ -706,6 +748,7 @@ def generate_configs() -> list[SimulationConfig]:
 
     if True:
         # Varying density contrast.
+        # AHC AND HC FROM GRAVITY ON.
         for water_density in [10000.0, 5000.0, 200.0]:
             for solver_name, hc_tol, nl_tol in solvers_and_tols:
                 if solver_name.startswith("Newton"):
@@ -714,7 +757,7 @@ def generate_configs() -> list[SimulationConfig]:
                 file_name = f"water_density_{water_density:.2f}"
                 folder_name = (
                     results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
+                    / f"{solver_name}_from_gravity_on_{hc_tol:.3f}_{nl_tol:.2e}"
                     / "viscous_and_capillary_and_gravity"
                     / "varying_water_density"
                     / file_name
