@@ -36,7 +36,7 @@ import pathlib
 import shutil
 import sys
 import warnings
-from typing import Any, Type
+from typing import Any
 
 import numpy as np
 import porepy as pp
@@ -47,7 +47,7 @@ from ahc.models.protocol import TPFProtocol
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, clean_up_after_simulation, setup_params
+from utils import SimulationConfig, clean_up_after_simulation, setup_porepy_params
 
 # region SETUP
 
@@ -146,7 +146,7 @@ default_time_manager_params = {
 }
 
 
-def setup_model(solver: str) -> Type[SPE11HC] | Type[SPE11Newton]:
+def setup_model(solver: str) -> type[SPE11HC] | type[SPE11Newton]:
     """Return a model class based on the solver name.
 
     Parameters:
@@ -183,7 +183,7 @@ def run_simulation(
     )
 
     model_class = setup_model(config.solver_name)
-    updated_solver_params, updated_time_manager_params = setup_params(
+    updated_solver_params, updated_time_manager_params = setup_porepy_params(
         config.solver_name, config.adaptive_error_ratio, **kwargs
     )
 

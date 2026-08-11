@@ -74,7 +74,7 @@ from ahc.viz.iteration_exporting import IterationExportingMixin
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, setup_params
+from utils import SimulationConfig, clean_up_after_simulation, setup_porepy_params
 
 # region SETUP
 
@@ -193,7 +193,7 @@ class SPE10Newton(
 # endregion
 
 # region UTILS
-spe10_layer: int = 55
+SPE10_LAYER: int = 55
 
 default_solver_params = {
     "progressbars": True,
@@ -223,26 +223,28 @@ default_time_manager_params = {
 }
 
 
-def setup_model(
-    solver: str, iteration_exporting: bool = False
+def setup_porepy_model(
+    config: SimulationConfig, **kwargs
 ) -> type[SPE10HC] | type[SPE10Newton]:
     """Return a model class based on the solver name.
 
     Parameters:
-        solver: The name of the solver ("AHC", "HC", "Newton", or "NewtonAppleyard").
+        config: The simulation configuration specifying the solver type.
+        **kwargs: Additional keyword arguments. Currently, only ``iteration_exporting``
+            is supported, which adds the ``IterationExportingMixin`` to the model class.
 
     Returns:
         The model class with the correct adaptive solver.
 
     """
-    if solver in ["HC", "AHC"]:
+    if config.solver_name in ["HC", "AHC"]:
         model_class = SPE10HC
-    elif solver in ["Newton", "NewtonAppleyard"]:
+    elif config.solver_name in ["Newton", "NewtonAppleyard"]:
         model_class = SPE10Newton
     else:
-        raise ValueError(f"Unknown solver: {solver}")
+        raise ValueError(f"Unknown solver: {config.solver_name}")
 
-    if iteration_exporting:
+    if kwargs.get("iteration_exporting", False):
         model_class = type(
             f"{model_class.__name__}WithIterationExporting",
             (IterationExportingMixin, model_class),
@@ -263,8 +265,7 @@ def run_simulation(
     Parameters:
         config: The simulation configuration.
         solver_params: Optional dictionary of solver parameters. If None, default
-        parameters
-            are used and updated with the parameters from the config.
+            parameters are used and updated with the parameters from the config.
         time_manager_params: Optional dictionary of time manager parameters. If None,
             default parameters are used and updated with the parameters from the config.
         **kwargs: Additional keyword arguments to pass to the model setup and parameter
@@ -282,12 +283,13 @@ def run_simulation(
         f"CP model: {config.cp_model_2}."
         f"Buoyancy: {config.buoyancy_constants_2}"
     )
-    model_class = setup_model(config.solver_name, **kwargs)
-    updated_solver_params, updated_time_manager_params = setup_params(
-        config.solver_name, config.hc_tol, config.nl_tol, **kwargs
+
+    model_class = setup_porepy_model(config, **kwargs)
+    updated_solver_params, updated_time_manager_params = setup_porepy_params(
+        config, **kwargs
     )
 
-    # Build params dictionaries.
+    # Build porepy params dictionaries.
     if solver_params is None:
         solver_params = copy.deepcopy(default_solver_params) | updated_solver_params
     if time_manager_params is None:
@@ -313,6 +315,7 @@ def run_simulation(
             "model_1": config.buoyancy_constants_1,
             "model_2": config.buoyancy_constants_2,
         }
+    folder_name = config.folder_name()
     solver_params.update(
         {
             "meshing_arguments": {"cell_size": config.cell_size},
@@ -323,19 +326,16 @@ def run_simulation(
             "spe10_layer": config.spe10_layer,
             "spe10_case": config.spe10_case,
             "spe10_water_density": config.spe10_water_density,
-            "folder_name": config.folder_name,
-            "file_name": config.file_name,
-            "solver_statistics_file_name": config.folder_name
-            / "solver_statistics.json",
+            "folder_name": folder_name,
+            "file_name": config.case,
+            "solver_statistics_file_name": folder_name / "solver_statistics.json",
             "time_manager": pp.TimeManager(**time_manager_params),
         }
     )
 
-    try:
-        shutil.rmtree(config.folder_name)
-        config.folder_name.mkdir(parents=True)
-    except Exception:
-        pass
+    # Remove previous runs.
+    shutil.rmtree(folder_name)
+    folder_name.mkdir(parents=True)
 
     try:
         model = model_class(solver_params)
@@ -345,7 +345,7 @@ def run_simulation(
         raise e
 
     # Save number of grid cells to a file.
-    with (config.folder_name / "num_grid_cells.txt").open("w") as f:
+    with (folder_name / "num_grid_cells.txt").open("w") as f:
         f.write(str(model.g.num_cells))
 
 
@@ -364,8 +364,8 @@ solvers_and_tols: list[tuple[str, float, float]] = [
 ]
 
 
+LINEAR_RP_MODEL = {"model": "linear", "limit": True}
 rp_models = {
-    "linear": {"model": "linear", "limit": True},
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey-Mualem",
         "limit": True,
@@ -382,10 +382,8 @@ rp_models = {
     "Corey_power_3": {"model": "Corey", "power": 3, "limit": True},
 }
 
+ZERO_CP_MODEL = {"model": None}
 cp_models = {
-    "None": {
-        "model": None,
-    },
     "linear": {
         "model": "linear",
         "entry_pressure": 50 * pp.PASCAL,
@@ -409,387 +407,328 @@ cp_models = {
     },
 }
 
-buoyancy_constants = {
-    "gravity_on": {"gravity_acceleration": pp.GRAVITY_ACCELERATION},
-    "gravity_off": {"gravity_acceleration": 0.0},
-}
+ZERO_BUOYANCY_MODEL = {"gravity_acceleration": 0.0}
+buoyancy_models = {"gravity_on": {"gravity_acceleration": pp.GRAVITY_ACCELERATION}}
 
 
-def generate_configs() -> list[SimulationConfig]:
-    """Generate all simulation configurations."""
-    results_dir = dirname / "results"
-    results_dir.mkdir(exist_ok=True)
+def generate_viscous_varying_rp_cases(init_s: float) -> list[SimulationConfig]:
+    """Generate simulation configurations for viscous-dominated flow with varying
+    relative permeability models, linear capillary pressure, and prescribed initial
+    saturation.
 
-    configs = []
-
-    # region VISCOUS
-
-    if True:
-        # Varying rel. perm. models at init_s = 0.2 and init_s = 0.3 with linear capillary
-        # pressure.
-        for init_s in [0.2, 0.3]:
-            for rp_model_name, rp_model in rp_models.items():
-                if rp_model_name == "linear":
-                    continue
-                for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                    folder_name = (
-                        results_dir
-                        / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                        / "viscous"
-                        / "varying_rp"
-                        / f"init_s_{init_s}"
-                        / rp_model_name
-                    )
-                    configs.append(
-                        SimulationConfig(
-                            file_name=rp_model_name,
-                            folder_name=folder_name,
-                            solver_name=solver_name,
-                            hc_tol=hc_tol,
-                            nl_tol=nl_tol,
-                            init_s=init_s,
-                            rp_model_1=rp_models["linear"],
-                            rp_model_2=rp_model,
-                            cp_model_1=cp_models["None"],
-                            cp_model_2=cp_models["linear"],
-                            buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                            buoyancy_constants_2=buoyancy_constants["gravity_off"],
-                            spe10_layer=spe10_layer,
-                        )
-                    )
-
-    if True:
-        # Varying init_s for the more challenging Brooks-Corey rel. perm. model.
-        for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                file_name = f"init_s_{init_s:.2f}"
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous"
-                    / "varying_init_s"
-                    / file_name
+    """
+    cases = []
+    for rp_model_name, rp_model in rp_models.items():
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="viscous",
+                    study="varying_rp",
+                    case=pathlib.Path(f"init_s_{init_s}") / rp_model_name,
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=init_s,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_model,
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["linear"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_layer=SPE10_LAYER,
                 )
-                configs.append(
+            )
+
+    return cases
+
+
+def generate_viscous_varying_init_s_cases() -> list[SimulationConfig]:
+    """Generate simulation configurations for viscous-dominated flow with initial
+    saturation varying between 0.225 and 0.275, the more challenging Brooks-Corey rel. perm.
+    model, and linear capillary pressure.
+
+    """
+    cases = []
+    for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="viscous",
+                    study="varying_init_s",
+                    case=f"init_s_{init_s:.2f}",
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=init_s,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_models["Brooks-Corey_nb_2"],
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["linear"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_layer=SPE10_LAYER,
+                )
+            )
+
+    return cases
+
+
+def generate_pure_gravity_cases() -> list[SimulationConfig]:
+    """Generate simulation configurations for pure gravity-driven flow with varying
+    water density, the less challenging Brooks-Corey rel. perm. model, and Brooks-Corey
+    capillary pressure.
+
+    """
+    cases = []
+    for water_density in [10000.0, 5000.0, water["density"], 200.0]:
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="gravity_separation",
+                    study="varying_water_density",
+                    case=f"water_density_{water_density:.2f}",
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=0.0,  # NOTE This is overwritten for spe10_case="gravity_separation".
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=buoyancy_models["gravity_on"],
+                    spe10_layer=SPE10_LAYER,
+                    spe10_case="gravity_separation",
+                    spe10_water_density=water_density,  # kg/m^3
+                )
+            )
+
+    return cases
+
+
+def generate_capillary_varying_rp() -> list[SimulationConfig]:
+    """Generate simulations for coupled viscous-capillary flow with varying rel. perm.
+    and cap. press. models and an initial saturation of :math:`0.3`.
+
+    """
+    cases = []
+    for rp_model_name, rp_model in rp_models.items():
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            # Make sure that the target capillary pressure model is compatible with the
+            # relative permeability model.
+            cp_model_2 = (
+                cp_models["Brooks-Corey_nb_2"]
+                if rp_model_name == "Brooks-Corey_nb_2"
+                else cp_models["Brooks-Corey_nb_4"]
+            )
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="viscous_and_capillary",
+                    study="varying_rp",
+                    case=pathlib.Path(f"init_s_{0.3}") / rp_model_name,
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=0.3,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_model,
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_model_2,
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_layer=SPE10_LAYER,
+                )
+            )
+
+    return cases
+
+
+def generate_capillary_varying_init_s() -> list[SimulationConfig]:
+    """Generate simulations for coupled viscous-capillary flow with varying initial
+    saturation between 0.225 and 0.275 and the less challenging Brooks-Corey rel. perm.
+    and cap. press. model.
+
+    """
+    cases = []
+    for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="viscous_and_capillary",
+                    study="varying_init_s",
+                    case=f"init_s_{init_s:.2f}",
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=init_s,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_layer=SPE10_LAYER,
+                )
+            )
+
+    return cases
+
+
+def generate_capillary_varying_entry_pressure() -> list[SimulationConfig]:
+    """Generate simulations for coupled viscous-capillary flow with varying entry
+    pressure, the less challenging Brooks-Corey rel. perm. and cap. press. model, and an
+    initial saturation of :math:`0.3`.
+
+    """
+    cases = []
+    for entry_pressure in [200, 500, 1000]:
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cp_model_2 = cp_models["Brooks-Corey_nb_4"].copy()
+            cp_model_2["entry_pressure"] = entry_pressure * pp.PASCAL
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="viscous_and_capillary",
+                    study="varying_entry_pressure",
+                    case=f"entry_pressure_{entry_pressure}_hc_from_none",
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=0.3,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_model_2,
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_layer=SPE10_LAYER,
+                )
+            )
+
+    return cases
+
+
+def generate_buoyancy_varying_rp() -> list[SimulationConfig]:
+    """Generate simulations for coupled viscous-capillary-gravity flow with varying rel.
+    perm. models, Brooks-Corey capillary pressure, and an initial saturation of
+    :math:`0.3`.
+
+    Note: The HC solvers are run both from gravity on and gravity off as an auxiliary
+        problem.
+
+    """
+    cases = []
+    for rp_model_name, rp_model in rp_models.items():
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cp_model_2 = (
+                cp_models["Brooks-Corey_nb_2"]
+                if rp_model_name == "Brooks-Corey_nb_2"
+                else cp_models["Brooks-Corey_nb_4"]
+            )
+
+            if solver_name.endswith("HC"):
+                hc_gravity_cases = [
+                    ("", ZERO_BUOYANCY_MODEL),
+                    ("from_gravity_on", buoyancy_models["gravity_on"]),
+                ]
+            else:
+                hc_gravity_cases = [("", buoyancy_models["gravity_off"])]
+
+            for solver_name_postfix, buoyancy_constants_1 in hc_gravity_cases:
+                cases.append(
                     SimulationConfig(
-                        file_name=file_name,
-                        folder_name=folder_name,
+                        results_dir=results_dir,
+                        regime="viscous_and_capillary_and_gravity",
+                        study="varying_rp",
+                        case=pathlib.Path(f"init_s_{0.3}") / rp_model_name,
                         solver_name=solver_name,
-                        hc_tol=hc_tol,
-                        nl_tol=nl_tol,
-                        init_s=init_s,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_models["Brooks-Corey_nb_2"],
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["linear"],
-                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
-                        spe10_layer=spe10_layer,
-                    )
-                )
-
-        # endregion
-
-    # region FULL_GRAVITY_SEPARATION
-    # NOTE HC starts with a linear rel. perm. model and zero capillary pressure and zero
-    # gravity.
-    # Varying rel. perm. models  with linear capillary pressure.
-    if True:
-        for rp_model_name, rp_model in rp_models.items():
-            if rp_model_name == "linear":
-                continue
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "gravity_separation"
-                    / "varying_rp"
-                    / rp_model_name
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=rp_model_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        hc_tol=hc_tol,
-                        nl_tol=nl_tol,
-                        init_s=0.0,  # Does not matter for this case.
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_model,
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["linear"],
-                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
-                        spe10_layer=spe10_layer,
-                        spe10_case="gravity_separation",
-                    )
-                )
-
-    # endregion
-
-    # region VISCOUS_AND_CAPILLARY
-    # NOTE HC starts with a linear rel. perm. model and zero capillary pressure.
-
-    if True:
-        # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
-        # capillary pressure.
-        for rp_model_name, rp_model in rp_models.items():
-            if rp_model_name == "linear":
-                continue
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous_and_capillary"
-                    / "varying_rp"
-                    / f"init_s_{0.3}"
-                    / rp_model_name
-                )
-                cp_model_2 = (
-                    cp_models["Brooks-Corey_nb_2"]
-                    if rp_model_name == "Brooks-Corey_nb_2"
-                    else cp_models["Brooks-Corey_nb_4"]
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=rp_model_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
+                        solver_name_postfix=solver_name_postfix,
                         hc_tol=hc_tol,
                         nl_tol=nl_tol,
                         init_s=0.3,
-                        rp_model_1=rp_models["linear"],
+                        rp_model_1=LINEAR_RP_MODEL,
                         rp_model_2=rp_model,
-                        cp_model_1=cp_models["None"],
+                        cp_model_1=ZERO_CP_MODEL,
                         cp_model_2=cp_model_2,
-                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
-                        spe10_layer=spe10_layer,
+                        buoyancy_constants_1=buoyancy_constants_1,
+                        buoyancy_constants_2=buoyancy_models["gravity_on"],
+                        spe10_layer=SPE10_LAYER,
                     )
                 )
 
-    if True:
-        # Varying init_s for the less challenging Brooks-Corey model.
-        for init_s in list(np.linspace(0.2, 0.3, 5)[1:-1]):
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                file_name = f"init_s_{init_s:.2f}"
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous_and_capillary"
-                    / "varying_init_s"
-                    / file_name
-                )
-                configs.append(
+    return cases
+
+
+def generate_buoyancy_varying_density() -> list[SimulationConfig]:
+    """Generate simulations for coupled viscous-capillary-gravity flow with varying
+    density contrast, the less challenging Brooks-Corey rel. perm. and capillary
+    pressure models, and an initial saturation of :math:`0.3`.
+
+    Note: The HC solvers are run both from gravity on and gravity off as an auxiliary
+        problem.
+
+    """
+    cases = []
+    for water_density in [10000.0, 5000.0, water["density"], 200.0]:
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            if solver_name.endswith("HC"):
+                hc_gravity_cases = [
+                    ("", ZERO_BUOYANCY_MODEL),
+                    ("from_gravity_on", buoyancy_models["gravity_on"]),
+                ]
+            else:
+                hc_gravity_cases = [("", buoyancy_models["gravity_off"])]
+
+            for solver_name_postfix, buoyancy_constants_1 in hc_gravity_cases:
+                cases.append(
                     SimulationConfig(
-                        file_name=file_name,
-                        folder_name=folder_name,
+                        results_dir=results_dir,
+                        regime="viscous_and_capillary_and_gravity",
+                        study="varying_water_density",
+                        case=f"water_density_{water_density:.2f}",
                         solver_name=solver_name,
+                        solver_name_postfix=solver_name_postfix,
                         hc_tol=hc_tol,
                         nl_tol=nl_tol,
-                        init_s=init_s,
-                        rp_model_1=rp_models["linear"],
+                        init_s=0.3,
+                        rp_model_1=LINEAR_RP_MODEL,
                         rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                        cp_model_1=cp_models["None"],
+                        cp_model_1=ZERO_CP_MODEL,
                         cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
-                        spe10_layer=spe10_layer,
-                    )
-                )
-
-    if True:
-        # Less challenging Brooks-Corey cap. pressure with different entry pressures.
-        for entry_pressure in [200, 500, 1000]:
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                file_name = f"entry_pressure_{entry_pressure}_hc_from_none"
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous_and_capillary"
-                    / "varying_entry_pressure"
-                    / file_name
-                )
-                cp_model_2 = cp_models["Brooks-Corey_nb_4"].copy()
-                cp_model_2["entry_pressure"] = entry_pressure * pp.PASCAL
-                configs.append(
-                    SimulationConfig(
-                        file_name=file_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        hc_tol=hc_tol,
-                        nl_tol=nl_tol,
-                        init_s=0.3,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_model_2,
-                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_off"],
-                        spe10_layer=spe10_layer,
-                    )
-                )
-    # endregion
-
-    # region VISCOUS_AND_CAPILLARY_AND_GRAVITY
-    # NOTE Run with the 5-spot setup and additional gravity.
-    # NOTE HC starts with a linear rel. perm. model and zero capillary pressure and zero
-    # gravity.
-
-    if True:
-        # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
-        # capillary pressure and gravity
-        for rp_model_name, rp_model in rp_models.items():
-            if rp_model_name == "linear":
-                continue
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous_and_capillary_and_gravity"
-                    / "varying_rp"
-                    / f"init_s_{0.3}"
-                    / rp_model_name
-                )
-                cp_model_2 = (
-                    cp_models["Brooks-Corey_nb_2"]
-                    if rp_model_name == "Brooks-Corey_nb_2"
-                    else cp_models["Brooks-Corey_nb_4"]
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=rp_model_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        hc_tol=hc_tol,
-                        nl_tol=nl_tol,
-                        init_s=0.3,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_model,
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_model_2,
-                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
-                        spe10_layer=spe10_layer,
-                    )
-                )
-
-    if True:
-        # Varying rel. perm. and cap. press. models at init_s = 0.3 with Brooks-Corey
-        # capillary pressure and gravity
-        # AHC AND HC FROM GRAVITY ON.
-        for rp_model_name, rp_model in rp_models.items():
-            if rp_model_name == "linear":
-                continue
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                if solver_name.startswith("Newton"):
-                    continue
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_from_gravity_on_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous_and_capillary_and_gravity"
-                    / "varying_rp"
-                    / f"init_s_{0.3}"
-                    / rp_model_name
-                )
-                cp_model_2 = (
-                    cp_models["Brooks-Corey_nb_2"]
-                    if rp_model_name == "Brooks-Corey_nb_2"
-                    else cp_models["Brooks-Corey_nb_4"]
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=rp_model_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        hc_tol=hc_tol,
-                        nl_tol=nl_tol,
-                        init_s=0.3,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_model,
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_model_2,
-                        buoyancy_constants_1=buoyancy_constants["gravity_on"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
-                        spe10_layer=spe10_layer,
-                    )
-                )
-
-    if True:
-        # Varying density contrast.
-        for water_density in [10000.0, 5000.0, 200.0]:
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                file_name = f"water_density_{water_density:.2f}"
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous_and_capillary_and_gravity"
-                    / "varying_water_density"
-                    / file_name
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=file_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        hc_tol=hc_tol,
-                        nl_tol=nl_tol,
-                        init_s=0.3,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                        buoyancy_constants_1=buoyancy_constants["gravity_off"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
-                        spe10_layer=spe10_layer,
+                        buoyancy_constants_1=buoyancy_constants_1,
+                        buoyancy_constants_2=buoyancy_models["gravity_on"],
+                        spe10_layer=SPE10_LAYER,
                         spe10_water_density=water_density,  # kg/m^3
                     )
                 )
 
-    if True:
-        # Varying density contrast.
-        # AHC AND HC FROM GRAVITY ON.
-        for water_density in [10000.0, 5000.0, 200.0]:
-            for solver_name, hc_tol, nl_tol in solvers_and_tols:
-                if solver_name.startswith("Newton"):
-                    continue
-
-                file_name = f"water_density_{water_density:.2f}"
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_from_gravity_on_{hc_tol:.3f}_{nl_tol:.2e}"
-                    / "viscous_and_capillary_and_gravity"
-                    / "varying_water_density"
-                    / file_name
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=file_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        hc_tol=hc_tol,
-                        nl_tol=nl_tol,
-                        init_s=0.3,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                        buoyancy_constants_1=buoyancy_constants["gravity_on"],
-                        buoyancy_constants_2=buoyancy_constants["gravity_on"],
-                        spe10_layer=spe10_layer,
-                        spe10_water_density=water_density,  # kg/m^3
-                    )
-                )
-
-    # endregion
-
-    return configs
+    return cases
 
 
 if __name__ == "__main__":
-    configs = generate_configs()
-    for config in configs:
-        run_simulation(config)
-        # clean_up_after_simulation(config)
+    results_dir = dirname / "results"
+    results_dir.mkdir(exist_ok=True)
+
+    experiments: dict[str, list[SimulationConfig]] = {
+        "viscous_varying_rp": generate_viscous_varying_rp_cases(init_s=0.2)
+        + generate_viscous_varying_rp_cases(init_s=0.3),
+        "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
+        "pure_gravity": generate_pure_gravity_cases(),
+        "capillary_varying_rp": generate_capillary_varying_rp(),
+        "capillary_varying_init_s": generate_capillary_varying_init_s(),
+        "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
+        "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
+        "buoyancy_varying_density": generate_buoyancy_varying_density(),
+    }
+
+    for cases in experiments.values():
+        for config in cases:
+            run_simulation(config)
+            clean_up_after_simulation(config)
 
 # endregion

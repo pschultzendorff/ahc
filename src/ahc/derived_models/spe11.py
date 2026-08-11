@@ -176,7 +176,7 @@ def download_spe11_data(data_dir: pathlib.Path) -> None:
 
 def read_refinement_factor(geo_file: pathlib.Path) -> float:
     """Read the refinement factor in the SPE11 geometric information."""
-    with geo_file.open("r") as f:
+    with geo_file.open() as f:
         lines: list[str] = f.readlines()
     line_idx = 3 if geo_file.name == GEO_FILE_CASE_A else 4
     return float(lines[line_idx][36:-3])
@@ -447,7 +447,7 @@ def load_spe11_data(
     )
 
     # The well positions always gets written to the case A geo file.
-    with (data_dir / GEO_FILE_CASE_A).open("r") as f:
+    with (data_dir / GEO_FILE_CASE_A).open() as f:
         lines: list[str] = f.readlines()
         # NOTE Line number must align with ``write_well_positions``. 823 is valid for
         # NUM_SQUARES=4.

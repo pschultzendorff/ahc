@@ -75,7 +75,7 @@ class SolverStatisticsTPF(pp.SolverStatistics):
         if self.path is not None:
             # Check if object exists and append to it
             if self.path.exists():
-                with self.path.open("r") as file:
+                with self.path.open() as file:
                     data = json.load(file)
             else:
                 data = {}
@@ -131,7 +131,7 @@ class SolverStatisticsRec(SolverStatisticsTPF):
         if self.path is not None:
             # Check if object exists and append to it
             if self.path.exists():
-                with self.path.open("r") as file:
+                with self.path.open() as file:
                     data = json.load(file)
             else:
                 data = {}
@@ -209,7 +209,7 @@ class SolverStatisticsEst(SolverStatisticsRec):
         if self.path is not None:
             # Check if object exists and append to it
             if self.path.exists():
-                with self.path.open("r") as file:
+                with self.path.open() as file:
                     data = json.load(file)
             else:
                 data = {}
@@ -274,7 +274,7 @@ class SolverStatisticsANewton(SolverStatisticsRec):
         if self.path is not None:
             # Check if object exists and append to it
             if self.path.exists():
-                with self.path.open("r") as file:
+                with self.path.open() as file:
                     data = json.load(file)
             else:
                 data = {}
@@ -449,7 +449,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
         if self.path is not None:
             # Check if object exists and append to it
             if self.path.exists():
-                with self.path.open("r") as file:
+                with self.path.open() as file:
                     data: dict[int, Any] = json.load(file)
             else:
                 data = {}
