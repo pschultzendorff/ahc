@@ -328,14 +328,16 @@ def run_simulation(
             "spe10_case": config.spe10_case,
             "spe10_water_density": config.spe10_water_density,
             "folder_name": folder_name,
-            "file_name": config.case,
+            "file_name": config.case.name
+            if isinstance(config.case, pathlib.Path)
+            else config.case,
             "solver_statistics_file_name": folder_name / "solver_statistics.json",
             "time_manager": pp.TimeManager(**time_manager_params),
         }
     )
 
     # Remove previous runs.
-    shutil.rmtree(folder_name)
+    shutil.rmtree(folder_name, ignore_errors=True)
     folder_name.mkdir(parents=True)
 
     try:
@@ -476,7 +478,7 @@ def generate_viscous_varying_init_s_cases() -> list[SimulationConfig]:
     return cases
 
 
-def generate_pure_gravity_cases() -> list[SimulationConfig]:
+def generate_gravity_separation_cases() -> list[SimulationConfig]:
     """Generate simulation configurations for pure gravity-driven flow with varying
     water density, the less challenging Brooks-Corey rel. perm. model, and Brooks-Corey
     capillary pressure.
@@ -715,7 +717,7 @@ studies: dict[str, list[SimulationConfig]] = {
     "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
     "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
     "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-    "pure_gravity": generate_pure_gravity_cases(),
+    "gravity_separation": generate_gravity_separation_cases(),
     "capillary_varying_rp": generate_capillary_varying_rp(),
     "capillary_varying_init_s": generate_capillary_varying_init_s(),
     "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
@@ -728,6 +730,6 @@ studies: dict[str, list[SimulationConfig]] = {
 if __name__ == "__main__":
     results_dir.mkdir(exist_ok=True)
     for study in studies.values():
-        for case in study:
-            run_simulation(case)
-            clean_up_after_simulation(case)
+        for config in study:
+            run_simulation(config)
+            clean_up_after_simulation(config)

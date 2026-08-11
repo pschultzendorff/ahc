@@ -134,7 +134,14 @@ class SimulationConfig:
             f"{self.solver_name}{postfix_with_underscore}"
             f"_{self.hc_tol:.3f}_{self.nl_tol:.2e}"
         )
-        return self.results_dir / solver_name_with_params / self.regime / self.study
+
+        return (
+            self.results_dir
+            / solver_name_with_params
+            / self.regime
+            / self.study
+            / self.case
+        )
 
 
 def setup_porepy_params(
@@ -383,7 +390,7 @@ def read_data(
     config: SimulationConfig,
     expected_final_time: float,
 ) -> SimulationStatistics:
-    with (config.folder_name() / config.case / "solver_statistics.json").open() as f:
+    with (config.folder_name() / "solver_statistics.json").open() as f:
         data: dict[str, Any] = json.load(f)
 
     time_steps = list(data.values())
@@ -393,9 +400,7 @@ def read_data(
     # failed).
     try:
         stats.num_grid_cells = int(
-            (config.folder_name() / config.case / "num_grid_cells.txt")
-            .read_text()
-            .strip()
+            (config.folder_name() / "num_grid_cells.txt").read_text().strip()
         )
     except FileNotFoundError:
         return stats
