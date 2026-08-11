@@ -78,7 +78,6 @@ from utils import SimulationConfig, clean_up_after_simulation, setup_porepy_para
 
 # region SETUP
 
-
 # Limit number of threads for NREC.
 N_THREADS = "4"
 os.environ["MKL_NUM_THREADS"] = N_THREADS
@@ -96,7 +95,9 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
+# Directories for results.
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
+results_dir = dirname / "results"
 
 # endregion
 
@@ -351,7 +352,7 @@ def run_simulation(
 
 # endregion
 
-# region RUN
+# region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
     ("AHC", 0.1, 0.1),
     ("AHC", 0.1, 0.01),
@@ -637,7 +638,7 @@ def generate_buoyancy_varying_rp() -> list[SimulationConfig]:
                     ("from_gravity_on", buoyancy_models["gravity_on"]),
                 ]
             else:
-                hc_gravity_cases = [("", buoyancy_models["gravity_off"])]
+                hc_gravity_cases = [("", ZERO_BUOYANCY_MODEL)]
 
             for solver_name_postfix, buoyancy_constants_1 in hc_gravity_cases:
                 cases.append(
@@ -682,7 +683,7 @@ def generate_buoyancy_varying_density() -> list[SimulationConfig]:
                     ("from_gravity_on", buoyancy_models["gravity_on"]),
                 ]
             else:
-                hc_gravity_cases = [("", buoyancy_models["gravity_off"])]
+                hc_gravity_cases = [("", ZERO_BUOYANCY_MODEL)]
 
             for solver_name_postfix, buoyancy_constants_1 in hc_gravity_cases:
                 cases.append(
@@ -710,25 +711,23 @@ def generate_buoyancy_varying_density() -> list[SimulationConfig]:
     return cases
 
 
-if __name__ == "__main__":
-    results_dir = dirname / "results"
-    results_dir.mkdir(exist_ok=True)
-
-    experiments: dict[str, list[SimulationConfig]] = {
-        "viscous_varying_rp": generate_viscous_varying_rp_cases(init_s=0.2)
-        + generate_viscous_varying_rp_cases(init_s=0.3),
-        "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-        "pure_gravity": generate_pure_gravity_cases(),
-        "capillary_varying_rp": generate_capillary_varying_rp(),
-        "capillary_varying_init_s": generate_capillary_varying_init_s(),
-        "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
-        "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
-        "buoyancy_varying_density": generate_buoyancy_varying_density(),
-    }
-
-    for cases in experiments.values():
-        for config in cases:
-            run_simulation(config)
-            clean_up_after_simulation(config)
+studies: dict[str, list[SimulationConfig]] = {
+    "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
+    "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
+    "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
+    "pure_gravity": generate_pure_gravity_cases(),
+    "capillary_varying_rp": generate_capillary_varying_rp(),
+    "capillary_varying_init_s": generate_capillary_varying_init_s(),
+    "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
+    "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
+    "buoyancy_varying_density": generate_buoyancy_varying_density(),
+}
 
 # endregion
+
+if __name__ == "__main__":
+    results_dir.mkdir(exist_ok=True)
+    for study in studies.values():
+        for case in study:
+            run_simulation(case)
+            clean_up_after_simulation(case)

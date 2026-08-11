@@ -1,139 +1,130 @@
 import json
 import pathlib
 import sys
+from collections.abc import Callable
 
-from run import default_time_manager_params, generate_configs
+from matplotlib.figure import Figure
+from run import (
+    default_time_manager_params,
+    studies,
+)
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import calc_relative_error, plot_nl_iterations, read_data
+from utils import (
+    SimulationConfig,
+    SimulationStatistics,
+    calc_relative_error,
+    plot_nl_iterations,
+    read_data,
+)
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]  # type: ignore
 
-if __name__ == "__main__":
-    configs = generate_configs()
-    configs_viscous_varying_rp_init_s_02 = configs[:20]
-    configs_viscous_varying_rp_init_s_03 = configs[20:40]
-    configs_viscous_varying_init_s = configs[5:10] + configs[40:55] + configs[25:30]
-    configs_viscous_and_cap_varying_cap_init_s_03 = configs[55:75]
-    configs_viscous_and_cap_varying_init_s = configs[75:90] + configs[55:60]
-    configs_viscous_and_cap_varying_entry_press = configs[55:60] + configs[90:]
-    rel_errors = {}
+rel_errors: dict[str, str] = {}
 
-    data_1 = {}
-    for config in configs_viscous_varying_rp_init_s_02:
-        if config.rp_model_2["model"] == "Corey":
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-        elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_Br.-Corey {config.rp_model_2['n_b']}"
-        statistics = read_data(config, EXPECTED_FINAL_TIME)
-        data_1[key] = statistics
-        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
-            if statistics.converged:
-                rel_errors[f"fig_1_{key}"] = (
-                    f"{calc_relative_error(statistics)['total']:.2f}"
+
+def plot_study(
+    cases: list[SimulationConfig],
+    key_func: Callable[[SimulationConfig], str],
+    varying_param_name: str,
+    **kwargs,
+) -> Figure:
+    data: dict[str, SimulationStatistics] = {}
+    for config in cases:
+        stats = read_data(config, EXPECTED_FINAL_TIME)
+        key = key_func(config)
+        data[key] = stats
+        if config.solver_name == "AHC" and config.hc_tol == 0.01:
+            if stats.converged:
+                rel_errors[f"{config.folder_name()}_{key}"] = (
+                    f"{calc_relative_error(stats)['total']:.2f}"
                 )
             else:
-                rel_errors[f"fig_1_{key}"] = "not converged"
-    fig1 = plot_nl_iterations(data_1, "Relative permeability model")
+                rel_errors[f"{config.folder_name()}_{key}"] = "not converged"
+    return plot_nl_iterations(data, varying_param_name, **kwargs)
 
-    data_2 = {}
-    for config in configs_viscous_varying_rp_init_s_03:
-        if config.rp_model_2["model"] == "Corey":
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-        elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
-            key = f"{config.solver_name}_{config.adaptive_error_ratio}_Br.-Corey {config.rp_model_2['n_b']}"
-        statistics = read_data(config, EXPECTED_FINAL_TIME)
-        data_2[key] = statistics
-        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
-            if statistics.converged:
-                rel_errors[f"fig_2_{key}"] = (
-                    f"{calc_relative_error(statistics)['total']:.2f}"
-                )
-            else:
-                rel_errors[f"fig_2_{key}"] = "not converged"
-    fig2 = plot_nl_iterations(data_2, "Relative permeability model")
 
-    data_3 = {}
-    for config in configs_viscous_varying_init_s:
-        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
-        statistics = read_data(config, EXPECTED_FINAL_TIME)
-        data_3[key] = statistics
-        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
-            if statistics.converged:
-                rel_errors[f"fig_3_{key}"] = (
-                    f"{calc_relative_error(statistics)['total']:.2f}"
-                )
-            else:
-                rel_errors[f"fig_3_{key}"] = "not converged"
-    fig3 = plot_nl_iterations(data_3, r"$s_\mathrm{w}^0$")
-
-    data_4 = {}
-    for config in configs_viscous_and_cap_varying_cap_init_s_03:
-        key = (
-            f"{config.solver_name}_{config.adaptive_error_ratio}_"
-            + f"Br.-C. $nb={config.cp_model_2['n_b']}$\n"
+def _key_varying_rp(config: SimulationConfig) -> str:
+    if config.rp_model_2["model"] == "Corey":
+        return f"{config.solver_name}_{config.hc_tol}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
+    elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
+        return (
+            f"{config.solver_name}_{config.hc_tol}_Br.-Corey {config.rp_model_2['n_b']}"
         )
-        if config.rp_model_2["model"] == "Corey":
-            key += f"C. $p={config.rp_model_2['power']}$"
-        else:
-            key += f"Br.-C. $nb={config.rp_model_2['n_b']}$"
-        statistics = read_data(config, EXPECTED_FINAL_TIME)
-        data_4[key] = statistics
-        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
-            if statistics.converged:
-                rel_errors[f"fig_4_{key}"] = (
-                    f"{calc_relative_error(statistics)['total']:.2f}"
-                )
-            else:
-                rel_errors[f"fig_4_{key}"] = "not converged"
-    fig4 = plot_nl_iterations(
-        data_4,
-        "Capillary pressure & Relative permeability model",
-        tight_layout=True,
-        rotate_x_labels=True,
-        extended_figure_height=True,
+    else:
+        raise ValueError(
+            f"Unknown relative permeability model: {config.rp_model_2['model']}"
+        )
+
+
+def _key_varying_init_s(config: SimulationConfig) -> str:
+    return f"{config.solver_name}_{config.hc_tol}_{config.init_s}"
+
+
+def _key_varying_cap(config: SimulationConfig) -> str:
+    key = (
+        f"{config.solver_name}_{config.hc_tol}_"
+        + f"Br.-C. $nb={config.cp_model_2['n_b']}$\n"
     )
+    if config.rp_model_2["model"] == "Corey":
+        key += f"C. $p={config.rp_model_2['power']}$"
+    else:
+        key += f"Br.-C. $nb={config.rp_model_2['n_b']}$"
+    return key
 
-    data_5 = {}
-    for config in configs_viscous_and_cap_varying_init_s:
-        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.init_s}"
-        statistics = read_data(config, EXPECTED_FINAL_TIME)
-        data_5[key] = statistics
-        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
-            if statistics.converged:
-                rel_errors[f"fig_5_{key}"] = (
-                    f"{calc_relative_error(statistics)['total']:.2f}"
-                )
-            else:
-                rel_errors[f"fig_5_{key}"] = "not converged"
-    fig5 = plot_nl_iterations(data_5, r"$s_\mathrm{w}^0$")
 
-    data_6 = {}
-    for config in configs_viscous_and_cap_varying_entry_press:
-        key = f"{config.solver_name}_{config.adaptive_error_ratio}_{config.cp_model_2['entry_pressure']}"
-        statistics = read_data(config, EXPECTED_FINAL_TIME)
-        data_6[key] = statistics
-        if config.solver_name == "AHC" and config.adaptive_error_ratio == 0.01:
-            if statistics.converged:
-                rel_errors[f"fig_6_{key}"] = (
-                    f"{calc_relative_error(statistics)['total']:.2f}"
-                )
-            else:
-                rel_errors[f"fig_6_{key}"] = "not converged"
-    fig6 = plot_nl_iterations(data_6, r"$p_\mathrm{e}$")
+def _key_varying_entry_pressure(config: SimulationConfig) -> str:
+    return f"{config.solver_name}_{config.hc_tol}_{config.cp_model_2['entry_pressure']}"
 
+
+def _key_varying_water_density(config: SimulationConfig) -> str:
+    return f"{config.solver_name}_{config.hc_tol}_{config.spe10_water_density}"
+
+
+if __name__ == "__main__":
     fig_dir = dirname / "figures"
     fig_dir.mkdir(exist_ok=True)
 
+    for study_name, study in studies.items():
+        kwargs = {}
+        match study_name:
+            case (
+                "viscous_varying_rp_init_s_02"
+                | "viscous_varying_rp_init_s_03"
+                | "buoyancy_varying_density"
+            ):
+                key_func = _key_varying_rp
+                varying_param_name = "Relative permeability model"
+            case "viscous_varying_init_s" | "capillary_varying_init_s":
+                key_func = _key_varying_init_s
+                varying_param_name = r"$s_\mathrm{w}^0$"
+            case "capillary_varying_rp":
+                key_func = _key_varying_cap
+                varying_param_name = "Capillary pressure & Relative permeability model"
+                kwargs = {
+                    "tight_layout": True,
+                    "rotate_x_labels": True,
+                    "extended_figure_height": True,
+                }
+            case "capillary_varying_entry_pressure":
+                key_func = _key_varying_entry_pressure
+                varying_param_name = r"$p_\mathrm{e}$"
+            case "pure_gravity" | "buoyancy_varying_density":
+                key_func = _key_varying_water_density
+                varying_param_name = r"$\rho_\mathrm{w}$"
+            case _:
+                raise ValueError(f"Unknown study: {study_name}")
+
+        fig = plot_study(
+            study,
+            key_func=key_func,
+            varying_param_name=varying_param_name,
+            **kwargs,
+        )
+        fig.savefig(fig_dir / f"nl_iters_{study_name}.png")
+
     with (fig_dir / "relative_errors.txt").open("w") as f:
         json.dump(rel_errors, f, indent=2)
-
-    fig1.savefig(fig_dir / "nl_iters_viscous_varying_rp_init_s_02.png")
-    fig2.savefig(fig_dir / "nl_iters_viscous_varying_rp_init_s_03.png")
-    fig3.savefig(fig_dir / "nl_iters_viscous_varying_init_s.png")
-    fig4.savefig(fig_dir / "nl_iters_viscous_and_cap_varying_cap_init_s_03.png")
-    fig5.savefig(fig_dir / "nl_iters_viscous_and_cap_varying_init_s.png")
-    fig6.savefig(fig_dir / "nl_iters_viscous_and_cap_varying_entry_press.png")

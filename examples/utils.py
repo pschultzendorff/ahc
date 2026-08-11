@@ -127,8 +127,11 @@ class SimulationConfig:
             name: Path to the folder for the simulation results.
 
         """
+        postfix_with_underscore = (
+            f"_{self.solver_name_postfix}" if self.solver_name_postfix else ""
+        )
         solver_name_with_params = (
-            f"{self.solver_name}_{self.solver_name_postfix}_{self.hc_tol}_{self.nl_tol}"
+            f"{self.solver_name}{postfix_with_underscore}_{self.hc_tol}_{self.nl_tol}"
         )
         return self.results_dir / solver_name_with_params / self.regime / self.study
 
@@ -379,7 +382,7 @@ def read_data(
     config: SimulationConfig,
     expected_final_time: float,
 ) -> SimulationStatistics:
-    with (config.folder_name() / "solver_statistics.json").open() as f:
+    with (config.folder_name() / config.case / "solver_statistics.json").open() as f:
         data: dict[str, Any] = json.load(f)
 
     time_steps = list(data.values())
@@ -389,7 +392,9 @@ def read_data(
     # failed).
     try:
         stats.num_grid_cells = int(
-            (config.folder_name() / "num_grid_cells.txt").read_text().strip()
+            (config.folder_name() / config.case / "num_grid_cells.txt")
+            .read_text()
+            .strip()
         )
     except FileNotFoundError:
         return stats
