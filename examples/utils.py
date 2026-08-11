@@ -131,7 +131,8 @@ class SimulationConfig:
             f"_{self.solver_name_postfix}" if self.solver_name_postfix else ""
         )
         solver_name_with_params = (
-            f"{self.solver_name}{postfix_with_underscore}_{self.hc_tol}_{self.nl_tol}"
+            f"{self.solver_name}{postfix_with_underscore}"
+            f"_{self.hc_tol:.3f}_{self.nl_tol:.2e}"
         )
         return self.results_dir / solver_name_with_params / self.regime / self.study
 
@@ -318,7 +319,7 @@ class SimulationStatistics:
     energy_norm: list = field(default_factory=list)
 
     lambdas: list = field(default_factory=list)
-    converged: bool = False
+    converged: bool = True
     final_time: float = 0.0
 
     num_grid_cells: int = 1
@@ -499,11 +500,11 @@ def plot_nl_iterations(
         title: Optional title for the plot.
     """
     # Extract solvers and parameter values from case names
-    cases = list(data.keys())
-    solvers = sorted(set("\n".join(case.split("_")[:2]) for case in cases))
+    case_keys = list(data.keys())
+    solvers = sorted(set("\n".join(case_key.split("_")[:2]) for case_key in case_keys))
     solvers = []
-    for case in cases:
-        solver_name, adaptive_error_ratio_str, varying_param = case.split("_")
+    for case_key in case_keys:
+        solver_name, adaptive_error_ratio_str, varying_param = case_key.split("_")
         if solver_name == "HC":
             solvers.append(solver_name)
         elif solver_name.startswith("AHC"):
@@ -522,7 +523,7 @@ def plot_nl_iterations(
     solvers = sorted(set(solvers))
 
     x_ticks = sorted(
-        set(" ".join(case.split("_")[2:]) for case in cases),
+        set(" ".join(case_key.split("_")[2:]) for case_key in case_keys),
         key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else x,
     )
 
@@ -532,8 +533,8 @@ def plot_nl_iterations(
     converged = np.empty((len(solvers), len(x_ticks)), dtype=bool)
     final_times = np.empty((len(solvers), len(x_ticks)))
 
-    for case, stat in data.items():
-        solver_name, adaptive_error_ratio_str, varying_param = case.split("_")
+    for case_key, stat in data.items():
+        solver_name, adaptive_error_ratio_str, varying_param = case_key.split("_")
 
         adaptive_error_ratio = float(adaptive_error_ratio_str)
 

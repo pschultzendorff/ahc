@@ -94,7 +94,8 @@ if __name__ == "__main__":
             case (
                 "viscous_varying_rp_init_s_02"
                 | "viscous_varying_rp_init_s_03"
-                | "buoyancy_varying_density"
+                | "buoyancy_varying_rp"
+                | "gravity_separation"
             ):
                 key_func = _key_varying_rp
                 varying_param_name = "Relative permeability model"
@@ -112,7 +113,7 @@ if __name__ == "__main__":
             case "capillary_varying_entry_pressure":
                 key_func = _key_varying_entry_pressure
                 varying_param_name = r"$p_\mathrm{e}$"
-            case "pure_gravity" | "buoyancy_varying_density":
+            case "buoyancy_varying_density":
                 key_func = _key_varying_water_density
                 varying_param_name = r"$\rho_\mathrm{w}$"
             case _:
