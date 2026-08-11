@@ -352,6 +352,21 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
             ref_increment_sat_norm, ref_increment_press_norm = (
                 self.compute_nonlinear_increment_norm(reference_increment)
             )
+
+            # Handle edge cases.
+            if ref_increment_sat_norm == 0.0:
+                logger.warning(
+                    "Reference nonlinear increment norm for saturation is zero. Set to"
+                    " 1.0 to avoid division by zero."
+                )
+                ref_increment_sat_norm = 1.0
+            if ref_increment_press_norm == 0.0:
+                logger.warning(
+                    "Reference nonlinear increment norm for pressure is zero. Set to"
+                    " 1.0 to avoid division by zero."
+                )
+                ref_increment_press_norm = 1.0
+
             rel_increment_sat_norm: float = (
                 nl_increment_sat_norm / ref_increment_sat_norm
             )
