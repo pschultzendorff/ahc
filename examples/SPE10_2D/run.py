@@ -316,6 +316,7 @@ def run_simulation(
             "model_1": config.buoyancy_constants_1,
             "model_2": config.buoyancy_constants_2,
         }
+
     folder_name = config.folder_name()
     solver_params.update(
         {
@@ -345,7 +346,7 @@ def run_simulation(
         pp.run_time_dependent_model(model=model, params=solver_params)
     except Exception as e:
         logger.error(f"Run failed with error: {e}.")
-        raise e
+        # raise e
 
     # Save number of grid cells to a file.
     with (folder_name / "num_grid_cells.txt").open("w") as f:
