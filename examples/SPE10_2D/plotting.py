@@ -28,14 +28,18 @@ rel_errors: dict[str, str] = {}
 
 def plot_study(
     cases: list[SimulationConfig],
-    key_func: Callable[[SimulationConfig], str],
+    key_func: Callable[[SimulationConfig, SimulationStatistics], tuple[str, str]],
     varying_param_name: str,
     **kwargs,
 ) -> Figure:
-    data: dict[str, SimulationStatistics] = {}
+    # To allow for easy sorting of the data by solver specs and parameter values in
+    # plot_nl_iterations, we use tuples of strings as keys. The first string is the
+    # solver name plus all relevant specs, while the second string is the parameter
+    # value. See the various helper functions below for details.
+    data: dict[tuple[str, str], SimulationStatistics] = {}
     for config in cases:
         stats = read_data(config, EXPECTED_FINAL_TIME)
-        key = key_func(config)
+        key = key_func(config, stats)
         data[key] = stats
         if config.solver_name == "AHC" and config.hc_tol == 0.01:
             if stats.converged:
@@ -47,41 +51,55 @@ def plot_study(
     return plot_nl_iterations(data, varying_param_name, **kwargs)
 
 
-def _key_varying_rp(config: SimulationConfig) -> str:
-    if config.rp_model_2["model"] == "Corey":
-        return f"{config.solver_name}_{config.hc_tol}_{config.rp_model_2['model']} {config.rp_model_2['power']}"
-    elif config.rp_model_2["model"] == "Brooks-Corey-Mualem":
-        return (
-            f"{config.solver_name}_{config.hc_tol}_Br.-Corey {config.rp_model_2['n_b']}"
-        )
-    else:
-        raise ValueError(
-            f"Unknown relative permeability model: {config.rp_model_2['model']}"
-        )
+def _key_varying_rp(
+    config: SimulationConfig, stats: SimulationStatistics
+) -> tuple[str, str]:
+    match config.rp_model_2["model"]:
+        case "Corey":
+            parameter_value = (
+                f"{config.rp_model_2['model']} {config.rp_model_2['power']}"
+            )
+        case "Brooks-Corey-Mualem":
+            parameter_value = f"Br.-Corey {config.rp_model_2['n_b']}"
+        case _:
+            raise ValueError(
+                f"Unknown relative permeability model: {config.rp_model_2['model']}"
+            )
+    return config.solver_specs(), parameter_value
 
 
-def _key_varying_init_s(config: SimulationConfig) -> str:
-    return f"{config.solver_name}_{config.hc_tol}_{config.init_s}"
+def _key_varying_init_s(
+    config: SimulationConfig, stats: SimulationStatistics
+) -> tuple[str, str]:
+    return config.solver_specs(), str(config.init_s)
 
 
-def _key_varying_cap(config: SimulationConfig) -> str:
-    key = (
-        f"{config.solver_name}_{config.hc_tol}_"
-        + f"Br.-C. $nb={config.cp_model_2['n_b']}$\n"
-    )
-    if config.rp_model_2["model"] == "Corey":
-        key += f"C. $p={config.rp_model_2['power']}$"
-    else:
-        key += f"Br.-C. $nb={config.rp_model_2['n_b']}$"
-    return key
+def _key_varying_cap(
+    config: SimulationConfig, stats: SimulationStatistics
+) -> tuple[str, str]:
+    parameter_value = f"Br.-C. $nb={config.rp_model_2['n_b']}$\n"
+    match config.cp_model_2["model"]:
+        case "Brooks-Corey":
+            parameter_value += f"Br.-C. $nb={config.cp_model_2['n_b']}$"
+        case "Corey":
+            parameter_value += f"C. $p={config.cp_model_2['power']}$"
+        case _:
+            raise ValueError(
+                f"Unknown capillary pressure model: {config.cp_model_2['model']}"
+            )
+    return config.solver_specs(), parameter_value
 
 
-def _key_varying_entry_pressure(config: SimulationConfig) -> str:
-    return f"{config.solver_name}_{config.hc_tol}_{config.cp_model_2['entry_pressure']}"
+def _key_varying_entry_pressure(
+    config: SimulationConfig, stats: SimulationStatistics
+) -> tuple[str, str]:
+    return config.solver_specs(), str(config.cp_model_2["entry_pressure"])
 
 
-def _key_varying_water_density(config: SimulationConfig) -> str:
-    return f"{config.solver_name}_{config.hc_tol}_{config.spe10_water_density}"
+def _key_varying_water_density(
+    config: SimulationConfig, stats: SimulationStatistics
+) -> tuple[str, str]:
+    return config.solver_specs(), str(config.spe10_water_density)
 
 
 if __name__ == "__main__":

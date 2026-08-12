@@ -69,7 +69,9 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
+# Directories for results.
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
+results_dir = dirname / "results"
 
 # endregion
 
@@ -146,7 +148,7 @@ default_time_manager_params = {
 }
 
 
-def setup_model(solver: str) -> type[SPE11HC] | type[SPE11Newton]:
+def setup_porepy_model(solver: str) -> type[SPE11HC] | type[SPE11Newton]:
     """Return a model class based on the solver name.
 
     Parameters:
@@ -173,18 +175,18 @@ def run_simulation(
     """Run simulation for a single configuration."""
     logger.info(
         f"solver: {config.solver_name}, "
-        f"adaptive error ratio: {config.adaptive_error_ratio:.2f}, "
-        f"refinement factor: {config.refinement_factor:.2f}, "
+        f"HC tolerance: {config.hc_tol:.2f}, "
+        f"NL tolerance: {config.nl_tol:.2f}, "
+        f"cell size: {config.cell_size:.2f}, \n"
         f"initial saturation: {config.init_s}, "
         f"RP model 1: {config.rp_model_1}, "
-        f"RP model 2: {config.rp_model_2}, "
-        f"CP model 1: {config.cp_model_1}, "
-        f"CP model 2: {config.cp_model_2}."
+        f"RP model 2: {config.rp_model_2}, \n"
+        f"CP model: {config.cp_model_2}."
     )
 
-    model_class = setup_model(config.solver_name)
+    model_class = setup_porepy_model(config.solver_name)
     updated_solver_params, updated_time_manager_params = setup_porepy_params(
-        config.solver_name, config.adaptive_error_ratio, **kwargs
+        config, **kwargs
     )
 
     # Build params dictionaries.
@@ -207,6 +209,7 @@ def run_simulation(
             "model_2": config.cp_model_2,
         }
 
+    folder_name = config.folder_name()
     solver_params.update(
         {
             # Meshing and model:
@@ -216,16 +219,18 @@ def run_simulation(
             "spe11_initial_saturation": config.init_s,
             "spe11_entry_pressure": config.spe11_entry_pressure,
             # Output:
-            "folder_name": config.folder_name,
-            "file_name": config.file_name,
-            "solver_statistics_file_name": config.folder_name
-            / "solver_statistics.json",
+            "folder_name": folder_name,
+            "file_name": config.case.name
+            if isinstance(config.case, pathlib.Path)
+            else config.case,
+            "solver_statistics_file_name": folder_name / "solver_statistics.json",
             "time_manager": pp.TimeManager(**time_manager_params),
         }
     )
 
-    shutil.rmtree(config.folder_name, ignore_errors=True)
-    config.folder_name.mkdir(parents=True)
+    # Remove previous runs.
+    shutil.rmtree(folder_name, ignore_errors=True)
+    folder_name.mkdir(parents=True)
 
     try:
         model = model_class(solver_params)
@@ -234,24 +239,24 @@ def run_simulation(
         logger.error(f"Run failed with error: {e}.")
 
     # Save number of grid cells to a file.
-    with (config.folder_name / "num_grid_cells.txt").open("w") as f:
+    with (folder_name / "num_grid_cells.txt").open("w") as f:
         f.write(str(model.g.num_cells))
 
 
 # endregion
 
-# region RUN
-solvers_and_ratios: list[tuple[str, float]] = [
-    ("AHC", 0.1),
-    ("AHC", 0.01),
-    ("HC", 0.1),
-    ("Newton", 0.1),
-    ("NewtonAppleyard", 0.1),
+# region SIMULATIONS
+solvers_and_tols: list[tuple[str, float, float]] = [
+    ("AHC", 0.1, 0.1),
+    ("AHC", 0.01, 0.1),
+    ("HC", 0.01, 1e-3),
+    ("Newton", 0.0, 0.1),
+    ("NewtonAppleyard", 0.0, 0.1),
 ]
-refinement_factors: list[float] = [10, 5, 1]  # , 0.5]
+refinement_factors: list[float] = [10, 5, 1]
 
+LINEAR_RP_MODEL = {"model": "linear", "limit": True}
 rp_models: dict[str, Any] = {
-    "linear": {"model": "linear", "limit": True},
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey-Mualem",
         "limit": True,
@@ -268,8 +273,8 @@ rp_models: dict[str, Any] = {
     "Corey_power_3": {"model": "Corey", "limit": True, "power": 3},
 }
 
+ZERO_CP_MODEL = {"model": None}
 cp_models: dict[str, Any] = {
-    "None": {"model": None},
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey",
         "n_b": 4.0,
@@ -278,75 +283,87 @@ cp_models: dict[str, Any] = {
     },
 }
 
-results_dir = dirname / "results"
-results_dir.mkdir(exist_ok=True)
+ZERO_BUOYANCY_MODEL = {"gravity_acceleration": 0.0}
 
 
-def generate_configs() -> list[SimulationConfig]:
-    """Generate all simulation configurations."""
-    configs = []
-    # Varying rel. perm. models at init_s = 0.8 and init_s = 0.9.
-    for init_s in [0.8, 0.9]:
-        for rp_model_name, rp_model in rp_models.items():
-            if rp_model_name == "linear":
-                continue
-            for solver_name, adaptive_error_ratio in solvers_and_ratios:
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                    / "varying_rp"
-                    / f"init_s_{init_s}"  # _ref_fac_{refinement_factors[1]:.2f}"
-                    / rp_model_name
+def generate_viscous_varying_rp_cases(init_s: float) -> list[SimulationConfig]:
+    """Generate simulation configurations for viscous-dominated flow with varying
+    relative permeability models, Brooks-Corey capillary pressure, and prescribed
+    initial saturation.
+
+    """
+    cases = []
+    for rp_model_name, rp_model in rp_models.items():
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="viscous",
+                    study="varying_rp",
+                    case=pathlib.Path(f"init_s_{init_s}") / rp_model_name,
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=init_s,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_model,
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
                 )
-                configs.append(
-                    SimulationConfig(
-                        file_name=rp_model_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        adaptive_error_ratio=adaptive_error_ratio,
-                        refinement_factor=refinement_factors[2],
-                        init_s=init_s,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_model,
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                    )
+            )
+
+    return cases
+
+
+def generate_viscous_varying_ref_factor(init_s: float) -> list[SimulationConfig]:
+    """Generate simulation configurations for viscous-dominated flow with varying
+    grid refinement factor, linear capillary pressure, and prescribed initial
+    saturation.
+
+    """
+    cases = []
+    for ref_factor in refinement_factors:
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir,
+                    regime="viscous",
+                    study="varying_refinement",
+                    case=pathlib.Path(f"init_s_{init_s}") / f"ref_fac_{ref_factor:.2f}",
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=init_s,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
                 )
+            )
 
-    # Varying refinement factors at init_s = 0.8 and init_s = 0.9.
-    for init_s in [0.8, 0.9]:
-        for refinement_factor in refinement_factors:
-            for solver_name, adaptive_error_ratio in solvers_and_ratios:
-                file_name = f"ref_fac_{refinement_factor:.2f}"
-                folder_name = (
-                    results_dir
-                    / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                    / "varying_refinement"
-                    / f"init_s_{init_s}"
-                    / file_name
-                )
-                configs.append(
-                    SimulationConfig(
-                        file_name=file_name,
-                        folder_name=folder_name,
-                        solver_name=solver_name,
-                        adaptive_error_ratio=adaptive_error_ratio,
-                        refinement_factor=refinement_factor,
-                        init_s=init_s,
-                        rp_model_1=rp_models["linear"],
-                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                        cp_model_1=cp_models["None"],
-                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                    )
-                )
-
-    return configs
+    return cases
 
 
-if __name__ == "__main__":
-    configs = generate_configs()
-    for config in configs:
-        run_simulation(config)
-        clean_up_after_simulation(config)
+studies: dict[str, list[SimulationConfig]] = {
+    "viscous_varying_rp_init_s_08": generate_viscous_varying_rp_cases(init_s=0.8),
+    "viscous_varying_rp_init_s_09": generate_viscous_varying_rp_cases(init_s=0.9),
+    "viscous_varying_ref_factor_init_s_08": generate_viscous_varying_ref_factor(
+        init_s=0.8
+    ),
+    "viscous_varying_ref_factor_init_s_09": generate_viscous_varying_ref_factor(
+        init_s=0.9
+    ),
+}
 
 # endregion
+
+if __name__ == "__main__":
+    results_dir.mkdir(exist_ok=True)
+    for study in studies.values():
+        for config in study:
+            run_simulation(config)
+            clean_up_after_simulation(config)
