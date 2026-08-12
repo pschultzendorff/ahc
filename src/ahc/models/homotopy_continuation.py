@@ -1106,7 +1106,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
                 self.compute_nonlinear_increment_norm(reference_increment)
             )
 
-            # Handle edge cases, e.g., in the first step of the pure gravity segretation
+            # Handle edge cases, e.g., in the first step of the pure gravity segratation
             # example.
             if ref_increment_sat_norm == 0.0:
                 logger.warning(

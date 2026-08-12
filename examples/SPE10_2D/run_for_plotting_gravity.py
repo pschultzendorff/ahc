@@ -93,7 +93,7 @@ if __name__ == "__main__":
             buoyancy_constants_1=buoyancy_constants["gravity_on"],
             buoyancy_constants_2=buoyancy_constants["gravity_on"],
             spe10_layer=spe10_layer,
-            spe10_case="gravity_segretation",
+            spe10_case="gravity_segratation",
         )
         run_simulation(
             config, time_manager_params=time_manager_params, iteration_exporting=True

@@ -100,7 +100,7 @@ class SimulationConfig:
     spe10_layer: int = 0
     """SPE10 layer number. Possible values are 0 to 84. Default is 0."""
     spe10_case: str = "five_spot"
-    """SPE10 case name. Possible values are "five_spot" and "gravity_segretation".
+    """SPE10 case name. Possible values are "five_spot" and "gravity_segratation".
     Default is "five_spot". 
 
     """
