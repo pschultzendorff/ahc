@@ -250,6 +250,7 @@ solvers_and_tols: list[tuple[str, float, float]] = [
     ("AHC", 0.1, 0.1),
     ("AHC", 0.01, 0.1),
     ("HC", 0.01, 1e-3),
+    ("HC", 0.01, 1e-5),
     ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]

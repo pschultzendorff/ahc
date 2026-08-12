@@ -44,7 +44,14 @@ import sys
 import warnings
 
 import numpy as np
-from run import cp_models, rp_models, run_simulation, solvers_and_ratios
+from run import (
+    LINEAR_RP_MODEL,
+    ZERO_BUOYANCY_MODEL,
+    ZERO_CP_MODEL,
+    cp_models,
+    rp_models,
+    run_simulation,
+)
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -65,50 +72,58 @@ np.seterr(under="ignore")
 warnings.filterwarnings("default")
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
+results_dir = dirname / "results"
 
 # endregion
 
 
 # region RUN
+solvers_and_tols: list[tuple[str, float, float]] = [
+    ("AHC", 0.1, 0.1),
+    ("AHC", 0.01, 0.1),
+    ("HC", 0.01, 1e-3),
+    ("HC", 0.01, 1e-5),
+    ("Newton", 0.0, 0.1),
+    ("NewtonAppleyard", 0.0, 0.1),
+]
 
 
-def generate_configs() -> list[SimulationConfig]:
-    """Generate all simulation configurations."""
-    results_dir = dirname / "results"
-    results_dir.mkdir(exist_ok=True)
-
-    configs = []
+def generate_cases() -> list[SimulationConfig]:
+    """Generate simulation configurations for all layers and solvers."""
+    cases = []
 
     for spe10_layer in range(85):
-        for solver_name, adaptive_error_ratio in solvers_and_ratios:
-            folder_name = (
-                results_dir
-                / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / f"layer_{spe10_layer:02d}"
-            )
-            configs.append(
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
                 SimulationConfig(
-                    file_name=f"{solver_name}_{adaptive_error_ratio:.3f}",
-                    folder_name=folder_name,
+                    results_dir=results_dir,
+                    regime="viscous",
+                    study="all_layers",
+                    case=f"layer_{spe10_layer:02d}",
                     solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
                     init_s=0.3,
-                    rp_model_1=rp_models["linear"],
+                    rp_model_1=LINEAR_RP_MODEL,
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                    cp_model_1=cp_models["None"],
-                    cp_model_2=cp_models["linear"],
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
                     spe10_layer=spe10_layer,
                 )
             )
 
-    return configs
+    return cases
 
 
 if __name__ == "__main__":
-    configs = generate_configs()
-    for config in configs:
+    results_dir.mkdir(exist_ok=True)
+    study = generate_cases()
+    for config in study:
         run_simulation(config)
-        # Keep only 2 simulations from the upper and lower layers each.
+        # Keep full simulation results for 2 simulations from the upper and lower
+        # layers, respectively.
         if config.spe10_layer not in [10, 20, 50, 65]:
             clean_up_after_simulation(config)
 
