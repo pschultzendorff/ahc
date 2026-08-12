@@ -2,7 +2,7 @@ import logging
 
 from porepy.numerics.nonlinear.nonlinear_solvers import NewtonSolver
 
-from ahc.models.flow_and_transport import TPFSolutionStrategy
+from ahc.models.protocol import TPFProtocol
 
 # ``tqdm`` is not a dependency. Up to the user to install it.
 try:
@@ -30,7 +30,7 @@ class ModifiedNewtonSolver(NewtonSolver):
 
     """
 
-    def solve(self, model: TPFSolutionStrategy) -> tuple[bool, bool]:
+    def solve(self, model: TPFProtocol) -> tuple[bool, bool]:
         """Solve the nonlinear problem.
 
         Parameters:

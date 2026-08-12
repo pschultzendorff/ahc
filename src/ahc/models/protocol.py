@@ -343,14 +343,78 @@ else:
         def assemble_residual(self) -> np.ndarray:
             """Assemble the residual."""
 
-        # def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
-        #     """Method to be called after every non-linear iteration."""
+        def before_nonlinear_loop(self) -> None:
+            """Method to be called before entering the non-linear solver, thus at the start
+            of a new time step.
 
-        # def after_nonlinear_convergence(self) -> None:
-        #     """Method to be called after every non-linear iteration."""
+            Typically defined in
+            :class:`~ahc.models.flow_and_transport.TPFSolutionStrategy`.
 
-        # def after_nonlinear_failure(self) -> None:
-        #     """Method to be called if the non-linear solver fails to converge."""
+            """
+
+        def before_nonlinear_iteration(self) -> None:
+            """Method to be called at the start of every non-linear iteration.
+
+            Typically defined in
+            :class:`~ahc.models.flow_and_transport.TPFSolutionStrategy`.
+
+            """
+
+        def after_nonlinear_iteration(self, nonlinear_increment: np.ndarray) -> None:
+            """Method to be called at the end of every non-linear iteration.
+
+            Typically defined in
+            :class:`~ahc.models.flow_and_transport.TPFSolutionStrategy`.
+
+            Parameters:
+                nonlinear_increment: The increment of the solution from the current
+                    iteration.
+
+            """
+
+        def check_convergence(
+            self,
+            nonlinear_increment: np.ndarray,
+            residual: np.ndarray,
+            reference_increment: np.ndarray,
+            reference_residual: np.ndarray,
+            nl_params: dict[str, Any],
+        ) -> tuple[bool, bool]:
+            """Check convergence of the non-linear solver.
+
+            Typically defined in
+            :class:`~ahc.models.flow_and_transport.TPFSolutionStrategy`.
+
+            Parameters:
+                nonlinear_increment: The increment of the solution from the current
+                    iteration.
+                reference_increment: The increment of the solution from the previous
+                    iteration.
+                residual: The residual of the current iteration.
+                reference_residual: The residual of the previous iteration.
+
+            Returns:
+                A 2-tuple containing:
+                is_converged: True if the solution is converged.
+                is_diverged: True if the solution is diverged.
+
+            """
+
+        def after_nonlinear_convergence(self) -> None:
+            """Method to be called after every non-linear iteration.
+
+            Typically defined in
+            :class:`~ahc.models.flow_and_transport.TPFSolutionStrategy`.
+
+            """
+
+        def after_nonlinear_failure(self) -> None:
+            """Method to be called if the non-linear solver fails to converge.
+
+            Typically defined in
+            :class:`~ahc.models.flow_and_transport.TPFSolutionStrategy`.
+
+            """
 
     class ReconstructionProtocol(TPFProtocol, Protocol):
         postproc_ad_ops: dict[str, pp.ad.Operator]
@@ -542,7 +606,7 @@ else:
         def set_initial_estimators(self) -> None:
             """Initialize time step values for error estimators."""
 
-    class HCProtocol(EstimatesProtocol, Protocol):
+    class HCProtocol(EstimatesProtocol, TPFProtocol, Protocol):
         _rel_perm_constants_1: RelPermConstants
         """Relative permeability constants for the first phase."""
         _rel_perm_constants_2: RelPermConstants

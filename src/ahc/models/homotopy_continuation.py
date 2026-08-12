@@ -217,12 +217,13 @@ class BuoyancyHC(HCProtocol, TPFEquations):
         phase: FluidPhase,
         buoyancy_constants: BuoyancyConstants | None = None,
     ) -> pp.ad.Operator:
-        vector_source_1 = super().vector_source(
+        # Ignore mypy complaining about unsafe call to super() method with trivial body.
+        vector_source_1 = super().vector_source(  # type: ignore[safe-super]
             g,
             phase,
             buoyancy_constants=self._buoyancy_constants_1,
         )
-        vector_source_2 = super().vector_source(
+        vector_source_2 = super().vector_source(  # type: ignore[safe-super]
             g,
             phase,
             buoyancy_constants=self._buoyancy_constants_2,
@@ -1049,6 +1050,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
                     prepare_simulation=prepare_simulation,
                 )
 
+    @typing.override
     def check_convergence(
         self,
         nonlinear_increment: np.ndarray,
@@ -1100,10 +1102,10 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         # Adaptive stopping criterion.
         if not diverged and nl_params["hc_adaptive"]:
             nl_increment_sat_norm, nl_increment_press_norm = (
-                self.compute_nonlinear_increment_norm(nonlinear_increment)
+                self.compute_nonlinear_increment_norm_per_variable(nonlinear_increment)
             )
             ref_increment_sat_norm, ref_increment_press_norm = (
-                self.compute_nonlinear_increment_norm(reference_increment)
+                self.compute_nonlinear_increment_norm_per_variable(reference_increment)
             )
 
             # Handle edge cases, e.g., in the first step of the pure gravity segratation
