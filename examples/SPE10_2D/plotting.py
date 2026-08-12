@@ -95,7 +95,7 @@ if __name__ == "__main__":
                 "viscous_varying_rp_init_s_02"
                 | "viscous_varying_rp_init_s_03"
                 | "buoyancy_varying_rp"
-                | "gravity_separation"
+                | "gravity_segretation"
             ):
                 key_func = _key_varying_rp
                 varying_param_name = "Relative permeability model"

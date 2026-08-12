@@ -224,11 +224,8 @@ def run_simulation(
         }
     )
 
-    try:
-        shutil.rmtree(config.folder_name)
-        config.folder_name.mkdir(parents=True)
-    except Exception:
-        pass
+    shutil.rmtree(config.folder_name, ignore_errors=True)
+    config.folder_name.mkdir(parents=True)
 
     try:
         model = model_class(solver_params)

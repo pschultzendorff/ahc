@@ -121,7 +121,7 @@ class EditableSPE10ParametersMixin(TPFProtocol):
     def initial_condition(self) -> None:
         """Change initial values for pressure and saturation.
 
-        - Gravity separation: The upper half of the domain is fully saturated with the
+        - Gravity segretation: The upper half of the domain is fully saturated with the
           more dense phase (water), lower half is fully saturated with the less dense
           phase (oil).
         - Five-spot setup: The saturation in the full domain is set to
@@ -129,7 +129,7 @@ class EditableSPE10ParametersMixin(TPFProtocol):
 
         """
 
-        if self.params["spe10_case"] == "gravity_separation":
+        if self.params["spe10_case"] == "gravity_segretation":
             initial_pressure = np.full(self.g.num_cells, 0.0)
             height: float = (
                 (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
@@ -156,7 +156,7 @@ class EditableSPE10ParametersMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_separation' and 'five_spot'."
+                + " Supported cases are 'gravity_segretation' and 'five_spot'."
             )
 
         self.equation_system.set_variable_values(
@@ -478,7 +478,7 @@ def generate_viscous_varying_init_s_cases() -> list[SimulationConfig]:
     return cases
 
 
-def generate_gravity_separation_cases() -> list[SimulationConfig]:
+def generate_gravity_segretation_cases() -> list[SimulationConfig]:
     """Generate simulation configurations for pure gravity-driven flow with varying
     water density, the less challenging Brooks-Corey rel. perm. model, and Brooks-Corey
     capillary pressure.
@@ -490,13 +490,13 @@ def generate_gravity_separation_cases() -> list[SimulationConfig]:
             cases.append(
                 SimulationConfig(
                     results_dir=results_dir,
-                    regime="gravity_separation",
+                    regime="gravity_segretation",
                     study="varying_water_density",
                     case=f"water_density_{water_density:.2f}",
                     solver_name=solver_name,
                     hc_tol=hc_tol,
                     nl_tol=nl_tol,
-                    init_s=0.0,  # NOTE This is overwritten for spe10_case="gravity_separation".
+                    init_s=0.0,  # NOTE This is overwritten for spe10_case="gravity_segretation".
                     rp_model_1=LINEAR_RP_MODEL,
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=ZERO_CP_MODEL,
@@ -504,7 +504,7 @@ def generate_gravity_separation_cases() -> list[SimulationConfig]:
                     buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
                     buoyancy_constants_2=buoyancy_models["gravity_on"],
                     spe10_layer=SPE10_LAYER,
-                    spe10_case="gravity_separation",
+                    spe10_case="gravity_segretation",
                     spe10_water_density=water_density,  # kg/m^3
                 )
             )
@@ -714,15 +714,15 @@ def generate_buoyancy_varying_density() -> list[SimulationConfig]:
 
 
 studies: dict[str, list[SimulationConfig]] = {
-    "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
-    "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
-    "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-    "gravity_separation": generate_gravity_separation_cases(),
-    "capillary_varying_rp": generate_capillary_varying_rp(),
-    "capillary_varying_init_s": generate_capillary_varying_init_s(),
-    "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
-    "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
-    "buoyancy_varying_density": generate_buoyancy_varying_density(),
+    # "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
+    # "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
+    # "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
+    "gravity_segretation": generate_gravity_segretation_cases(),
+    # "capillary_varying_rp": generate_capillary_varying_rp(),
+    # "capillary_varying_init_s": generate_capillary_varying_init_s(),
+    # "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
+    # "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
+    # "buoyancy_varying_density": generate_buoyancy_varying_density(),
 }
 
 # endregion

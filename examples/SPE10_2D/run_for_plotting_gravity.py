@@ -69,8 +69,8 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # region RUN
 time_manager_params = {
-    "schedule": np.array([0.0, 300.0 * pp.DAY]),
-    "dt_init": 1.0 * pp.DAY,
+    "schedule": np.array([0.0, 500.0 * pp.DAY]),
+    "dt_init": 2.5 * pp.DAY,
     "constant_dt": True,
 }
 
@@ -86,14 +86,14 @@ if __name__ == "__main__":
             solver_name="NewtonAppleyard",
             adaptive_error_ratio=0.0,  # Disregarded
             init_s=0.3,
-            rp_model_1=rp_models["Brooks-Corey_nb_4"],
-            rp_model_2=rp_models["Brooks-Corey_nb_4"],
-            cp_model_1=cp_models["linear"],
-            cp_model_2=cp_models["linear"],
+            rp_model_1=rp_models["linear"],
+            rp_model_2=rp_models["linear"],
+            cp_model_1=cp_models["None"],
+            cp_model_2=cp_models["None"],
             buoyancy_constants_1=buoyancy_constants["gravity_on"],
             buoyancy_constants_2=buoyancy_constants["gravity_on"],
             spe10_layer=spe10_layer,
-            spe10_case="gravity_separation",
+            spe10_case="gravity_segretation",
         )
         run_simulation(
             config, time_manager_params=time_manager_params, iteration_exporting=True
