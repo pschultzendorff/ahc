@@ -120,13 +120,8 @@ class SimulationConfig:
     r"""Homogenized entry pressure for the SPE11 model. Default is
     :math:`30\,\mathrm{Pa}`."""
 
-    def folder_name(self) -> pathlib.Path:
-        """Create a folder path from metadata and solver parameters.
-
-        Returns:
-            name: Path to the folder for the simulation results.
-
-        """
+    def solver_specs(self) -> str:
+        """Get the solver specifications as a string."""
         postfix_with_underscore = (
             f"_{self.solver_name_postfix}" if self.solver_name_postfix else ""
         )
@@ -134,10 +129,18 @@ class SimulationConfig:
             f"{self.solver_name}{postfix_with_underscore}"
             f"_{self.hc_tol:.3f}_{self.nl_tol:.2e}"
         )
+        return solver_name_with_params
 
+    def folder_name(self) -> pathlib.Path:
+        """Create a folder path from metadata and solver parameters.
+
+        Returns:
+            name: Path to the folder for the simulation results.
+
+        """
         return (
             self.results_dir
-            / solver_name_with_params
+            / self.solver_specs()
             / self.regime
             / self.study
             / self.case
@@ -294,7 +297,8 @@ def setup_porepy_params(
 
 
 def clean_up_after_simulation(config: SimulationConfig) -> None:
-    """Remove large files that are not needed for the analysis.
+    """Delete simulation results not needed for the analysis, i.e., everything but
+        statistic files.
 
     Parameters:
         config: The simulation configuration containing the folder name.
@@ -314,8 +318,11 @@ def clean_up_after_simulation(config: SimulationConfig) -> None:
 
 @dataclass
 class SimulationStatistics:
-    # Type of list element vary depending on the solver type. We do not specify this
-    # here.
+    """Class to store statistics read from a 'solver_statistics.json' file."""
+
+    # IMPLEMENTATION NOTE The type of the list element will vary depending on the solver
+    # type, as the HC solvers have nested lists for the inner loops We do not specify
+    # this here.
     discrete_times: list = field(default_factory=list)
     timestep_nl_iters: list = field(default_factory=list)
 
@@ -332,7 +339,7 @@ class SimulationStatistics:
     num_grid_cells: int = 1
 
 
-def flatten(xx: list[list]) -> list:
+def _flatten_nested_list(xx: list[list]) -> list:
     return [x for sublist in xx for x in sublist]
 
 
@@ -492,143 +499,153 @@ def calc_relative_error(stats: SimulationStatistics) -> dict[str, float]:
 
 
 def plot_nl_iterations(
-    data: dict[str, SimulationStatistics],
+    data: dict[tuple[str, str], SimulationStatistics],
     varying_param_name: str,
     title: str | None = None,
     **kwargs,
 ):
-    """Create a heatmap showing nonlinear iterations for different solvers and parameter values.
+    """Plot a heatmap of nonlinear iterations for different solvers and parameter values
+    from one study.
 
     Parameters:
-        data: Dictionary mapping simulation configurations to simulation statistics.
-        varying_param_name: Name of the parameter that varies between the configurations.
+        data: Dictionary mapping solver specs and varying parameter values (as a tuple
+            of strings) to simulation statistics.
+        varying_param_name: Name of the parameter that varies between the
+            configurations. This will be the title of the x-axis.
         title: Optional title for the plot.
+
     """
-    # Extract solvers and parameter values from case names
-    case_keys = list(data.keys())
-    solvers = sorted(set("\n".join(case_key.split("_")[:2]) for case_key in case_keys))
-    solvers = []
-    for case_key in case_keys:
-        solver_name, adaptive_error_ratio_str, varying_param = case_key.split("_")
-        if solver_name == "HC":
-            solvers.append(solver_name)
-        elif solver_name.startswith("AHC"):
-            solvers.append(
-                f"{solver_name}\n"
-                + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio_str}$"
-                + "\n"
-                # Hardcode adaptive stopping criterion for corrector loop.
-                + r"$\gamma_\mathrm{lin} = 0.1$"
-            )
-        elif solver_name.startswith("Newton"):
-            solvers.append(
-                f"{solver_name}\n"
-                + rf"$\gamma_\mathrm{{lin}} = {adaptive_error_ratio_str}$"
-            )
-    solvers = sorted(set(solvers))
 
-    x_ticks = sorted(
-        set(" ".join(case_key.split("_")[2:]) for case_key in case_keys),
-        key=lambda x: float(x) if x.replace(".", "", 1).isdigit() else x,
+    # Loop through data and transform into an array that stores solver_specs,
+    # parameter_value, and the statistics of interest.
+    data_dtype = np.dtype(
+        [
+            ("solver_specs", "U50"),
+            ("parameter_value", "U50"),
+            ("nl_iterations", "i8"),
+            ("annotation", "U25"),
+            ("converged", "?"),
+            ("final_time", "float32"),
+        ]
     )
+    data_as_array = np.zeros(len(data), dtype=data_dtype)
+    for i, ((solver_specs, parameter_value), stats) in enumerate(data.items()):
+        # Transform the solver specs into annotations. Unique annotations for each
+        # combination of solver name and specs.
+        solver_specs_list: list[str] = solver_specs.split("_")
+        solver_name = solver_specs_list[0]
+        solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 1 else ""
+        match solver_name:
+            case "HC":
+                data_as_array[i]["solver_specs"] = (
+                    f"{solver_name}{solver_name_postfix}\n"
+                    rf"$\beta_{{\min}} = {solver_specs_list[-2]}$\\n"
+                    rf"$\epsilon_\mathrm{{Newton}} = {solver_specs_list[-1]}$"
+                )
+            case "AHC":
+                data_as_array[i]["solver_specs"] = (
+                    f"{solver_name}{solver_name_postfix}\n"
+                    rf"$\gamma_\mathrm{{HC}} = {solver_specs_list[-2]}$\\n"
+                    rf"$\gamma_\mathrm{{lin}} = {solver_specs_list[-1]}$"
+                )
+            case "Newton" | "NewtonAppleyard":
+                data_as_array[i]["solver_specs"] = (
+                    f"{solver_name}{solver_name_postfix}\n"
+                    rf"$\gamma_\mathrm{{lin}} = {solver_specs_list[-1]}$"
+                )
+            case _:
+                raise ValueError(f"Unknown solver: {solver_name}")
 
-    # Transform data to arrays for nl iterations, annotations, and convergence status.
-    nl_iterations = np.empty((len(solvers), len(x_ticks)))
-    annotations = np.empty((len(solvers), len(x_ticks)), dtype="<U25")
-    converged = np.empty((len(solvers), len(x_ticks)), dtype=bool)
-    final_times = np.empty((len(solvers), len(x_ticks)))
+        data_as_array[i]["parameter_value"] = parameter_value
 
-    for case_key, stat in data.items():
-        solver_name, adaptive_error_ratio_str, varying_param = case_key.split("_")
-
-        adaptive_error_ratio = float(adaptive_error_ratio_str)
-
-        if solver_name == "HC":
-            # Standard HC solver does not have an adaptive error ratio.
-            i = solvers.index(solver_name)
-        elif solver_name == "AHC":
-            i = solvers.index(
-                f"{solver_name}\n"
-                + rf"$\gamma_\mathrm{{HC}} = {adaptive_error_ratio}$"
-                + "\n"
-                # Hardcode adaptive stopping criterion for corrector loop.
-                + r"$\gamma_\mathrm{lin} = 0.1$"
-            )
-        elif solver_name.startswith("Newton"):
-            i = solvers.index(
-                f"{solver_name}\n"
-                + rf"$\gamma_\mathrm{{lin}} = {adaptive_error_ratio}$"
-            )
-
-        j = x_ticks.index(varying_param)
-
-        # Do not read statistics if the solver did not converge.
-        converged[i, j] = stat.converged
-        if not stat.converged:
-            final_times[i, j] = stat.final_time
+        # Now, read the stats of the case.
+        data_as_array[i]["converged"] = stats.converged
+        if not stats.converged:
+            data_as_array[i]["final_time"] = stats.final_time
+            # Leave the other statistics empty if the solver did not converge.
             continue
 
-        tot_nl_iters = (
-            sum(stat.timestep_nl_iters)
+        tot_nl_iterations = (
+            sum(stats.timestep_nl_iters)
             if solver_name.startswith("Newton")
-            else sum(flatten(stat.timestep_nl_iters))
+            else sum(_flatten_nested_list(stats.timestep_nl_iters))
         )
-        nl_iterations[i, j] = tot_nl_iters
+        data_as_array[i]["nl_iterations"] = tot_nl_iterations
 
-        # For HC and AHC, show nl iters, hc iters, final beta, and time steps.
-        if solver_name in ["HC", "AHC"]:
-            tot_hc_iters = len(flatten(stat.timestep_nl_iters))
-            final_lambda = stat.lambdas[-1][-1]
-            annotations[i, j] = (
-                f"{tot_nl_iters}/{tot_hc_iters}/{final_lambda:.4f}\n"
-                + f"({len(stat.discrete_times)})"
+        # Create annotations for the heatmap entries.
+        # For HC and AHC, these include #nl_iters, #hc_iters, final beta value, and
+        # #time_steps.
+        if solver_name.endswith("HC"):
+            tot_hc_iters = len(_flatten_nested_list(stats.timestep_nl_iters))
+            final_lambda = stats.lambdas[-1][-1]
+            data_as_array[i]["annotation"] = (
+                f"{tot_nl_iterations}/{tot_hc_iters}/{final_lambda:.4f}\n"
+                + f"({len(stats.discrete_times)})"
             )
-        # For Newton, show only nl iters and time steps.
+        # For Newton, these include only #nl_iters and #time_steps.
         else:
-            annotations[i, j] = f"{tot_nl_iters}\n({len(stat.discrete_times)})"
+            data_as_array[i]["annotation"] = (
+                f"{tot_nl_iterations}\n({len(stats.discrete_times)})"
+            )
 
-    # Create heatmap figure.
+    # Create ticks for x- and y-axes.
+    x_ticks = np.unique(data_as_array["parameter_value"])
+    y_ticks = np.unique(data_as_array["solver_specs"])
+
+    # Sort indices first by solver_specs, then by parameter_value.
+    idx = np.lexsort((data_as_array["solver_specs"], data_as_array["parameter_value"]))
+    # Sort stats in the same way.
+    stats_as_array = data_as_array[:, 2:][idx]
+
+    # Reshape each data column into an array of shape=(len(x_ticks), len(y_ticks)) for
+    # the heatmap.
+    grids = {
+        col: stats_as_array[col].reshape(len(y_ticks), len(x_ticks))
+        for col in stats_as_array.dtype.names
+    }
+
+    # Now, we can finally create the heatmap figure.
     if kwargs.get("extended_figure_height", False):
         fig, ax = plt.subplots(figsize=(8, 5))
     else:
         fig, ax = plt.subplots(figsize=(8, 4))
 
-    # Failed time steps are marked in red.
+    # Number of total nonlinear iterations corresponds to shade of blue. Failed time
+    # steps are marked red.
     cmap = matplotlib.colormaps["Blues"]
     cmap.set_bad(color="red")
 
     sns.heatmap(
-        nl_iterations,
-        mask=np.logical_not(converged),
-        annot=annotations,
+        grids["nl_iterations"],
+        mask=np.logical_not(grids["converged"]),
+        annot=grids["annotation"],
         fmt="s",
         cmap=cmap,
         cbar=True,
         cbar_kws={"label": "Number of cumulative nonlinear iterations"},
         xticklabels=x_ticks,
-        yticklabels=solvers,
+        yticklabels=y_ticks,
         linewidths=0.8,
         ax=ax,
     )
 
-    # Annotate failed simulations
-    for i in range(converged.shape[0]):
-        for j in range(converged.shape[1]):
-            if not converged[i, j]:
-                ax.text(
-                    j + 0.5,
-                    i + 0.5,
-                    r"Reached min. $\Delta t$"
-                    + "\n"
-                    # i and j are switched in the flattened data.
-                    + f"at t={final_times[i, j] / 86400:.1f} d",
-                    ha="center",
-                    va="center",
-                    fontsize=10,
-                    color="black",
-                )
+    # Annotate failed simulations with the final time reached.
+    for i, j in np.argwhere(np.logical_not(grids["converged"])):
+        ax.text(
+            j + 0.5,
+            i + 0.5,
+            (
+                r"Reached min. $\Delta t$\\n"
+                # i and j are switched in the flattened data.
+                f"at t={grids['final_times'][i, j] / 86400:.1f} d"
+            ),
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="black",
+        )
 
-    # Set labels and title
+    # Set labels and title.
     ax.set_xlabel(varying_param_name, fontsize=12, fontweight="bold")
     ax.set_ylabel("Solver & adaptive error ratio", fontsize=12, fontweight="bold")
     ax.set_title(
@@ -641,26 +658,23 @@ def plot_nl_iterations(
 
     if kwargs.get("tight_layout", True):
         fig.tight_layout()
+
+    # Long x-tick labels may be rotated by 45 degrees to fit the figure.
     if kwargs.get("rotate_x_labels", False):
         ax.tick_params(axis="x", labelrotation=45)
-
-    # Ensure rotated x tick labels are not cut off at the bottom.
-    fig.subplots_adjust(
-        bottom=max(
-            0.1,
-            max(
-                (len(label.get_text()) for label in ax.get_xticklabels()),
-                default=0,
+        # Ensure rotated x tick labels are not cut off at the bottom.
+        fig.subplots_adjust(
+            bottom=max(
+                0.1,
+                max(
+                    (len(label.get_text()) for label in ax.get_xticklabels()),
+                    default=0,
+                )
+                * 0.01,
             )
-            * 0.01,
         )
-    )
-    plt.draw()
-    # Use tight_layout with padding to prevent clipping of rotated labels.
-    try:
+        plt.draw()
         fig.tight_layout(pad=1.5)
-    except Exception:
-        pass
 
     return fig
 
@@ -730,9 +744,9 @@ def plot_estimators(
                 )
                 tot_nl_iterations_fine += len(lin_est_i)
 
-            hc_est_flat = flatten(stats.hc_estimator[i])
-            spat_est_flat = flatten(spat_est)
-            temp_est_flat = flatten(temp_est)
+            hc_est_flat = _flatten_nested_list(stats.hc_estimator[i])
+            spat_est_flat = _flatten_nested_list(spat_est)
+            temp_est_flat = _flatten_nested_list(temp_est)
         else:
             ax.plot(
                 range(tot_nl_iterations, tot_nl_iterations + len(lin_est)),
