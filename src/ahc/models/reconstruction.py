@@ -963,7 +963,8 @@ class RecSolutionStrategy(  # type: ignore
 
     @typing.override
     def after_nonlinear_convergence(self) -> None:
-        super().after_nonlinear_convergence()
+        # Ignore mypy complaining about unsafe call to super() method with trivial body.
+        super().after_nonlinear_convergence()  # type: ignore[safe-super]
         # Save time step values for equilibrations. Needed in ``adaptive_newton.py``.
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
             flux_values: np.ndarray = pp.get_solution_values(

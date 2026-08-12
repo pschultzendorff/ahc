@@ -991,11 +991,11 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
             # Nonlinear increment based norm
             nl_increment_sat_norm, nl_increment_press_norm = (
-                self.compute_nonlinear_increment_norm(nonlinear_increment)
+                self.compute_nonlinear_increment_norm_per_variable(nonlinear_increment)
             )
             # Residual based norm
-            residual_flow_norm, residual_transp_norm = self.compute_residual_norm(
-                residual
+            residual_flow_norm, residual_transp_norm = (
+                self.compute_residual_norm_per_equation(residual)
             )
 
             logger.debug(
@@ -1007,10 +1007,10 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             # END COPIED CODE
 
             ref_increment_sat_norm, ref_increment_press_norm = (
-                self.compute_nonlinear_increment_norm(reference_increment)
+                self.compute_nonlinear_increment_norm_per_variable(reference_increment)
             )
             ref_residual_flow_norm, ref_residual_transp_norm = (
-                self.compute_residual_norm(reference_residual)
+                self.compute_residual_norm_per_equation(reference_residual)
             )
 
             # Check convergence requiring all increments and residuals to be either
@@ -1060,7 +1060,9 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         return converged, diverged
 
-    def compute_residual_norm(self, residual: np.ndarray) -> tuple[float, float]:
+    def compute_residual_norm_per_equation(
+        self, residual: np.ndarray
+    ) -> tuple[float, float]:
         """Compute the residual norm for a nonlinear iteration.
 
         Note: This is somewhat brittle at the moment, as the order of the equations in
@@ -1084,7 +1086,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
 
         return residual_flow_norm, residual_transp_norm
 
-    def compute_nonlinear_increment_norm(
+    def compute_nonlinear_increment_norm_per_variable(
         self, nonlinear_increment: np.ndarray
     ) -> tuple[float, float]:
         """Compute the norm based on the update increment for a nonlinear iteration

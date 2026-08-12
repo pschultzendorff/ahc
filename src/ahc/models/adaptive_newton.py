@@ -345,12 +345,12 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
         # Adaptive stopping criterion.
         if not diverged and nl_params["nl_adaptive"]:
             nl_increment_sat_norm, nl_increment_press_norm = (
-                self.compute_nonlinear_increment_norm(  # type: ignore
+                self.compute_nonlinear_increment_norm_per_variable(  # type: ignore
                     nonlinear_increment
                 )
             )
             ref_increment_sat_norm, ref_increment_press_norm = (
-                self.compute_nonlinear_increment_norm(reference_increment)
+                self.compute_nonlinear_increment_norm_per_variable(reference_increment)
             )
 
             # Handle edge cases.

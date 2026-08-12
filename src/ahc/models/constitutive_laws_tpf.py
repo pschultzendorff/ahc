@@ -858,13 +858,15 @@ class Buyoancy(TPFProtocol):
         # BEGIN COPIED CODE
         val = phase.convert_units(buoyancy_constants.gravity_acceleration, "m*s^-2")
         size = g.num_cells
-        gravity = pp.wrap_as_dense_ad_array(val, size=size, name="gravity")
+        gravity_acceleration = pp.wrap_as_dense_ad_array(val, size=size, name="gravity")
 
         # Gravity acts along the last coordinate direction (z in 3d, y in 2d). Ignore
         # type error, can't get mypy to understand keyword-only arguments in mixin.
         e_n = self.e_i([g], i=self.nd - 1, dim=self.nd)
         # e_n is a matrix, thus we need @ for it.
-        gravity = pp.ad.Scalar(-1.0) * (e_n @ (pp.ad.Scalar(phase.density) * gravity))
+        gravity = pp.ad.Scalar(-1.0) * (
+            e_n @ (pp.ad.Scalar(phase.density) * gravity_acceleration)
+        )
         gravity.set_name("gravity_force")
         # END COPIED CODE
 
