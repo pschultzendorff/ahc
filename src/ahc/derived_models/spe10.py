@@ -220,7 +220,7 @@ class SPE10EquationsMixin(TPFProtocol):
         SI Units: m^d/(m^(d-1)*s) -> Depends on the units of the other parameters.
 
         """
-        if self.params["spe10_case"] == "gravity_segratation":
+        if self.params["spe10_case"] == "gravity_segregation":
             source: np.ndarray = np.zeros(self.g.num_cells)
         elif self.params["spe10_case"] == "five_spot":
             source = np.zeros(self.g.num_cells)
@@ -234,7 +234,7 @@ class SPE10EquationsMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segratation' and 'five_spot'."
+                + " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
 
         return source
@@ -254,7 +254,7 @@ class SPE10ModifiedBoundaryMixin(TPFProtocol):
 
     def bc_type(self, g: pp.Grid) -> pp.BoundaryCondition:
         """BC type (Dirichlet or Neumann)."""
-        if self.params["spe10_case"] == "gravity_segratation":
+        if self.params["spe10_case"] == "gravity_segregation":
             domain_sides = self.domain_boundary_sides(g)
             bc = pp.BoundaryCondition(g, domain_sides.north, "dir")
         elif self.params["spe10_case"] == "five_spot":
@@ -269,7 +269,7 @@ class SPE10ModifiedBoundaryMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segratation' and 'five_spot'."
+                + " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
         return bc
 
@@ -277,7 +277,7 @@ class SPE10ModifiedBoundaryMixin(TPFProtocol):
         self, g: pp.Grid, phase: FluidPhase
     ) -> np.ndarray:
         """Dirichlet pressure values."""
-        if self.params["spe10_case"] == "gravity_segratation":
+        if self.params["spe10_case"] == "gravity_segregation":
             bc: np.ndarray = np.zeros(g.num_faces)
         elif self.params["spe10_case"] == "five_spot":
             height: float = (
@@ -292,7 +292,7 @@ class SPE10ModifiedBoundaryMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segratation' and 'five_spot'."
+                + " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
         return bc
 
@@ -396,7 +396,7 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
 
         """
 
-        if self.params["spe10_case"] == "gravity_segratation":
+        if self.params["spe10_case"] == "gravity_segregation":
             initial_pressure = np.full(self.g.num_cells, 0.0)
             height: float = (
                 (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
@@ -419,7 +419,7 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segratation' and 'five_spot'."
+                + " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
 
         self.equation_system.set_variable_values(
@@ -494,7 +494,7 @@ class SPE10ModelGeometryMixin(TPFProtocol):
         - Five spot setup: the production well boundaries.
 
         """
-        if self.params["spe10_case"] == "gravity_segratation":
+        if self.params["spe10_case"] == "gravity_segregation":
             height = (HEIGHT / 2) if self.params["spe10_quarter_domain"] else HEIGHT
             width = WIDTH / 2 if self.params["spe10_quarter_domain"] else WIDTH
             self._fractures = [

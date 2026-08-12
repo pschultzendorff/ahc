@@ -77,16 +77,14 @@ def _key_varying_init_s(
 def _key_varying_cap(
     config: SimulationConfig, stats: SimulationStatistics
 ) -> tuple[str, str]:
-    parameter_value = f"Br.-C. $nb={config.rp_model_2['n_b']}$\n"
-    match config.cp_model_2["model"]:
-        case "Brooks-Corey":
+    parameter_value = f"Br.-C. $nb={config.cp_model_2['n_b']}$\n"
+    match config.rp_model_2["model"]:
+        case "Brooks-Corey-Mualem":
             parameter_value += f"Br.-C. $nb={config.cp_model_2['n_b']}$"
         case "Corey":
-            parameter_value += f"C. $p={config.cp_model_2['power']}$"
+            parameter_value += f"C. $p={config.rp_model_2['power']}$"
         case _:
-            raise ValueError(
-                f"Unknown capillary pressure model: {config.cp_model_2['model']}"
-            )
+            raise ValueError(f"Unknown rel. perm. model: {config.rp_model_2['model']}")
     return config.solver_specs(), parameter_value
 
 
@@ -113,7 +111,7 @@ if __name__ == "__main__":
                 "viscous_varying_rp_init_s_02"
                 | "viscous_varying_rp_init_s_03"
                 | "buoyancy_varying_rp"
-                | "gravity_segratation"
+                | "gravity_segregation"
             ):
                 key_func = _key_varying_rp
                 varying_param_name = "Relative permeability model"

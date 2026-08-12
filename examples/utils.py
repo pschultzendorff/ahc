@@ -100,7 +100,7 @@ class SimulationConfig:
     spe10_layer: int = 0
     """SPE10 layer number. Possible values are 0 to 84. Default is 0."""
     spe10_case: str = "five_spot"
-    """SPE10 case name. Possible values are "five_spot" and "gravity_segratation".
+    """SPE10 case name. Possible values are "five_spot" and "gravity_segregation".
     Default is "five_spot". 
 
     """
@@ -515,15 +515,15 @@ def plot_nl_iterations(
         title: Optional title for the plot.
 
     """
-
     # Loop through data and transform into an array that stores solver_specs,
     # parameter_value, and the statistics of interest.
     data_dtype = np.dtype(
         [
-            ("solver_specs", "U50"),
-            ("parameter_value", "U50"),
+            # Make the strings long enough to avoid any issues.
+            ("solver_specs", "U200"),
+            ("parameter_value", "U100"),
             ("nl_iterations", "i8"),
-            ("annotation", "U25"),
+            ("annotation", "U100"),
             ("converged", "?"),
             ("final_time", "float32"),
         ]
@@ -534,18 +534,20 @@ def plot_nl_iterations(
         # combination of solver name and specs.
         solver_specs_list: list[str] = solver_specs.split("_")
         solver_name = solver_specs_list[0]
-        solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 1 else ""
+        solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 3 else ""
         match solver_name:
             case "HC":
                 data_as_array[i]["solver_specs"] = (
                     f"{solver_name}{solver_name_postfix}\n"
-                    rf"$\beta_{{\min}} = {solver_specs_list[-2]}$\\n"
+                    rf"$\beta_{{\min}} = {solver_specs_list[-2]}$"
+                    "\n"
                     rf"$\epsilon_\mathrm{{Newton}} = {solver_specs_list[-1]}$"
                 )
             case "AHC":
                 data_as_array[i]["solver_specs"] = (
                     f"{solver_name}{solver_name_postfix}\n"
-                    rf"$\gamma_\mathrm{{HC}} = {solver_specs_list[-2]}$\\n"
+                    rf"$\gamma_\mathrm{{HC}} = {solver_specs_list[-2]}$"
+                    "\n"
                     rf"$\gamma_\mathrm{{lin}} = {solver_specs_list[-1]}$"
                 )
             case "Newton" | "NewtonAppleyard":
@@ -593,22 +595,22 @@ def plot_nl_iterations(
     y_ticks = np.unique(data_as_array["solver_specs"])
 
     # Sort indices first by solver_specs, then by parameter_value.
-    idx = np.lexsort((data_as_array["solver_specs"], data_as_array["parameter_value"]))
+    idx = np.lexsort((data_as_array["parameter_value"], data_as_array["solver_specs"]))
     # Sort stats in the same way.
-    stats_as_array = data_as_array[:, 2:][idx]
+    stats_as_array = data_as_array[idx]
 
     # Reshape each data column into an array of shape=(len(x_ticks), len(y_ticks)) for
     # the heatmap.
     grids = {
         col: stats_as_array[col].reshape(len(y_ticks), len(x_ticks))
         for col in stats_as_array.dtype.names
+        if col not in ("solver_specs", "parameter_value")
     }
 
     # Now, we can finally create the heatmap figure.
-    if kwargs.get("extended_figure_height", False):
-        fig, ax = plt.subplots(figsize=(8, 5))
-    else:
-        fig, ax = plt.subplots(figsize=(8, 4))
+    fig_height = len(y_ticks)
+    fig_width = len(x_ticks) * 2
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
     # Number of total nonlinear iterations corresponds to shade of blue. Failed time
     # steps are marked red.
@@ -622,7 +624,11 @@ def plot_nl_iterations(
         fmt="s",
         cmap=cmap,
         cbar=True,
-        cbar_kws={"label": "Number of cumulative nonlinear iterations"},
+        # Keep colorbar width approximately constant independent of height of figure.
+        cbar_kws={
+            "label": "Number of cumulative nonlinear iterations",
+            "aspect": fig_height / fig_width * 20 / (8 / 5),
+        },
         xticklabels=x_ticks,
         yticklabels=y_ticks,
         linewidths=0.8,
