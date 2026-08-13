@@ -105,5 +105,9 @@ heterogeneous porous media,” *Journal of Computational Physics*, vol. 253, pp.
 Generative AI (GitHub Copilot in VS Code, ChatGPT, and Microsoft Copilot) was used to
 create scripted figures with `Matplotlib`.
 
+While working on the revised paper, Microsoft Copilot with GPT 5.5 quick answer(?)
+and GPT 5.6 thinking deep (?) helped with refactoring the runscripts, mostly by
+suggesting some neat ``numpy`` tricks to replace heavy `for`-loops.
+
 ## TODO 
 Fix some of the tests
