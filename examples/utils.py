@@ -641,9 +641,8 @@ def plot_nl_iterations(
             j + 0.5,
             i + 0.5,
             (
-                r"Reached min. $\Delta t$\\n"
-                # i and j are switched in the flattened data.
-                f"at t={grids['final_times'][i, j] / 86400:.1f} d"
+                r"Reached min. $\Delta t$"
+                f"\nat t={grids['final_time'][i, j] / 86400:.1f} d"
             ),
             ha="center",
             va="center",

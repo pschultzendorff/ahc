@@ -101,10 +101,7 @@ def model_with_gravity() -> TwoPhaseFlowModifiedSetupGravity:
 
 
 def residual_saturation(phase_name: str) -> float:
-    if phase_name == WETTING:
-        return 0.1
-    elif phase_name == NONWETTING:
-        return 0.1
+    return 0.1
 
 
 @pytest.fixture

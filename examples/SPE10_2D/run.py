@@ -718,7 +718,7 @@ studies: dict[str, list[SimulationConfig]] = {
     "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
     "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
     "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-    # "gravity_segregation": generate_gravity_segregation_cases(),
+    "gravity_segregation": generate_gravity_segregation_cases(),
     "capillary_varying_rp": generate_capillary_varying_rp(),
     "capillary_varying_init_s": generate_capillary_varying_init_s(),
     "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
