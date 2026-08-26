@@ -239,6 +239,8 @@ class SolverStatisticsANewton(SolverStatisticsRec):
     """List of temporal discretization error estimates for each non-linear iteration."""
     lin_est: list[float] = field(default_factory=list)
     """List of linearization error estimates for each non-linear iteration."""
+    global_energy_norm: list[float] = field(default_factory=list)
+    """List of global energy norms for each non-linear iteration."""
 
     @typing.override
     def log_error(
@@ -247,12 +249,18 @@ class SolverStatisticsANewton(SolverStatisticsRec):
         residual_norm: tuple[float, float] | None = None,
         **kwargs,
     ) -> None:
-        if "spatial_est" in kwargs and "temp_est" in kwargs and "lin_est" in kwargs:
+        if (
+            "spatial_est" in kwargs
+            and "temp_est" in kwargs
+            and "lin_est" in kwargs
+            and "global_energy_norm" in kwargs
+        ):
             self.spatial_est.append(kwargs["spatial_est"])
             self.temp_est.append(
                 kwargs["temp_est"],
             )
             self.lin_est.append(kwargs["lin_est"])
+            self.global_energy_norm.append(kwargs["global_energy_norm"])
         else:
             super().log_error(nonlinear_increment_norm, residual_norm, **kwargs)
 
@@ -263,6 +271,7 @@ class SolverStatisticsANewton(SolverStatisticsRec):
         self.spatial_est.clear()
         self.temp_est.clear()
         self.lin_est.clear()
+        self.global_energy_norm.clear()
 
     @typing.override
     def save(self) -> None:
@@ -287,6 +296,7 @@ class SolverStatisticsANewton(SolverStatisticsRec):
                     "spatial_est": self.spatial_est,
                     "temp_est": self.temp_est,
                     "lin_est": self.lin_est,
+                    "global_energy_norm": self.global_energy_norm,
                 }
             )
 
@@ -475,10 +485,10 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                     "nl_increment_press_norms": nipn,
                     "residual_flow_norms": rfn,
                     "residual_transp_norms": rtn,
-                    "spatial_error_estimates": se,
-                    "temporal_error_estimates": te,
-                    "hc_error_estimates": hce,
-                    "linearization_error_estimates": le,
+                    "spatial_est": se,
+                    "temp_est": te,
+                    "hc_est": hce,
+                    "lin_est": le,
                     "global_energy_norm": gen,
                     "equilibrated_flux_mismatch": efm,
                 }
