@@ -98,45 +98,7 @@ class HCSolver:
             # If the solver was requested to generate a reference solution, set HC
             # parameter to zero and solve target problem with tight Newton tolerance.
             if self.reference_solution:
-                if model.hc_is_converged:
-                    model.nonlinear_solver_statistics.hc_lambda_fl = 0.0
-                    model.nonlinear_solver_statistics.hc_lambda_ad.set_value(
-                        model.nonlinear_solver_statistics.hc_lambda_fl
-                    )
-                    # Set Newton parameters to ensure best possible chance of
-                    # non-adaptive convergence for the target problem.
-                    best_newton_params = self.params.copy()
-                    best_newton_params.update(
-                        {
-                            # Adaptive stopping criteria for Newton:
-                            "nl_adaptive": False,
-                            # Non-adaptive stopping parameters and other solver parameters:
-                            "nl_convergence_tol_abs": 1e-3,
-                            "nl_convergence_tol_rel": 1e-3,
-                            "nl_divergence_tol": 1e30,
-                            "nl_appleyard_chopping": True,
-                            "nl_physical_damping": True,
-                            "max_iterations": 100,
-                        }
-                    )
-                    best_newton_solver = ModifiedNewtonSolver(best_newton_params)
-                    model.before_hc_iteration()
-                    nl_is_converged, _ = best_newton_solver.solve(model)
-                    model.after_hc_iteration()
-
-                    if nl_is_converged:
-                        model.after_hc_convergence()
-                    else:
-                        raise RuntimeError(
-                            "Cannot generate reference solution, since Newton did not"
-                            " converge at lambda=0.0."
-                        )
-                else:
-                    raise RuntimeError(
-                        "Cannot generate reference solution, since the HC got stuck in"
-                        "a non-converged state."
-                    )
-
+                self.solve_for_reference_solution(model)
             else:
                 if model.hc_is_converged:
                     model.after_hc_convergence()
@@ -145,3 +107,54 @@ class HCSolver:
 
         hc_progressbar.close()
         return model.hc_is_converged, model.hc_is_diverged
+
+    def solve_for_reference_solution(self, model: HCProtocol) -> None:
+        r"""Solve the nonlinear problem for a reference solution at :math:`\lambda=0` and
+        tight non-adaptive Newton tolerances.
+
+        This method is intended to be run after the HC algorithm has converged to a
+        solution at some :math:`\lambda>0`. It then sets the HC parameter to zero and
+        solves the target problem.
+
+        Parameters:
+            model: The model instance specifying the problem to be solved.
+
+        """
+        if model.hc_is_converged:
+            model.nonlinear_solver_statistics.hc_lambda_fl = 0.0
+            model.nonlinear_solver_statistics.hc_lambda_ad.set_value(
+                model.nonlinear_solver_statistics.hc_lambda_fl
+            )
+            # Set Newton parameters to ensure best possible chance of
+            # non-adaptive convergence for the target problem.
+            best_newton_params = self.params.copy()
+            best_newton_params.update(
+                {
+                    # Adaptive stopping criteria for Newton:
+                    "nl_adaptive": False,
+                    # Non-adaptive stopping parameters and other solver parameters:
+                    "nl_convergence_tol_abs": 1e-5,
+                    "nl_convergence_tol_rel": 1e-5,
+                    "nl_divergence_tol": 1e30,
+                    "nl_appleyard_chopping": True,
+                    "nl_physical_damping": True,
+                    "max_iterations": 100,
+                }
+            )
+            best_newton_solver = ModifiedNewtonSolver(best_newton_params)
+            model.before_hc_iteration()
+            nl_is_converged, _ = best_newton_solver.solve(model)
+            model.after_hc_iteration()
+
+            if nl_is_converged:
+                model.after_hc_convergence()
+            else:
+                raise RuntimeError(
+                    "Cannot generate reference solution, since Newton did not"
+                    " converge at lambda=0.0."
+                )
+        else:
+            raise RuntimeError(
+                "Cannot generate reference solution, since the HC got stuck in"
+                "a non-converged state."
+            )
