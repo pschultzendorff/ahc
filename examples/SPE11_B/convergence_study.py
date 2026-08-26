@@ -154,8 +154,13 @@ if __name__ == "__main__":
         run_simulation(
             config,
             time_manager_params=time_manager_params,
-            extrapolate_temp_estimator_after_cutting=False,
+            # Important to disable extrapolate_temp_estimator_after_cutting by setting
+            # the exponent to 0.0 for the convergence study, as we want to see the
+            # effect of time step cutting on the estimators.
+            additional_solver_params={"extrapolate_temp_estimator_after_cutting": 0.0},
         )
+        # FIXME Run with different values for the exponent!!!!!!
+
         clean_up_after_simulation(config)
 
     fig_dir = dirname / "figures"

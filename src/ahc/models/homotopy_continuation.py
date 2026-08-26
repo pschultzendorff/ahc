@@ -495,17 +495,17 @@ class EstimatesHCMixin(HCProtocol):
         # Sum estimators for both fluxes.
         est: float = sum(estimators) ** (1 / 2)
 
-        # If an interpolated temporal estimator is used, project the temporal estimator
-        # onto the original time step length (before cutting). The temporal convergence
-        # is assumed to be sublinear in the time step length.
-        if self.params.get("extrapolate_temp_estimator_after_cutting", False):
-            if self.original_dt is not None:
-                scaling = (self.original_dt / self.time_manager.dt) ** (0.75)
-                est *= scaling
-                logger.info(
-                    "Projected temporal estimator onto original time step length"
-                    + f" with scaling factor {scaling:.2f}."
-                )
+        # Project the temporal estimator onto the original time step length when time
+        # step cutting to avoid strengthening the adaptive criteria. The default
+        # exponent value of 0.0 results in no scaling.
+        if self.original_dt is not None:
+            exponent = self.params.get("extrapolate_temp_estimator_after_cutting", 0.0)
+            scaling = (self.original_dt / self.time_manager.dt) ** exponent
+            est *= scaling
+            logger.info(
+                "Projected temporal estimator onto original time step length"
+                + f" with scaling factor {scaling:.2f}."
+            )
 
         logger.info(f"Global temporal discretization error estimator: {est}")
         return est
@@ -691,10 +691,12 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         """Reset HC parameter and residuals."""
         # Reset ``self.original_dt`` if ``self.original_time + self.original_dt`` has
         # been reached.
-        if self.original_dt is not None:
-            if self.time_manager.time >= self.original_time + self.original_dt:
-                self.original_dt = None
-                self.original_time = self.time_manager.time
+        if (
+            self.original_dt is not None
+            and self.time_manager.time >= self.original_time + self.original_dt
+        ):
+            self.original_dt = None
+            self.original_time = self.time_manager.time
 
         # Reset lambda and decay.
         self.nonlinear_solver_statistics.hc_reset()

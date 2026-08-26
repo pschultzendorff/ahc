@@ -30,6 +30,7 @@ Model description:
 
 """
 
+import copy
 import logging
 import os
 import pathlib
@@ -44,6 +45,7 @@ from ahc.derived_models.spe11 import SPE11Mixin, case_B
 from ahc.models.adaptive_newton import TwoPhaseFlowANewton
 from ahc.models.homotopy_continuation import TwoPhaseFlowHC
 from ahc.models.protocol import TPFProtocol
+from ahc.viz.iteration_exporting import IterationExportingMixin
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -148,22 +150,35 @@ default_time_manager_params = {
 }
 
 
-def setup_porepy_model(solver: str) -> type[SPE11HC] | type[SPE11Newton]:
+def setup_porepy_model(
+    config: SimulationConfig, **kwargs
+) -> type[SPE11HC] | type[SPE11Newton]:
     """Return a model class based on the solver name.
 
     Parameters:
-        solver: The name of the solver ("AHC", "HC", "Newton", or "NewtonAppleyard").
+        config: The simulation configuration specifying the solver type.
+        **kwargs: Additional keyword arguments. Currently, only ``iteration_exporting``
+            is supported, which adds the ``IterationExportingMixin`` to the model class.
 
     Returns:
         The model class with the correct adaptive solver.
 
     """
-    if solver in ["HC", "AHC"]:
-        return SPE11HC
-    elif solver in ["Newton", "NewtonAppleyard"]:
-        return SPE11Newton
+    if config.solver_name in ["HC", "AHC"]:
+        model_class = SPE11HC
+    elif config.solver_name in ["Newton", "NewtonAppleyard"]:
+        model_class = SPE11Newton
     else:
-        raise ValueError(f"Unknown solver: {solver}")
+        raise ValueError(f"Unknown solver: {config.solver_name}")
+
+    if kwargs.get("iteration_exporting", False):
+        model_class = type(
+            f"{model_class.__name__}WithIterationExporting",
+            (IterationExportingMixin, model_class),
+            {},
+        )
+
+    return model_class
 
 
 def run_simulation(
@@ -184,16 +199,28 @@ def run_simulation(
         f"CP model: {config.cp_model_2}."
     )
 
-    model_class = setup_porepy_model(config.solver_name)
-    updated_solver_params, updated_time_manager_params = setup_porepy_params(
-        config, **kwargs
-    )
+    model_kwargs = kwargs.get("model_kwargs", {})
+    # This triple parameter dict construction is ugly, but we avoid adding every
+    # parameter we ever want to change to SimulationConfig or setup_porepy_params.
+    additional_solver_params = kwargs.get("additional_solver_params", {})
+    additional_time_manager_params = kwargs.get("additional_time_manager_params", {})
 
-    # Build params dictionaries.
+    model_class = setup_porepy_model(config, **model_kwargs)
+    updated_solver_params, updated_time_manager_params = setup_porepy_params(config)
+
+    # Build porepy params dictionaries.
     if solver_params is None:
-        solver_params = default_solver_params | updated_solver_params
+        solver_params = (
+            copy.deepcopy(default_solver_params)
+            | updated_solver_params
+            | additional_solver_params
+        )
     if time_manager_params is None:
-        time_manager_params = default_time_manager_params | updated_time_manager_params
+        time_manager_params = (
+            copy.deepcopy(default_time_manager_params)
+            | updated_time_manager_params
+            | additional_time_manager_params
+        )
 
     # Newton and Appleyard Newton require only one of each constitutive law.
     if config.solver_name.startswith("Newton"):
@@ -210,7 +237,8 @@ def run_simulation(
         }
 
     folder_name = config.folder_name()
-    solver_params.update(
+    # solver_params is not None at this point. Ignore pylance complaining.
+    solver_params.update(  # type: ignore
         {
             # Meshing and model:
             "meshing_arguments": {"spe11_refinement_factor": config.refinement_factor},
@@ -224,7 +252,9 @@ def run_simulation(
             if isinstance(config.case, pathlib.Path)
             else config.case,
             "solver_statistics_file_name": folder_name / "solver_statistics.json",
-            "time_manager": pp.TimeManager(**time_manager_params),
+            # All required parameters for TimeManager are included, ignore pylance
+            # complaining.
+            "time_manager": pp.TimeManager(**time_manager_params),  # type: ignore
         }
     )
 
@@ -235,8 +265,11 @@ def run_simulation(
     try:
         model = model_class(solver_params)
         pp.run_time_dependent_model(model=model, params=solver_params)
-    except Exception as e:
-        logger.error(f"Run failed with error: {e}.")
+
+    # It is okay to catch general exceptions, because we recognize failed
+    # simulations in plotting.py.
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Run failed with exception: {e}.")
 
     # Save number of grid cells to a file.
     with (folder_name / "num_grid_cells.txt").open("w") as f:

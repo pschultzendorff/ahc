@@ -206,14 +206,12 @@ class ErrorEstimateANewtonMixin(AdaptiveNewtonProtocol):
         # Sum estimators for both equations.
         est: float = sum(estimators) ** (1 / 2)
 
-        # If an interpolated temporal estimator is used, project the temporal estimator
-        # onto the original time step length (before cutting). The temporal convergence
-        # is assumed to be sublinear in the time step length.
-        if (
-            self.params.get("extrapolate_temp_estimator_after_cutting", False)
-            and self.original_dt is not None
-        ):
-            scaling = (self.original_dt / self.time_manager.dt) ** (0.75)
+        # Project the temporal estimator onto the original time step length when time
+        # step cutting to avoid strengthening the adaptive criteria. The default
+        # exponent value of 0.0 results in no scaling.
+        if self.original_dt is not None:
+            exponent = self.params.get("extrapolate_temp_estimator_after_cutting", 0.0)
+            scaling = (self.original_dt / self.time_manager.dt) ** exponent
             est *= scaling
             logger.info(
                 "Projected temporal estimator onto original time step length"
@@ -298,10 +296,12 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
 
         # Reset ``self.original_dt`` if ``self.original_time + self.original_dt`` has
         # been reached.
-        if self.original_dt is not None:
-            if self.time_manager.time >= self.original_time + self.original_dt:
-                self.original_dt = None
-                self.original_time = self.time_manager.time
+        if (
+            self.original_dt is not None
+            and self.time_manager.time >= self.original_time + self.original_dt
+        ):
+            self.original_dt = None
+            self.original_time = self.time_manager.time
 
     def check_convergence(
         self,
@@ -340,6 +340,7 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
             spatial_est=spatial_est,
             temp_est=temp_est,
             lin_est=lin_est,
+            global_energy_norm=self.global_energy_norm(),
         )
 
         # Adaptive stopping criterion.

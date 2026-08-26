@@ -54,6 +54,7 @@ import pathlib
 import shutil
 import sys
 import warnings
+from typing import Any
 
 import numpy as np
 import porepy as pp
@@ -285,17 +286,27 @@ def run_simulation(
         f"Buoyancy: {config.buoyancy_constants_2}"
     )
 
-    model_class = setup_porepy_model(config, **kwargs)
-    updated_solver_params, updated_time_manager_params = setup_porepy_params(
-        config, **kwargs
-    )
+    model_kwargs = kwargs.get("model_kwargs", {})
+    # This triple parameter dict construction is ugly, but we avoid adding every
+    # parameter we ever want to change to SimulationConfig or setup_porepy_params.
+    additional_solver_params = kwargs.get("additional_solver_params", {})
+    additional_time_manager_params = kwargs.get("additional_time_manager_params", {})
+
+    model_class = setup_porepy_model(config, **model_kwargs)
+    updated_solver_params, updated_time_manager_params = setup_porepy_params(config)
 
     # Build porepy params dictionaries.
     if solver_params is None:
-        solver_params = copy.deepcopy(default_solver_params) | updated_solver_params
+        solver_params = (
+            copy.deepcopy(default_solver_params)
+            | updated_solver_params
+            | additional_solver_params
+        )
     if time_manager_params is None:
         time_manager_params = (
-            copy.deepcopy(default_time_manager_params) | updated_time_manager_params
+            copy.deepcopy(default_time_manager_params)
+            | updated_time_manager_params
+            | additional_time_manager_params
         )
 
     # Newton and Appleyard Newton require only one of each constitutive law.
@@ -318,7 +329,8 @@ def run_simulation(
         }
 
     folder_name = config.folder_name()
-    solver_params.update(
+    # solver_params is not None at this point. Ignore pylance complaining.
+    solver_params.update(  # type: ignore
         {
             "meshing_arguments": {"cell_size": config.cell_size},
             "rel_perm_constants": rel_perm_constants,
@@ -333,7 +345,9 @@ def run_simulation(
             if isinstance(config.case, pathlib.Path)
             else config.case,
             "solver_statistics_file_name": folder_name / "solver_statistics.json",
-            "time_manager": pp.TimeManager(**time_manager_params),
+            # All required parameters for TimeManager are included, ignore pylance
+            # complaining.
+            "time_manager": pp.TimeManager(**time_manager_params),  # type: ignore
         }
     )
 
@@ -344,9 +358,11 @@ def run_simulation(
     try:
         model = model_class(solver_params)
         pp.run_time_dependent_model(model=model, params=solver_params)
-    except Exception as e:
-        logger.error(f"Run failed with error: {e}.")
-        # raise e
+
+    # It is okay to catch general exceptions, because we recognize failed
+    # simulations in plotting.py.
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Run failed with exception: {e}.")
 
     # Save number of grid cells to a file.
     with (folder_name / "num_grid_cells.txt").open("w") as f:
@@ -714,23 +730,32 @@ def generate_buoyancy_varying_density() -> list[SimulationConfig]:
     return cases
 
 
-studies: dict[str, list[SimulationConfig]] = {
-    "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
-    "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
-    "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-    "gravity_segregation": generate_gravity_segregation_cases(),
-    "capillary_varying_rp": generate_capillary_varying_rp(),
-    "capillary_varying_init_s": generate_capillary_varying_init_s(),
-    "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
-    "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
-    "buoyancy_varying_density": generate_buoyancy_varying_density(),
+studies: dict[str, tuple[list[SimulationConfig], dict[str, Any]]] = {
+    # "viscous_varying_rp_init_s_02": (generate_viscous_varying_rp_cases(init_s=0.2),
+    # {}),
+    # FIXME This doesn't work like this. Gets saved to the same folder as the one above.
+    "viscous_varying_rp_init_s_02_spat_est_on": (
+        generate_viscous_varying_rp_cases(init_s=0.2),
+        {"additional_solver_params": {"disable_spatial_est": False}},
+    ),
+    # "viscous_varying_rp_init_s_03": (generate_viscous_varying_rp_cases(init_s=0.3), {}),
+    # "viscous_varying_init_s": (generate_viscous_varying_init_s_cases(), {}),
+    # "gravity_segregation": (generate_gravity_segregation_cases(), {}),
+    # "capillary_varying_rp": (generate_capillary_varying_rp(), {}),
+    # "capillary_varying_init_s": (generate_capillary_varying_init_s(), {}),
+    # "capillary_varying_entry_pressure": (
+    #     generate_capillary_varying_entry_pressure(),
+    #     {},
+    # ),
+    # "buoyancy_varying_rp": (generate_buoyancy_varying_rp(), {}),
+    # "buoyancy_varying_density": (generate_buoyancy_varying_density(), {}),
 }
 
 # endregion
 
 if __name__ == "__main__":
     results_dir.mkdir(exist_ok=True)
-    for study in studies.values():
+    for study, kwargs in studies.values():
         for config in study:
-            run_simulation(config)
+            run_simulation(config, **kwargs)
             clean_up_after_simulation(config)

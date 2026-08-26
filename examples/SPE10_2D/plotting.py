@@ -104,11 +104,12 @@ if __name__ == "__main__":
     fig_dir = dirname / "figures"
     fig_dir.mkdir(exist_ok=True)
 
-    for study_name, study in studies.items():
+    for study_name, (study, _) in studies.items():
         kwargs = {}
         match study_name:
             case (
                 "viscous_varying_rp_init_s_02"
+                | "viscous_varying_rp_init_s_02_spat_est_on"
                 | "viscous_varying_rp_init_s_03"
                 | "buoyancy_varying_rp"
             ):

@@ -148,7 +148,7 @@ class SimulationConfig:
 
 
 def setup_porepy_params(
-    config: SimulationConfig, **kwargs
+    config: SimulationConfig,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     r"""Setup solver and time manager parameters in PorePy format.
 
@@ -158,8 +158,6 @@ def setup_porepy_params(
     Parameters:
         config: The simulation configuration specifying nonlinear solver type and
             tolerances.
-        kwargs: Additional keyword arguments, e.g., for extrapolation time error
-            estimator after time step cutting.
 
     Returns:
         A tuple ``(solver_params, time_manager_params)``, where ``solver_params``
@@ -218,9 +216,11 @@ def setup_porepy_params(
                 "hc_error_ratio": hc_tol,  # Adaptive error ratio for outer loop.
                 "nl_error_ratio": nl_tol,  # Adaptive error ratio for inner loop.
                 "adaptive_threshold_rel": 1e2,
-                "extrapolate_temp_estimator_after_cutting": kwargs.get(
-                    "extrapolate_temp_estimator_after_cutting", True
-                ),
+                # When cutting time steps, project the temporal estimator onto the
+                # original time step length. This avoids strengthening the adaptive
+                # criteria. The temporal convergence is assumed to be sublinear in the
+                # time step length.
+                "extrapolate_temp_estimator_after_cutting": 0.75,
                 # Non-adaptive stopping and other Newton solver parameters:
                 "nl_convergence_tol_abs": 1e-5,
                 "nl_convergence_tol_rel": 1e-5,
@@ -238,9 +238,11 @@ def setup_porepy_params(
                 "nl_adaptive": True,
                 "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
                 "adaptive_threshold_rel": 1e2,
-                "extrapolate_temp_estimator_after_cutting": kwargs.get(
-                    "extrapolate_temp_estimator_after_cutting", True
-                ),
+                # When cutting time steps, project the temporal estimator onto the
+                # original time step length. This avoids strengthening the adaptive
+                # criteria. The temporal convergence is assumed to be sublinear in the
+                # time step length.
+                "extrapolate_temp_estimator_after_cutting": 0.75,
                 # Non-adaptive stopping parameters and other solver parameters:
                 "nl_convergence_tol_abs": 1e-5,
                 "nl_convergence_tol_rel": 1e-5,
@@ -257,9 +259,11 @@ def setup_porepy_params(
                 "nl_adaptive": True,
                 "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
                 "adaptive_threshold_rel": 1e2,
-                "extrapolate_temp_estimator_after_cutting": kwargs.get(
-                    "extrapolate_temp_estimator_after_cutting", True
-                ),
+                # When cutting time steps, project the temporal estimator onto the
+                # original time step length. This avoids strengthening the adaptive
+                # criteria. The temporal convergence is assumed to be sublinear in the
+                # time step length.
+                "extrapolate_temp_estimator_after_cutting": 0.75,
                 # Non-adaptive stopping parameters and other solver parameters:
                 "nl_convergence_tol_abs": 1e-5,
                 "nl_convergence_tol_rel": 1e-5,
@@ -359,10 +363,10 @@ def _parse_hc_steps(
     hc_steps = list(time_step.values())[:-5]
 
     num_nl_iterations = [s["num_iteration"] for s in hc_steps]
-    spat_estimator = [s["spatial_error_estimates"] for s in hc_steps]
-    temp_estimator = [s["temporal_error_estimates"] for s in hc_steps]
-    hc_estimator = [s["hc_error_estimates"] for s in hc_steps]
-    lin_estimator = [s["linearization_error_estimates"] for s in hc_steps]
+    spat_estimator = [s["spatial_est"] for s in hc_steps]
+    temp_estimator = [s["temp_est"] for s in hc_steps]
+    hc_estimator = [s["hc_est"] for s in hc_steps]
+    lin_estimator = [s["lin_est"] for s in hc_steps]
     energy_norm = [s["global_energy_norm"] for s in hc_steps]
 
     return (
@@ -603,7 +607,8 @@ def plot_nl_iterations(
     # the heatmap.
     grids = {
         col: stats_as_array[col].reshape(len(y_ticks), len(x_ticks))
-        for col in stats_as_array.dtype.names
+        # stats_as_array.dtype.names will not be None. Ignore pylance.
+        for col in stats_as_array.dtype.names  # type: ignore
         if col not in ("solver_specs", "parameter_value")
     }
 
@@ -629,8 +634,9 @@ def plot_nl_iterations(
             "label": "Number of cumulative nonlinear iterations",
             "aspect": fig_height / fig_width * 20 / (8 / 5),
         },
-        xticklabels=x_ticks,
-        yticklabels=y_ticks,
+        # It's okay to use numpy arrays here. Ignore pylance.
+        xticklabels=x_ticks,  # type: ignore
+        yticklabels=y_ticks,  # type: ignore
         linewidths=0.8,
         ax=ax,
     )
