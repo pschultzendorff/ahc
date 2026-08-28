@@ -240,12 +240,12 @@ def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
 
         # Add all squares as physical surfaces.
         surface_lines[26] = (
-            'Physical Surface("Facies 5", 5) = {2, 3, 4, 5, 6, '
+            "Physical Surface(Facies 5', 5) = {2, 3, 4, 5, 6, "
             + ", ".join([f"{400 + i * 100 + 22}" for i in range(NUM_SQUARES)])
             + "};\n"
         )
         surface_lines[54] = (
-            'Physical Surface("Facies 4", 4) = {10, 11, 12, 13, 14, 15, 22, '
+            "Physical Surface(Facies 4', 4) = {10, 11, 12, 13, 14, 15, 22, "
             + ", ".join([f"{400 + i * 100 + 23}" for i in range(NUM_SQUARES)])
             + "};\n"
         )
@@ -437,13 +437,13 @@ def load_spe11_data(
     if read_refinement_factor(geo_file) != refinement_factor:
         logger.info(
             "Refinement factor in the .geo file is wrong. Adjusting and"
-            + " recomputing mesh ..."
+            " recomputing mesh ..."
         )
         write_refinement_factor(geo_file, refinement_factor)
 
     logger.warning(
         "Well positions may be wrong if the files were downloaded previously and you"
-        + " switch between cases. Delete all .geo files and rerun. "
+        " switch between cases. Delete all .geo files and rerun. "
     )
 
     # The well positions always gets written to the case A geo file.
@@ -454,7 +454,7 @@ def load_spe11_data(
         if len(lines) != 823:
             logger.info(
                 "Well positions not included in the .geo file. Adjusting and"
-                + " recomputing mesh ..."
+                " recomputing mesh ..."
             )
             write_well_positions(data_dir / GEO_FILE_CASE_A, case)
 
@@ -747,7 +747,7 @@ class SPE11SolutionStrategyMixin(SPE11Protocol, TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE11 case {self.spe11_case}. "
-                + "Please choose either 'A' or 'B'."
+                "Please choose either 'A' or 'B'."
             )
 
         # Ignore mypy. When mixed in with a concrete class, super().__init__ takes

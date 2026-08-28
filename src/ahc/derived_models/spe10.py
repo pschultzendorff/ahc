@@ -104,7 +104,7 @@ def download_spe10_data(
     if perm_file is None or poro_file is None:
         raise FileNotFoundError(
             "Could not locate permeability or porosity data files in the downloaded"
-            + " contents."
+            " contents."
         )
 
     # Clean up.
@@ -139,7 +139,7 @@ def load_spe10_data(data_dir: pathlib.Path) -> tuple[np.ndarray, np.ndarray]:
             if i >= 1:
                 raise FileNotFoundError(
                     "Permeability and porosity data files not found. Perhaps, they were"
-                    + " not downloaded correctly."
+                    " not downloaded correctly."
                 )
             logger.info(
                 "Permeability and porosity data files not found. Downloading..."
@@ -234,7 +234,7 @@ class SPE10EquationsMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segregation' and 'five_spot'."
+                " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
 
         return source
@@ -269,7 +269,7 @@ class SPE10ModifiedBoundaryMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segregation' and 'five_spot'."
+                " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
         return bc
 
@@ -292,7 +292,7 @@ class SPE10ModifiedBoundaryMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segregation' and 'five_spot'."
+                " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
         return bc
 
@@ -342,7 +342,7 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
         if cell_size > 20 * FEET:
             raise NotImplementedError(
                 "The cell size is larger than the SPE10 model cell size. "
-                + "This is not supported yet."
+                "This is not supported yet."
             )
         layer: int = self.params.get("spe10_layer", 1) - 1
         isotropic_perm: bool = self.params.get("spe10_isotropic_perm", True)
@@ -419,7 +419,7 @@ class SPE10SolutionStrategyMixin(TPFProtocol):
         else:
             raise ValueError(
                 f"Unknown SPE10 case '{self.params['spe10_case']}'."
-                + " Supported cases are 'gravity_segregation' and 'five_spot'."
+                " Supported cases are 'gravity_segregation' and 'five_spot'."
             )
 
         self.equation_system.set_variable_values(
