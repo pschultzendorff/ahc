@@ -76,7 +76,7 @@ class ModifiedNewtonSolver(NewtonSolver):
             logger.info(
                 "Newton iteration number "
                 + f"{model.nonlinear_solver_statistics.num_iteration}"
-                + f" of {self.params['max_iterations']}"
+                + f" of {self.params['nl_max_iterations']}"
             )
 
             # Re-discretize the nonlinear term
@@ -111,7 +111,7 @@ class ModifiedNewtonSolver(NewtonSolver):
         if not self.progress_bar or not _IS_TQDM_AVAILABLE:
             while (
                 model.nonlinear_solver_statistics.num_iteration
-                <= self.params["max_iterations"]
+                <= self.params["nl_max_iterations"]
                 and not is_converged
             ):
                 newton_step()
@@ -130,7 +130,7 @@ class ModifiedNewtonSolver(NewtonSolver):
                 # Initialize a progress bar. Length is the number of maximal Newton
                 # iterations.
                 solver_progressbar = trange(  # type: ignore
-                    self.params["max_iterations"],
+                    self.params["nl_max_iterations"],
                     desc="Newton loop",
                     position=self.progress_bar_position,
                     leave=False,
@@ -139,13 +139,13 @@ class ModifiedNewtonSolver(NewtonSolver):
 
                 while (
                     model.nonlinear_solver_statistics.num_iteration
-                    <= self.params["max_iterations"]
+                    <= self.params["nl_max_iterations"]
                     and not is_converged
                 ):
                     solver_progressbar.set_description_str(
                         "Newton iteration number "
                         + f"{model.nonlinear_solver_statistics.num_iteration + 1} of"
-                        + f" {self.params['max_iterations']}"
+                        + f" {self.params['nl_max_iterations']}"
                     )
                     newton_step()
 

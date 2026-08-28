@@ -422,6 +422,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
             )
             self.residual_flow_norms_hc.append(deepcopy(self.residual_flow_norms))
             self.residual_transp_norms_hc.append(deepcopy(self.residual_transp_norms))
+
         super().reset()
         self.spatial_est.append([])
         self.temp_est.append([])
@@ -525,10 +526,7 @@ class SolverStatisticsHC(SolverStatisticsTPF):
                     "time step index": self.time_step_index,
                     "current time": self.time,
                     "time step size": self.time_step_size,
-                    # Do not log the latest hc iteration, since it wasn't solved in a
-                    # Newton loop. This is because :meth:`after_hc_iteration` is called
-                    # before :meth:`after_hc_convergence/failure`
-                    "hc_lambdas": self.hc_lambdas[:-1],
+                    "hc_lambdas": self.hc_lambdas,
                     "hc_num_iterations": self.hc_num_iteration,
                 }
             )

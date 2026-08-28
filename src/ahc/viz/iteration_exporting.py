@@ -8,6 +8,7 @@ and adjusted for homotopy continuation.
 
 import numpy as np
 import porepy as pp
+
 from ahc.models.protocol import (
     IterationDataSavingProtocol,
     TPFProtocol,
@@ -38,7 +39,7 @@ class IterationExportingMixin(IterationDataSavingProtocol, TPFProtocol):
         # maximum number of nonlinear iterations. Default value set to 10 in
         # accordance with the default value used in NewtonSolver.
         # We do the same for the hc iteration index if homotopy continuation is used.
-        n_1: int = self.params.get("max_iterations", 10)
+        n_1: int = self.params.get("nl_max_iterations", 10)
         p_1: int = np.ceil(np.log10(n_1))
         self.r_1: int = 10**p_1
         if self.uses_hc:
