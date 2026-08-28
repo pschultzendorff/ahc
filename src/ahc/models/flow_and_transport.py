@@ -256,7 +256,7 @@ class TPFVariablesMixin(TPFProtocol, pp.VariableMixin):
         else:
             raise ValueError(
                 "``saturation`` must have either a ``name`` attribute"
-                + " specifying the phase or ``phase`` must be specified."
+                " specifying the phase or ``phase`` must be specified."
             )
 
         s_normalized.set_name(f"Normalized {name} saturation")
@@ -339,7 +339,7 @@ class TPFVariablesMixin(TPFProtocol, pp.VariableMixin):
         else:
             raise ValueError(
                 "``saturation`` must have either a ``name`` attribute"
-                + " specifying the phase or ``phase`` must be specified."
+                " specifying the phase or ``phase`` must be specified."
             )
 
     def normalize_saturation_deriv_np(
@@ -377,7 +377,7 @@ class TPFVariablesMixin(TPFProtocol, pp.VariableMixin):
         else:
             raise ValueError(
                 "``saturation`` must have either a ``name`` attribute"
-                + " specifying the phase or ``phase`` must be specified."
+                " specifying the phase or ``phase`` must be specified."
             )
 
 
@@ -501,7 +501,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         if isinstance(nl_appleyard_chopping, bool):
             self._nl_appleyard_chopping: bool = nl_appleyard_chopping
         else:
-            raise ValueError(
+            raise TypeError(
                 "expected nl_appleyard_chopping to be bool, got "
                 + f"{nl_appleyard_chopping}"
             )
@@ -518,7 +518,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         if isinstance(nl_enforce_physical_saturation, bool):
             self._nl_enforce_physical_saturation: bool = nl_enforce_physical_saturation
         else:
-            raise ValueError(
+            raise TypeError(
                 "expected nl_enforce_physical_saturation to be bool, got "
                 + f"{nl_enforce_physical_saturation}"
             )
@@ -528,7 +528,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         :math:`[s_{w,res}, 1 - s_{n,res}]` at each nonlinear iteration.
 
         Note: Narrows the interval by a small epsilon to avoid nonphysical saturations
-            due to floating point errors in the process of chopping.
+            caused by floating point errors in the process of chopping.
 
         """
 
@@ -562,7 +562,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
                 phase: FluidPhase = FluidPhase({"name": phase_name})
                 logger.info(
                     f"No {phase_name} constants provided in params."
-                    + " Using default values."
+                    " Using default values."
                 )
             else:
                 phase_constant = constants[phase_name]
@@ -761,19 +761,29 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         time_step_index: int | None = None,
         iterate_index: int | None = None,
     ) -> np.ndarray:
-        r"""Ensure that the saturation is within physical and solver bounds.
+        r"""Bound the saturation to be within physical and solver related bounds.
 
-        The saturation is bounded both to physical bounds according to the Appleyard
-        chopping. The behavior is defined by the model parameters
-        :attr:`nl_appleyard_chopping` and :attr:`nl_enforce_physical_saturation`.
+        After each nonlinear iteration, the saturation may be bounded to
+        - be in the physical interval :math:``[s_{\mathrm{w},r}, 1 -
+        S_{\mathrm{n},r}]`` where :math:``s_{\mathrm{w},r}`` and
+        :math:``S_{\mathrm{n},r}`` are the residual saturations of the wetting and
+        non-wetting phases, respectively.
+        - according to the Appleyard damping, that is for each cell :math:`K`, the
+        saturation increment :math:`\Delta s_{\mathrm{w},K}` is bounded to
+        :math:`\Delta s_{\mathrm{w},K} \in [-0.2, 0.2]`.
 
-        Note: Appleyard chopping is only applied to increments, while physical bounds
-            are applied to both increments and actual saturation values.
+        The behavior of this method is defined by the model attributes
+        :attr:`self.nl_appleyard_chopping` and
+        :attr:`self.nl_enforce_physical_saturation`, which are passed at initialization.
+
+        Note: Appleyard chopping can only be applied if an increment is passed, while
+            physical bounds can be applied to both increments and actual saturation
+            values.
 
         Parameters:
             s_w: Saturation or saturation increment to be bounded.
-            is_increment: Whether ``s_w`` is an increment or the actual saturation.
-                Default is ``False``.
+            is_increment: ``True`` if ``s_w`` represents a nonlinear increment.
+                ``False`` if it represents the saturation values. Default is ``False``.
             time_step_index: Time step index at which the old saturation is stored.
                 Default is ``None``.
             iterate_index: Iterate index at which the old saturation is stored.
@@ -787,7 +797,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         if is_increment and (time_step_index is None and iterate_index is None):
             raise ValueError(
                 "If ``is_increment`` is ``True``, either ``time_step_index`` or"
-                + " ``iterate_index`` must be specified."
+                " ``iterate_index`` must be specified."
             )
 
         if self._nl_appleyard_chopping and is_increment:
@@ -814,7 +824,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             )
 
             if is_increment:
-                # Return the chopped increment.
+                # Calculate the updated increment from the chopped saturation value.
                 s_w = s_w - s_w_prev
 
         return s_w
@@ -887,11 +897,9 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             nonlinear_increment: The new solution, as computed by the non-linear solver.
 
         """
-        # Store the non-chopped saturation.
+        # Store the unbounded saturation. This is for reconstruction purposes only.
         if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
-            self.non_chopped_nonlinear_increment: np.ndarray = (
-                nonlinear_increment.copy()
-            )
+            self.unbounded_nonlinear_increment: np.ndarray = nonlinear_increment.copy()
 
         # Apply Appleyard chopping and/or enforce physical saturation bounds.
         # Saturation comes first in the nonlinear increment.

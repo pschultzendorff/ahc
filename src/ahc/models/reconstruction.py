@@ -12,6 +12,7 @@ import scipy.sparse as sps
 # Ignore type checking numba due to missing stubs.
 from numba import njit, prange  # type: ignore
 from porepy.viz.exporter import DataInput
+from scipy.sparse.linalg import factorized
 
 from ahc.models.flow_and_transport import (
     TPFDataSavingMixin,
@@ -110,7 +111,7 @@ class GlobalPressureMixin(ReconstructionProtocol):
             if p_n is None:
                 raise ValueError(
                     "Non-wetting pressure `p_n` must be provided for global pressure"
-                    + " evaluation."
+                    " evaluation."
                 )
             interpolated = np.interp(
                 s_clipped, self.s_interpol_vals, self.global_pressure_interpol_vals
@@ -266,10 +267,10 @@ class PressureReconstructionMixin(ReconstructionProtocol):
             pressure_key: Name of the pressure field to be reconstructed.
             specifier: Specify the name of the flux field and total mobility used to
                 post-process the pressure. Used, e.g., in homotopy continuation, where
-                the fluxes used are ``f"{flux_name}_flux_wrt_goal_rel_perm_RT0_coeffs"``
-                instead of ``f"{flux_name}_flux_RT0_coeffs"``.
-                Gets appended between ``f"{flux_name}_flux"`` and ``"_RT0_coeffs"``,
-                i.e., the values ``f"{flux_name}_flux{flux_specifier}_RT0_coeffs"`` in
+                the fluxes used are ``f"{flux_name}_wrt_goal_rel_perm_RT0_coeffs"``
+                instead of ``f"{flux_name}_RT0_coeffs"``.
+                Gets appended between ``flux_name`` and ``"_RT0_coeffs"``,
+                i.e., the values ``f"{flux_name}{flux_specifier}_RT0_coeffs"`` in
                 the data dir are accessed.
             prepare_simulation: Set to True if called in :meth:`prepare_simulation`.
                 Stores zero coefficients for all pressures. Stores values additionally
@@ -535,17 +536,28 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
 
     def setup_flux_equilibration(self) -> None:
         """Precalculate opposite side nodes, cell faces, and sign normals for the
-        grid."""
+        grid as well as a factorized :math:`DD^t`, where :math:`D` is the discrete
+        divergence.
+
+        """
         opp_nodes_cell: np.ndarray = get_opposite_side_nodes(self.g)
         self.opp_nodes_coor_cell: np.ndarray = self.g.nodes[:, opp_nodes_cell]
         cell_faces_map = sps.find(self.g.cell_faces.T)[1]
         self.faces_cell = cell_faces_map.reshape(self.g.num_cells, self.g.dim + 1)
         self.sign_normals: np.ndarray = get_sign_normals(self.g)
 
+        # NOTE It might be faster to use a spanning tree here.
+        if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
+            # self.D will be a numpy array. Ignore mypy.
+            self.D: np.ndarray = pp.ad.Divergence([self.g]).value(self.equation_system)  # type: ignore
+            A = sps.csc_matrix(self.D @ self.D.T)
+            self.solve_A = factorized(A)
+
     def equilibrate_flux_during_Newton(
         self,
         flux_name: FLUX_NAME,
-        nonlinear_increment: np.ndarray | None = None,
+        unbounded_nonlinear_increment: np.ndarray | None = None,
+        bounded_nonlinear_increment: np.ndarray | None = None,
     ) -> None:
         """Equilibrate an approximate flux solution at a given Newton iteration.
 
@@ -555,19 +567,28 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
 
         We assume the following entries to be present in ``iterate_dictionary` at
         ``iterate_index`` 1!!!
-            - ``{flux_name}_flux``, storing the flux value from the previous nonlinear
+            - ``{flux_name}``, storing the flux value from the previous nonlinear
               iteration.
-            - ``{flux_name}_flux_jac``, storing the Jacobian of the flux value from
+            - ``{flux_name}_jac``, storing the Jacobian of the flux value from
               the previous nonlinear iteration.
 
         The following entries in ``iterate_dictionary` will be updated:
-            - ``{flux_name}_flux_equil``, storing the equilibrated flux.
+            - ``{flux_name}_equil``, storing the equilibrated flux.
 
         Parameters:
-            flux_field: Name flux field to be equilibrated.
-            nonlinear_increment: Nonlinear increment of the primary valuables. If
-                already constructed during Newton, we can save some time instead of
-                computing it again. **Increment HAS to be in the order
+            flux_field: Name of the flux field to be equilibrated.
+            unbounded_nonlinear_increment: Unbounded nonlinear increment of the primary
+                valuables, i.e., the original Newton update, with the saturation
+                increment not bounded to be within physical bounds or according to
+                Appleyard chopping. If already constructed during the Newton iteration,
+                it can be passed as a parameter instead of computing it again.
+                **Increment MUST be in the order ``self.primary_saturation_var``,
+                ``self.primary_pressure_var``.** Default is ``None``.
+            bounded_nonlinear_increment: Nonlinear increment of the primary valuables
+                after potential bounding of the saturation in
+                :meth:`self.bound_saturation`. If already constructed during the Newton
+                iteration, it can be passed as a parameter instead of computing it
+                again. **Increment MUST be in the order
                 ``self.primary_saturation_var``, ``self.primary_pressure_var``.**
                 Default is ``None``.
 
@@ -575,23 +596,58 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
             None
 
         """
-        if (
-            self._nl_appleyard_chopping or self._nl_enforce_physical_saturation
-        ) and nonlinear_increment is None:
-            raise ValueError(
-                "The non-chopped nonlinear increment vector has to be provided when"
-                + " Newton is run with Appleyard chopping or enforced physical"
-                + " saturations."
-            )
-        # The operators returned by ``DarcyFluxes.total_flux`` and
+        # The equilibrated flux is constructed from the value and Jacobian of the flux
+        # at the previous Newton iteration and the unbounded Newton update.
+
+        # 1. Construct the unbounded and or boundednonlinear increment if it was not
+        #    passed as a parameter.
+        if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
+            if unbounded_nonlinear_increment is None:
+                raise ValueError(
+                    "The unbounded nonlinear increment vector has to be provided when"
+                    " Newton is run with Appleyard chopping or enforced physical"
+                    " saturations as it cannot be reconstructed from stored"
+                    " variables."
+                )
+
+            if bounded_nonlinear_increment is None:
+                # NOTE The pressure and saturation variables are retrieved in the same
+                # order as in the Jacobian construction
+                var_val: np.ndarray = self.equation_system.get_variable_values(
+                    [self.primary_saturation_var, self.primary_pressure_var],
+                    iterate_index=1,
+                )
+                var_val_new: np.ndarray = self.equation_system.get_variable_values(
+                    [self.primary_saturation_var, self.primary_pressure_var],
+                    iterate_index=0,
+                )
+                bounded_nonlinear_increment = var_val_new - var_val
+
+        else:
+            if unbounded_nonlinear_increment is None:
+                # NOTE The pressure and saturation variables are retrieved in the same
+                # order as in the Jacobian construction
+                var_val: np.ndarray = self.equation_system.get_variable_values(
+                    [self.primary_saturation_var, self.primary_pressure_var],
+                    iterate_index=1,
+                )
+                var_val_new: np.ndarray = self.equation_system.get_variable_values(
+                    [self.primary_saturation_var, self.primary_pressure_var],
+                    iterate_index=0,
+                )
+                unbounded_nonlinear_increment = var_val_new - var_val
+
+        logger.info(f"Equilibrating {flux_name}.")
+
+        # 2. Collect value and jacobian of the fluxes.
+        # NOTE The operators returned by ``DarcyFluxes.total_flux`` and
         # ``DarcyFluxes.wetting_flux`` include bc values, hence
-        # ``f"{flux_name}_flux"`` includes bc values when set by
+        # ``flux_name`` includes bc values when set by
         # ``eval_jac_and_val_fluxes``, and hence we do not need to care about bc values
         # here.
-        logger.info(f"Equilibrating {flux_name} flux.")
-
-        # NOTE This requires the variables to be shifted at each nonlinear iteration. By
-        # default, this happens in
+        # NOTE Obtaining the flux value and Jacobian from the previous nonlinear
+        # iteration requires the data to be shifted during each nonlinear
+        # iteration. By default, this happens in
         # :meth:`SolutionStrategy.after_nonlinear_iteration`.
         val: np.ndarray = pp.get_solution_values(
             flux_name, self.g_data, iterate_index=1
@@ -600,20 +656,23 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
             flux_name + "_jac", self.g_data, iterate_index=1
         )
 
-        if nonlinear_increment is None:
-            # NOTE The variables are retrieved in the same order as in the Jacobian
-            # construction.
-            var_val: np.ndarray = self.equation_system.get_variable_values(
-                [self.primary_saturation_var, self.primary_pressure_var],
-                iterate_index=1,
-            )
-            var_val_new: np.ndarray = self.equation_system.get_variable_values(
-                [self.primary_saturation_var, self.primary_pressure_var],
-                iterate_index=0,
-            )
-            nonlinear_increment = var_val_new - var_val
+        # 3. Compute the equilibrated flux.
+        equilibrated_flux: np.ndarray = val + jac @ unbounded_nonlinear_increment
 
-        equilibrated_flux: np.ndarray = val + jac @ nonlinear_increment
+        # 4. Add an equilibrated flux for the saturation difference between bounded and
+        #    unbounded increment.
+        if (
+            self._nl_appleyard_chopping or self._nl_enforce_physical_saturation
+        ) and not np.allclose(
+            unbounded_nonlinear_increment,
+            # bounded_nonlinear_increment was computed before. Ignore mypy.
+            bounded_nonlinear_increment,  # type: ignore
+            rtol=1e-20,
+            atol=1e-20,
+        ):
+            equilibrated_flux += self.equilibrate_increment_diff(
+                bounded_nonlinear_increment - unbounded_nonlinear_increment
+            )
 
         pp.set_solution_values(
             f"{flux_name}_equil",
@@ -621,6 +680,23 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
             self.g_data,
             iterate_index=0,
         )
+
+    def equilibrate_increment_diff(
+        self, nonlinear_increment_diff: np.ndarray
+    ) -> np.ndarray:
+        """Compute an equilibrated flux for the bounded part of the nonlinear increment.
+
+        This pushes/pulls mass out of/into the domain to equilibrate the difference in
+        the nonlinear increment.
+
+        """
+        logger.info(
+            "Equilibrating difference between bounded and unbounded nonlinear"
+            " increment."
+        )
+        saturation_increment_diff = nonlinear_increment_diff[: self.g.num_cells]
+        # Solve DD^T x = D * diff_nonlinear_increment for x.
+        return self.D.T @ (self.solve_A(saturation_increment_diff))
 
     def extend_fv_fluxes(
         self,
@@ -888,7 +964,9 @@ class RecSolutionStrategy(  # type: ignore
         self.eval_postproc_qtys()
 
         self.postprocess_solution(
-            np.zeros(self.g.num_cells * 2), prepare_simulation=True
+            unbounded_nonlinear_increment=np.zeros(self.g.num_cells * 2),
+            bounded_nonlinear_increment=np.zeros(self.g.num_cells * 2),
+            prepare_simulation=True,
         )
 
     @typing.override
@@ -915,29 +993,36 @@ class RecSolutionStrategy(  # type: ignore
         # Now, the fluxes can be evaluated with the new upwinded mobilities.
         self.eval_postproc_qtys()
 
-        # When Newton is run with Appleyard chopping, the non-chopped nonlinear
+        # When Newton is run with Appleyard chopping, the unbounded nonlinear
         # increment has to be used to equilibrate the fluxes.
         if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
-            if hasattr(self, "non_chopped_nonlinear_increment"):
-                nonlinear_increment = self.non_chopped_nonlinear_increment
+            if hasattr(self, "unbounded_nonlinear_increment"):
+                bounded_nonlinear_increment = nonlinear_increment
+                unbounded_nonlinear_increment = self.unbounded_nonlinear_increment
             else:
                 raise AttributeError(
-                    "The non-chopped nonlinear increment vector has to be stored when"
-                    + " Appleyard chopping or enforcing of physical saturations is"
-                    + " enabled."
+                    "The unbounded nonlinear increment vector has to be stored when"
+                    " Appleyard chopping or enforcing of physical saturations is"
+                    " enabled."
                 )
+        else:
+            bounded_nonlinear_increment = None
+            unbounded_nonlinear_increment = nonlinear_increment
 
         try:
-            self.postprocess_solution(nonlinear_increment)
+            self.postprocess_solution(
+                unbounded_nonlinear_increment=unbounded_nonlinear_increment,
+                bounded_nonlinear_increment=bounded_nonlinear_increment,
+            )
 
-        except np.linalg.LinAlgError as e:
+        except np.linalg.LinAlgError as error:
             # If Newton diverged, postprocessing may fail because ``linalg_solve_batch``
             # cannot handle infs or nans.
             logger.warning(
                 "Postprocessing failed, likely due to diverged Newton."
-                + " Skipping postprocessing this iteration."
+                " Skipping postprocessing this iteration."
             )
-            logger.warning(e)
+            logger.warning(error)
 
     @typing.override
     def check_convergence(
@@ -1073,7 +1158,10 @@ class RecSolutionStrategy(  # type: ignore
                 )
 
     def postprocess_solution(
-        self, nonlinear_increment: np.ndarray, prepare_simulation: bool = False
+        self,
+        unbounded_nonlinear_increment: np.ndarray,
+        bounded_nonlinear_increment: np.ndarray | None,
+        prepare_simulation: bool = False,
     ) -> None:
         """Equilibrate fluxes and reconstruct pressures."""
         for flux_name in (TOTAL_FLUX, WETTING_FLUX):
@@ -1084,7 +1172,11 @@ class RecSolutionStrategy(  # type: ignore
             if not prepare_simulation:
                 # Saturation precedes pressure in nonlinear_increment as required by
                 # ``equilibrate_flux_during_Newton``.
-                self.equilibrate_flux_during_Newton(flux_name, nonlinear_increment)
+                self.equilibrate_flux_during_Newton(
+                    flux_name,
+                    unbounded_nonlinear_increment=unbounded_nonlinear_increment,
+                    bounded_nonlinear_increment=bounded_nonlinear_increment,
+                )
 
                 # Extend equilibrated fluxes.
                 self.extend_fv_fluxes(flux_name, flux_specifier="_equil")

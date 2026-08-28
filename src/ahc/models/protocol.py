@@ -503,7 +503,8 @@ else:
         def equilibrate_flux_during_Newton(
             self,
             flux_name: FLUX_NAME,
-            nonlinear_increment: np.ndarray | None = None,
+            unbounded_nonlinear_increment: np.ndarray | None = None,
+            bounded_nonlinear_increment: np.ndarray | None = None,
         ) -> None:
             """Equilibrate an approximate flux solution at a given Newton iteration."""
 
