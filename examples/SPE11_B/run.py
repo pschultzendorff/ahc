@@ -192,7 +192,7 @@ def run_simulation(
         f"solver: {config.solver_name}, "
         f"HC tolerance: {config.hc_tol:.2f}, "
         f"NL tolerance: {config.nl_tol:.2f}, "
-        f"cell size: {config.cell_size:.2f}, \n"
+        f"cell size: {config.spe10_cell_size:.2f}, \n"
         f"initial saturation: {config.init_s}, "
         f"RP model 1: {config.rp_model_1}, "
         f"RP model 2: {config.rp_model_2}, \n"
@@ -202,7 +202,7 @@ def run_simulation(
     model_kwargs = kwargs.get("model_kwargs", {})
     # This triple parameter dict construction is ugly, but we avoid adding every
     # parameter we ever want to change to SimulationConfig or setup_porepy_params.
-    additional_solver_params = kwargs.get("additional_solver_params", {})
+    additional_params = kwargs.get("additional_params", {})
     additional_time_manager_params = kwargs.get("additional_time_manager_params", {})
 
     model_class = setup_porepy_model(config, **model_kwargs)
@@ -213,7 +213,7 @@ def run_simulation(
         solver_params = (
             copy.deepcopy(default_solver_params)
             | updated_solver_params
-            | additional_solver_params
+            | additional_params
         )
     if time_manager_params is None:
         time_manager_params = (
@@ -241,7 +241,9 @@ def run_simulation(
     solver_params.update(  # type: ignore
         {
             # Meshing and model:
-            "meshing_arguments": {"spe11_refinement_factor": config.refinement_factor},
+            "meshing_arguments": {
+                "spe11_refinement_factor": config.spe11_refinement_factor
+            },
             "rel_perm_constants": rel_perm_constants,
             "cap_press_constants": cap_press_constants,
             "spe11_initial_saturation": config.init_s,
@@ -266,7 +268,7 @@ def run_simulation(
         model = model_class(solver_params)
         pp.run_time_dependent_model(model=model, params=solver_params)
 
-    # It is okay to catch general exceptions, because we recognize failed
+    # It is okay to catch general exceptions because we recognize failed
     # simulations in plotting.py.
     except Exception as e:  # noqa: BLE001
         logger.error(f"Run failed with exception: {e}.")
@@ -280,6 +282,7 @@ def run_simulation(
 
 # region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
+    ("ReferenceSolution", 0.01, 0.01),
     ("AHC", 0.1, 0.1),
     ("AHC", 0.01, 0.1),
     ("HC", 0.01, 1e-3),

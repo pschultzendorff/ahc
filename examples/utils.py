@@ -95,10 +95,10 @@ class SimulationConfig:
     """
 
     # SPE10 specific model parameters.
-    cell_size: float = 600 * FEET / 30  # Default cell size.
+    spe10_cell_size: float = 600 * FEET / 30  # Default cell size.
     """Cell size parameter to be passed to gmsh for the SPE10 model."""
-    spe10_layer: int = 0
-    """SPE10 layer number. Possible values are 0 to 84. Default is 0."""
+    spe10_layer: int = 55
+    """SPE10 layer number. Possible values are 0 to 84. Default is 55."""
     spe10_case: str = "five_spot"
     """SPE10 case name. Possible values are "five_spot" and "gravity_segregation".
     Default is "five_spot". 
@@ -108,7 +108,7 @@ class SimulationConfig:
     r"""Water density for the SPE10 model. Default is :math:`998.2\,\mathrm{kg/m^3}`."""
 
     # SPE11 specific model parameters.
-    refinement_factor: float = 1.0
+    spe11_refinement_factor: float = 1.0
     """Grid refinement factor for the SPE11 model. Default is 1.0, which means no
     refinement. Values larger than 1.0 mean a coarser grid and values smaller than 1.0
     mean a finer grid. 
@@ -150,7 +150,7 @@ class SimulationConfig:
 def setup_porepy_params(
     config: SimulationConfig,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    r"""Setup solver and time manager parameters in PorePy format.
+    r"""Setup model, solver, and time manager parameters in PorePy format.
 
     Note: Many of the solver and time stepping parameters for all benchmarks are
     hardcoded in this function.
@@ -160,9 +160,10 @@ def setup_porepy_params(
             tolerances.
 
     Returns:
-        A tuple ``(solver_params, time_manager_params)``, where ``solver_params``
-        contains parameters for the nonlinear solver, and ``time_manager_params``
-        contains parameters for the time manager.
+        params: A dictionary containing all parameters for the model and solver, WITHOUT
+            an initialized ``time manager``. The dictionary will be passed to the model
+            class for initialization and to ``run_model``.
+        time_manager_params: A dictionary containing parameters for the time manager.
 
     """
     solver_name = config.solver_name
@@ -173,131 +174,211 @@ def setup_porepy_params(
         " Generating solver and time manager parameters."
     )
 
+    # 1st: Setup nonlinear solver parameters.
+    # Params shared between all solvers.
+    params = {
+        # NOTE The first two are only needed for adaptive solvers. For the nonadaptive
+        # HC solver, it won't have any effect.
+        "adaptive_threshold_rel": 1e2,
+        # When cutting time steps, project the temporal estimator onto the
+        # original time step length. This avoids strengthening the adaptive
+        # criteria. The temporal convergence is assumed to be sublinear in the
+        # time step length.
+        "extrapolate_temp_estimator_after_cutting": 0.75,
+        # NOTE Now come parameters valid for all solvers.
+        "nl_divergence_tol": 1e30,
+        "nl_max_iterations": 30,
+        "nl_enforce_physical_saturation": True,
+    }
+
+    # Solver specific params.
     match solver_name:
         case "HC":
-            solver_params = {
-                # Metadata:
-                "nonlinear_solver_statistics": SolverStatisticsHC,
-                "nonlinear_solver": HCSolver,
-                # HC parameters:
-                "hc_constant_decay": False,
-                "hc_max_iterations": 50,
-                "hc_lambda_decay": 0.9,
-                "hc_decay_min_max": (0.1, 0.95),
-                "nl_iter_optimal_range": (6, 9),
-                "nl_iter_relax_factors": (0.7, 1.3),
-                "hc_decay_recomp_max": 5,
-                # Non-adaptive stopping criteria for HC:
-                "hc_adaptive": False,
-                "hc_lambda_min": hc_tol,  # Minimum :math:`\beta` for HC.
-                # Non-adaptive stopping and other Newton solver parameters:
-                "nl_convergence_tol_abs": nl_tol,  # Absolute tolerance for inner loop.
-                "nl_convergence_tol_rel": nl_tol,  # Relative tolerance for inner loop.
-                "nl_divergence_tol": 1e30,
-                "max_iterations": 30,
-                "nl_appleyard_chopping": False,
-            }
+            params.update(
+                {
+                    # Metadata:
+                    "nonlinear_solver_statistics": SolverStatisticsHC,
+                    "nonlinear_solver": HCSolver,
+                    # HC parameters:
+                    "hc_constant_decay": False,
+                    "hc_max_iterations": 50,
+                    "hc_lambda_decay": 0.9,
+                    "hc_decay_min_max": (0.1, 0.95),
+                    "nl_iter_optimal_range": (6, 9),
+                    "nl_iter_relax_factors": (0.7, 1.3),
+                    "hc_decay_recomp_max": 5,
+                    # Non-adaptive stopping criteria for HC:
+                    "hc_adaptive": False,
+                    "hc_lambda_min": hc_tol,  # Minimum :math:`\beta` for HC.
+                    # Non-adaptive stopping and other Newton solver parameters:
+                    "nl_convergence_tol_abs": nl_tol,  # Absolute tolerance for inner loop.
+                    "nl_convergence_tol_rel": nl_tol,  # Relative tolerance for inner loop.
+                    "nl_max_iterations": 30,
+                    "nl_appleyard_chopping": False,
+                    "nl_enforce_physical_saturation": True,
+                }
+            )
 
         case "AHC":
-            solver_params = {
-                # Metadata:
-                "nonlinear_solver_statistics": SolverStatisticsHC,
-                "nonlinear_solver": HCSolver,
-                # HC parameters:
-                "hc_max_iterations": 50,
-                "hc_constant_decay": False,
-                "hc_lambda_decay": 0.9,
-                "hc_decay_min_max": (0.1, 0.95),
-                "nl_iter_optimal_range": (6, 9),
-                "nl_iter_relax_factors": (0.7, 1.3),
-                "hc_decay_recomp_max": 5,
-                # Adaptive stopping criteria for HC and Newton:
-                "hc_adaptive": True,
-                "hc_error_ratio": hc_tol,  # Adaptive error ratio for outer loop.
-                "nl_error_ratio": nl_tol,  # Adaptive error ratio for inner loop.
-                "adaptive_threshold_rel": 1e2,
-                # When cutting time steps, project the temporal estimator onto the
-                # original time step length. This avoids strengthening the adaptive
-                # criteria. The temporal convergence is assumed to be sublinear in the
-                # time step length.
-                "extrapolate_temp_estimator_after_cutting": 0.75,
-                # Non-adaptive stopping and other Newton solver parameters:
-                "nl_convergence_tol_abs": 1e-5,
-                "nl_convergence_tol_rel": 1e-5,
-                "nl_divergence_tol": 1e30,
-                "max_iterations": 30,
-                "nl_appleyard_chopping": False,
-            }
+            params.update(
+                {
+                    # Metadata:
+                    "nonlinear_solver_statistics": SolverStatisticsHC,
+                    "nonlinear_solver": HCSolver,
+                    # HC parameters:
+                    "hc_max_iterations": 50,
+                    "hc_constant_decay": False,
+                    "hc_lambda_decay": 0.9,
+                    "hc_decay_min_max": (0.1, 0.95),
+                    "nl_iter_optimal_range": (6, 9),
+                    "nl_iter_relax_factors": (0.7, 1.3),
+                    "hc_decay_recomp_max": 5,
+                    # Adaptive stopping criteria for HC and Newton:
+                    "hc_adaptive": True,
+                    "hc_error_ratio": hc_tol,  # Adaptive error ratio for outer loop.
+                    "nl_error_ratio": nl_tol,  # Adaptive error ratio for inner loop.
+                    # Non-adaptive stopping and other Newton solver parameters:
+                    "nl_convergence_tol_abs": 1e-5,
+                    "nl_convergence_tol_rel": 1e-5,
+                    "nl_max_iterations": 30,
+                    "nl_appleyard_chopping": False,
+                    "nl_enforce_physical_saturation": True,
+                }
+            )
+
+        case "ReferenceSolution":
+            # The reference solution is computed with the AHC solver.
+            params.update(
+                {
+                    # Metadata:
+                    "nonlinear_solver_statistics": SolverStatisticsHC,
+                    "nonlinear_solver": HCSolver,
+                    # HC parameters:
+                    "hc_max_iterations": 50,
+                    "hc_constant_decay": False,
+                    "hc_lambda_decay": 0.9,
+                    "hc_decay_min_max": (0.1, 0.95),
+                    "nl_iter_optimal_range": (6, 9),
+                    "nl_iter_relax_factors": (0.7, 1.3),
+                    "hc_decay_recomp_max": 5,
+                    # Adaptive stopping criteria for HC and Newton:
+                    "hc_adaptive": True,
+                    "hc_error_ratio": hc_tol,  # Adaptive error ratio for outer loop.
+                    "nl_error_ratio": nl_tol,  # Adaptive error ratio for inner loop.
+                    # Non-adaptive stopping and other Newton solver parameters:
+                    "nl_convergence_tol_abs": 1e-5,
+                    "nl_convergence_tol_rel": 1e-5,
+                    "nl_max_iterations": 30,
+                    "nl_appleyard_chopping": False,
+                    "nl_enforce_physical_saturation": True,
+                    "reference_solution": True,  # Flag to indicate that a reference
+                    # solution shall be computed.
+                }
+            )
 
         case "Newton":
-            solver_params = {
+            params = {
                 # Metadata:
                 "nonlinear_solver_statistics": SolverStatisticsANewton,
                 "nonlinear_solver": ModifiedNewtonSolver,
                 # Adaptive stopping criteria for Newton:
                 "nl_adaptive": True,
                 "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
-                "adaptive_threshold_rel": 1e2,
-                # When cutting time steps, project the temporal estimator onto the
-                # original time step length. This avoids strengthening the adaptive
-                # criteria. The temporal convergence is assumed to be sublinear in the
-                # time step length.
-                "extrapolate_temp_estimator_after_cutting": 0.75,
                 # Non-adaptive stopping parameters and other solver parameters:
                 "nl_convergence_tol_abs": 1e-5,
                 "nl_convergence_tol_rel": 1e-5,
-                "nl_divergence_tol": 1e30,
                 "nl_appleyard_chopping": False,
-                "max_iterations": 30,
+                "nl_enforce_physical_saturation": True,
             }
         case "NewtonAppleyard":
-            solver_params = {
+            params = {
                 # Metadata:
                 "nonlinear_solver_statistics": SolverStatisticsANewton,
                 "nonlinear_solver": ModifiedNewtonSolver,
                 # Adaptive stopping criteria for Newton:
                 "nl_adaptive": True,
                 "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
-                "adaptive_threshold_rel": 1e2,
-                # When cutting time steps, project the temporal estimator onto the
-                # original time step length. This avoids strengthening the adaptive
-                # criteria. The temporal convergence is assumed to be sublinear in the
-                # time step length.
-                "extrapolate_temp_estimator_after_cutting": 0.75,
                 # Non-adaptive stopping parameters and other solver parameters:
                 "nl_convergence_tol_abs": 1e-5,
                 "nl_convergence_tol_rel": 1e-5,
-                "nl_divergence_tol": 1e30,
                 "nl_appleyard_chopping": True,
-                "max_iterations": 30,
             }
         case _:
             raise ValueError(f"Unknown solver: {solver_name}")
 
+    # 2nd: Sepcify constitutive laws.
+    # Newton and Appleyard Newton require only one of each constitutive law.
+    if config.solver_name.startswith("Newton"):
+        rel_perm_constants = config.rp_model_2
+        cap_press_constants = config.cp_model_2
+        buoyancy_constants = config.buoyancy_constants_2
+    else:
+        rel_perm_constants = {
+            "model_1": config.rp_model_1,
+            "model_2": config.rp_model_2,
+        }
+        cap_press_constants = {
+            "model_1": config.cp_model_1,
+            "model_2": config.cp_model_2,
+        }
+        buoyancy_constants = {
+            "model_1": config.buoyancy_constants_1,
+            "model_2": config.buoyancy_constants_2,
+        }
+    params.update(
+        {
+            "rel_perm_constants": rel_perm_constants,
+            "cap_press_constants": cap_press_constants,
+            "buoyancy_constants": buoyancy_constants,
+        }
+    )
+
+    # 3rd: Add metadata
+    folder_name = config.folder_name()
+    params.update(
+        {
+            "folder_name": folder_name,
+            "file_name": config.case.name
+            if isinstance(config.case, pathlib.Path)
+            else config.case,
+            "solver_statistics_file_name": folder_name / "solver_statistics.json",
+        }
+    )
+
+    # 4th: Set the time manager parameters.
+    time_manager_params = {
+        "recomp_factor": 0.1,
+        "recomp_max": 5,
+    }
     if solver_name.endswith("HC"):
         # Update adaptive time stepping parameters for HC.
-        time_manager_params = {
-            "iter_optimal_range": (
-                15,
-                30,
-            ),  # Default value is (4, 7), which is used for the Newton solvers.
-            "iter_relax_factors": (0.7, 1.3),
-            "iter_max": 50,  # This should be the same as "hc_max_iterations", which the
-            # TimeManager does not know about.
-        }
+        time_manager_params.update(
+            {
+                "iter_optimal_range": (
+                    15,
+                    30,
+                ),  # Higher than values for Newton, because typically more HC outer
+                # iterations are required. Default value is (4, 7).
+                "iter_relax_factors": (0.7, 1.3),
+                "iter_max": 50,  # This should be the same as "hc_max_iterations", which
+                # the TimeManager does not know about.
+            }
+        )
     else:
         # Update adaptive time stepping parameters for Newton.
-        time_manager_params = {
-            "iter_optimal_range": (
-                8,
-                20,
-            ),  # Default value is (4, 7).
-            "iter_relax_factors": (0.7, 1.3),  # Default value.
-            "iter_max": 30,  # This should be the same as "max_iterations", which the
-            # TimeManager does not know about.
-        }
+        time_manager_params.update(
+            {
+                "iter_optimal_range": (
+                    8,
+                    20,
+                ),  # Default value is (4, 7).
+                "iter_relax_factors": (0.7, 1.3),  # Default value.
+                "iter_max": 30,  # This should be the same as "nl_max_iterations", which
+                # the TimeManager does not know about.
+            }
+        )
 
-    return solver_params, time_manager_params
+    return params, time_manager_params
 
 
 def clean_up_after_simulation(config: SimulationConfig) -> None:

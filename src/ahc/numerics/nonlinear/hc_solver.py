@@ -11,6 +11,8 @@ from tqdm.auto import trange  # type: ignore
 from ahc.models.protocol import HCProtocol
 from ahc.numerics.nonlinear.newton import ModifiedNewtonSolver
 
+logger = logging.getLogger(__name__)
+
 
 class HCSolver:
     """A solver for nonlinear problems using the homotopy continuation (HC) algorithm."""
@@ -99,6 +101,7 @@ class HCSolver:
             # parameter to zero and solve target problem with tight Newton tolerance.
             if self.reference_solution:
                 self.solve_for_reference_solution(model)
+
             else:
                 if model.hc_is_converged:
                     model.after_hc_convergence()
@@ -120,11 +123,13 @@ class HCSolver:
             model: The model instance specifying the problem to be solved.
 
         """
+
         if model.hc_is_converged:
-            model.nonlinear_solver_statistics.hc_lambda_fl = 0.0
-            model.nonlinear_solver_statistics.hc_lambda_ad.set_value(
-                model.nonlinear_solver_statistics.hc_lambda_fl
+            logger.info(
+                "Computing reference solution at lambda=0.0 with tight non-adaptive"
+                " Newton tolerances."
             )
+
             # Set Newton parameters to ensure best possible chance of
             # non-adaptive convergence for the target problem.
             best_newton_params = self.params.copy()
@@ -138,10 +143,16 @@ class HCSolver:
                     "nl_divergence_tol": 1e30,
                     "nl_appleyard_chopping": True,
                     "nl_physical_damping": True,
-                    "max_iterations": 100,
+                    "nl_max_iterations": 100,
                 }
             )
             best_newton_solver = ModifiedNewtonSolver(best_newton_params)
+
+            # Run one HC step at lambda=0.0.
+            model.nonlinear_solver_statistics.hc_lambda_fl = 0.0
+            model.nonlinear_solver_statistics.hc_lambda_ad.set_value(
+                model.nonlinear_solver_statistics.hc_lambda_fl
+            )
             model.before_hc_iteration()
             nl_is_converged, _ = best_newton_solver.solve(model)
             model.after_hc_iteration()

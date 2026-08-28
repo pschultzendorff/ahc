@@ -2,13 +2,14 @@ import numpy as np
 import porepy as pp
 import pytest
 from ahc.models.flow_and_transport import TwoPhaseFlow
+from ahc.utils.compare import ComparisonMixin
 from porepy.models.protocol import PorePyModel
 
 
-class TwoPhaseFlowwithAnalyzer(TwoPhaseFlow, AnalyzerMixin):
+class TwoPhaseFlowwithAnalyzer(ComparisonMixin, TwoPhaseFlow):
     def __init__(self, params=None, reference_solution=None):
         TwoPhaseFlow.__init__(self, params)
-        AnalyzerMixin.__init__(self, reference_solution)
+        ComparisonMixin.__init__(self, reference_solution)
 
 
 @pytest.fixture

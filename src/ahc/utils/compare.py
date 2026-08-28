@@ -1,57 +1,172 @@
+import json
+import pathlib
+from dataclasses import asdict, dataclass
+from typing import cast
+
+import numpy as np
+import porepy as pp
+from matplotlib.pylab import cast
+
 from ahc.models.protocol import TPFProtocol
 
 
-class AnalyzerMixin(TPFProtocol):
-    def __init__(self, params: dict | None, **kwargs) -> None:
-        # Ignore mypy. When mixed in with a concrete class, super().__init__ takes
-        # params.
-        super().__init__(params)  # type: ignore
+# No attributes are added dynamically -> use slots=True for memory efficiency.
+@dataclass(slots=True)
+class SolutionVals:
+    pressure: np.ndarray
+    saturation: np.ndarray
+    total_flux: np.ndarray
+    wetting_flux: np.ndarray
+    flow_residual: np.ndarray
+    transport_residual: np.ndarray
 
-        if "reference_solution" in kwargs:
-            self.reference_solution = kwargs["reference_solution"]
-            self.reference_model = self.__class__(self.params)
-            self.reference_model.set_values(self.reference_solution)
-        else:
-            raise ValueError("Reference solution must be provided for analysis.")
 
-    def compare_primary_variables(self) -> dict[str, np.ndarray]:
-        if not hasattr(self, "reference_model"):
-            raise ValueError(
-                "Reference model is not set. Cannot compare primary variables."
-            )
+# No attributes are added dynamically -> use slots=True for memory efficiency.
+@dataclass(slots=True)
+class ComparisonStats:
+    pressure_diff_norm: float
+    pressure_diff_max: float
+    pressure_diff_min: float
 
-        # Compare the primary variables of the current model with the reference model
-        current_primary_vars = self.get_primary_variables()
-        reference_primary_vars = self.reference_model.get_primary_variables()
+    saturation_diff_norm: float
+    saturation_diff_max: float
+    saturation_diff_min: float
 
-        # Calculate the difference between the two primary variables
-        primary_var_difference = current_primary_vars - reference_primary_vars
+    total_flux_diff_norm: float
+    total_flux_diff_max: float
+    total_flux_diff_min: float
 
-        return {
-            "current_primary_vars": current_primary_vars,
-            "reference_primary_vars": reference_primary_vars,
-            "primary_var_difference": primary_var_difference,
-        }
+    wetting_flux_diff_norm: float
+    wetting_flux_diff_max: float
+    wetting_flux_diff_min: float
 
-    def compare_fluxes(self) -> dict[str, np.ndarray]:
-        if not hasattr(self, "reference_model"):
-            raise ValueError("Reference model is not set. Cannot compare fluxes.")
+    flow_residual_norm: float
+    transport_residual_norm: float
 
-        # Compare the fluxes of the current model with the reference model
-        current_fluxes = self.get_fluxes()
-        reference_fluxes = self.reference_model.get_fluxes()
 
-        # Calculate the difference between the two fluxes
-        flux_difference = current_fluxes - reference_fluxes
+def _difference_stats(
+    current: np.ndarray, reference: np.ndarray
+) -> tuple[float, float, float]:
+    diff = current - reference
+    return (
+        np.linalg.norm(diff).item(),
+        np.max(diff).item(),
+        np.min(diff).item(),
+    )
 
-        return {
-            "current_fluxes": current_fluxes,
-            "reference_fluxes": reference_fluxes,
-            "flux_difference": flux_difference,
-        }
 
-    def analyze(
-        self,
-    ):
-        # Perform analysis on the model
-        second
+class ComparisonMixin(TPFProtocol):
+    """_summary_"""
+
+    def save_solution(self) -> None:
+        """Save the current variable values as numpy arrays."""
+        solution = self.equation_system.get_variable_values(
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+            iterate_index=0,
+        )
+        np.save(self.params["folder_name"] / "solution.npy", solution)
+
+    def compare_with_reference(self, reference_solution: np.ndarray) -> ComparisonStats:
+        """Compare current approximation with a reference solution and return statistics
+        about the differences.
+
+        Parameters:
+            reference_solution: Reference saturation and pressure values (in that order)
+                for the same problem.
+
+        Returns:
+            _description_
+
+        """
+        current_solution = self.equation_system.get_variable_values(
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+            iterate_index=0,
+        )
+        # Evaluate current and reference solution statistics
+        solution_stats = self.collect_solution_values()
+        self.equation_system.set_variable_values(
+            values=reference_solution,
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+            iterate_index=0,
+        )
+        reference_stats = self.collect_solution_values()
+        # Restore the current solution values.
+        self.equation_system.set_variable_values(
+            values=current_solution,
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+            iterate_index=0,
+        )
+
+        # Calculate differences between current and reference statistics.
+
+        pressure_diff_norm, pressure_diff_max, pressure_diff_min = _difference_stats(
+            solution_stats.pressure, reference_stats.pressure
+        )
+        saturation_diff_norm, saturation_diff_max, saturation_diff_min = (
+            _difference_stats(solution_stats.saturation, reference_stats.saturation)
+        )
+        total_flux_diff_norm, total_flux_diff_max, total_flux_diff_min = (
+            _difference_stats(solution_stats.total_flux, reference_stats.total_flux)
+        )
+        wetting_flux_diff_norm, wetting_flux_diff_max, wetting_flux_diff_min = (
+            _difference_stats(solution_stats.wetting_flux, reference_stats.wetting_flux)
+        )
+
+        return ComparisonStats(
+            pressure_diff_norm=pressure_diff_norm,
+            pressure_diff_max=pressure_diff_max,
+            pressure_diff_min=pressure_diff_min,
+            saturation_diff_norm=saturation_diff_norm,
+            saturation_diff_max=saturation_diff_max,
+            saturation_diff_min=saturation_diff_min,
+            total_flux_diff_norm=total_flux_diff_norm,
+            total_flux_diff_max=total_flux_diff_max,
+            total_flux_diff_min=total_flux_diff_min,
+            wetting_flux_diff_norm=wetting_flux_diff_norm,
+            wetting_flux_diff_max=wetting_flux_diff_max,
+            wetting_flux_diff_min=wetting_flux_diff_min,
+            flow_residual_norm=np.linalg.norm(solution_stats.flow_residual).item(),
+            transport_residual_norm=np.linalg.norm(
+                solution_stats.transport_residual
+            ).item(),
+        )
+
+    def collect_solution_values(self) -> SolutionVals:
+        g: pp.Grid = self.g
+        es: pp.EquationSystem = self.equation_system
+
+        primary_variables = es.get_variable_values(
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+            iterate_index=0,
+        )
+        saturation, pressure = (
+            primary_variables[: g.num_cells],
+            primary_variables[g.num_cells :],
+        )
+
+        # The values of the fluxes and equations are always np.ndarrays for the
+        # TwoPhaseFlow model. Cast them to np.ndarray to satisfy mypy.
+        total_flux = cast(np.ndarray, self.total_flux(g).value(es))
+        wetting_flux = cast(np.ndarray, self.wetting_flux(g).value(es))
+
+        flow_residual = cast(
+            np.ndarray, self.equation_system.equations[self.flow_equation].value(es)
+        )
+        transport_residual = cast(
+            np.ndarray,
+            self.equation_system.equations[self.transport_equation].value(es),
+        )
+
+        return SolutionVals(
+            pressure=pressure,
+            saturation=saturation,
+            total_flux=total_flux,
+            wetting_flux=wetting_flux,
+            flow_residual=flow_residual,
+            transport_residual=transport_residual,
+        )
+
+
+def save_comparison_stats(stats: ComparisonStats, filename: pathlib.Path) -> None:
+    with filename.open("w") as f:
+        json.dump(asdict(stats), f)
