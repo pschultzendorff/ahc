@@ -548,8 +548,16 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
 
         # NOTE It might be faster to use a spanning tree here.
         if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
-            # self.D will be a numpy array. Ignore mypy.
-            self.D: np.ndarray = pp.ad.Divergence([self.g]).value(self.equation_system)  # type: ignore
+            # Divergence will be a coo matrix. Ignore mypy.
+            D_dense: np.ndarray = (
+                pp.ad.Divergence([self.g]).value(self.equation_system).todense()  # type: ignore
+            )
+
+            # Zero the Neumann boundary faces. Equilibrated fluxes shall not exchange
+            # mass through Neumann boundaries. self.D has shape (num_cells, num_faces).
+            # D_dense[:, self.g.get_boundary_faces()] = 0.0
+
+            self.D = sps.coo_matrix(D_dense)
             A = sps.csc_matrix(self.D @ self.D.T)
             self.solve_A = factorized(A)
 
@@ -660,34 +668,36 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
         equilibrated_flux: np.ndarray = val + jac @ unbounded_nonlinear_increment
 
         # 4. Add an equilibrated flux for the saturation difference between bounded and
-        #    unbounded increment.
+        #    unbounded increment. This is only required for the wetting flux.
         if (
-            self._nl_appleyard_chopping or self._nl_enforce_physical_saturation
-        ) and not np.allclose(
-            unbounded_nonlinear_increment,
-            # bounded_nonlinear_increment was computed before. Ignore mypy.
-            bounded_nonlinear_increment,  # type: ignore
-            rtol=1e-20,
-            atol=1e-20,
+            flux_name == WETTING_FLUX
+            and (self._nl_appleyard_chopping or self._nl_enforce_physical_saturation)
+            and not np.allclose(
+                unbounded_nonlinear_increment[: self.g.num_cells],
+                # bounded_nonlinear_increment was computed before. Ignore mypy.
+                bounded_nonlinear_increment[: self.g.num_cells],  # type: ignore
+                rtol=1e-20,
+                atol=1e-20,
+            )
         ):
-            equilibrated_flux += self.equilibrate_increment_diff(
-                bounded_nonlinear_increment - unbounded_nonlinear_increment
+            # IMPLEMENTATION NOTE For some reason we need a minus sign instead of a plus
+            # sign.
+            equilibrated_flux -= self.equilibrate_increment_diff(
+                unbounded_nonlinear_increment - bounded_nonlinear_increment
             )
 
         pp.set_solution_values(
-            f"{flux_name}_equil",
-            equilibrated_flux,
-            self.g_data,
-            iterate_index=0,
+            f"{flux_name}_equil", equilibrated_flux, self.g_data, iterate_index=0
         )
 
     def equilibrate_increment_diff(
         self, nonlinear_increment_diff: np.ndarray
     ) -> np.ndarray:
-        """Compute an equilibrated flux for the bounded part of the nonlinear increment.
+        """Compute the equilibrated wetting flux for the bounded part of the nonlinear
+        increment.
 
         This pushes/pulls mass out of/into the domain to equilibrate the difference in
-        the nonlinear increment.
+        mass change due to the difference in the nonlinear increment.
 
         """
         logger.info(
@@ -695,8 +705,17 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
             " increment."
         )
         saturation_increment_diff = nonlinear_increment_diff[: self.g.num_cells]
-        # Solve DD^T x = D * diff_nonlinear_increment for x.
-        return self.D.T @ (self.solve_A(saturation_increment_diff))
+
+        # The equilibrated wetting flux satisfies an equation involving the scaled time
+        # derivative of the saturation.
+        rhs = (
+            self.porosity(self.g) * self.g.cell_volumes * saturation_increment_diff
+        ) / self.time_manager.dt
+
+        # Solve DD^T x = rhs for D^T x.
+        corr = self.D.T @ (self.solve_A(rhs))
+
+        return corr
 
     def extend_fv_fluxes(
         self,
@@ -770,7 +789,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
 
             # Perform actual reconstruction and obtain coefficients
             coeffs = np.zeros([self.g.num_cells, self.g.dim + 1])
-            alpha = 1 / (self.g.dim * vol_cell)
+            alpha = 1 / (float(self.g.dim) * vol_cell)
             coeffs[:, 0] = alpha * np.sum(sign_normals_cell * flux[faces_cell], axis=1)
             for dim in range(self.g.dim):
                 coeffs[:, dim + 1] = -alpha * np.sum(
@@ -959,15 +978,21 @@ class RecSolutionStrategy(  # type: ignore
         # `iterate_index` 0 and `time_step_index` 0.
         self.eval_postproc_qtys(time_step_index=0)
 
-        # Flux equilibration needs two iterates. Initialize the current and the previous
-        # ``iterate_index`` with the same data by calling ``eval_postproc_qtys`` twice.
-        self.eval_postproc_qtys()
+        # # Flux equilibration needs two iterates. Initialize the current and the previous
+        # # ``iterate_index`` with the same data by calling ``eval_postproc_qtys`` twice.
+        # self.eval_postproc_qtys()
 
         self.postprocess_solution(
             unbounded_nonlinear_increment=np.zeros(self.g.num_cells * 2),
             bounded_nonlinear_increment=np.zeros(self.g.num_cells * 2),
             prepare_simulation=True,
         )
+
+    @typing.override
+    def before_nonlinear_loop(self) -> None:
+        # Flux equilibration needs two iterates. Initialize the current and the previous
+        # ``iterate_index`` with the same data by calling ``eval_postproc_qtys`` twice.
+        self.eval_postproc_qtys()
 
     @typing.override
     def before_nonlinear_iteration(self) -> None:
