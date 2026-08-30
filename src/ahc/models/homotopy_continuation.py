@@ -686,6 +686,19 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
     # region HC LOOP
     def before_hc_loop(self) -> None:
         """Reset HC parameter and residuals."""
+        # Update time step size.
+        self.ad_time_step.set_value(self.time_manager.dt)
+
+        # Reset hc statistics including lambda and decay.
+        self.nonlinear_solver_statistics.hc_reset()
+        self.hc_decay = self.hc_init_decay
+        self.hc_decay_recomp_counter = 0
+        self.convergence_status = False
+
+        # Use previous time step values as the initial HC guess.
+        time_step_values = self.equation_system.get_variable_values(time_step_index=0)
+        self.equation_system.set_variable_values(time_step_values, hc_index=0)
+
         # Reset ``self.original_dt`` if ``self.original_time + self.original_dt`` has
         # been reached.
         if (
@@ -694,14 +707,6 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         ):
             self.original_dt = None
             self.original_time = self.time_manager.time
-
-        # Reset lambda and decay.
-        self.nonlinear_solver_statistics.hc_reset()
-        self.hc_decay = self.hc_init_decay
-        self.hc_decay_recomp_counter = 0
-        self.convergence_status = False
-        # We do not need to specifically set the solution from the previous time step as
-        # a first guess, as this solution is stored at ``hc_index = 0`` anyways.
 
     def before_hc_iteration(self) -> None:
         pass
@@ -970,7 +975,7 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
     def before_nonlinear_loop(self) -> None:
         """Set the starting estimator to the solution from the previous continuation
         step."""
-        # Update time step size and empty statistics.
+        # Empty statistics.
         self.ad_time_step.set_value(self.time_manager.dt)
         self.nonlinear_solver_statistics.reset()
 
@@ -981,6 +986,11 @@ class SolutionStrategyHC(HCProtocol, EstimatesSolutionStrategy):  # type: ignore
         # NOTE One could check convergence once before starting the Newton loop. Perhaps
         # the solution from the previous HC iteration is already good enough. This way,
         # we would avoid one Newton iteration.
+
+        # Flux equilibration needs values at the current and previous iterates.
+        # At the beginning of each nonlinear loop, initialize once. These values will be
+        # shifted during after_nonlinear_iteration.
+        self.eval_postproc_qtys()
 
     def eval_postproc_qtys(self, time_step_index: int | None = None) -> None:
         """Calculate fluxes and total mobility w.r.t. the goal relative
