@@ -79,7 +79,9 @@ class TestEquilibratedFluxMixin:
         rng = np.random.default_rng(seed)
         nonlinear_increment_diff = rng.random(mock_model.g.num_cells)
 
-        flux_w_equil = pp.ad.DenseArray(
+        # IMPLEMENTATION NOTE For some reason we need a minus sign instead of a plus
+        # sign. Same as in equilibrate_flux_during_Newton.
+        flux_w_equil = pp.ad.Scalar(-1) * pp.ad.DenseArray(
             mock_model.equilibrate_increment_diff(nonlinear_increment_diff)
         )
 
@@ -103,7 +105,7 @@ class TestEquilibratedFluxMixin:
         # Ad flux.
         flux_w_equil_mismatch = (
             porosity_ad * (mock_model.volume_integral(dt_s, [mock_model.g], 1))
-            - div @ flux_w_equil
+            + div @ flux_w_equil
             - source_ad_w
         )
         flux_w_equil_mismatch_value = cast(
