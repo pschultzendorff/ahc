@@ -66,7 +66,9 @@ class ComparisonMixin(TPFProtocol):
         )
         np.save(self.params["folder_name"] / "solution.npy", solution)
 
-    def compare_with_reference(self, reference_solution: np.ndarray) -> ComparisonStats:
+    def compare_with_reference(
+        self, reference_solution: np.ndarray
+    ) -> tuple[ComparisonStats, ComparisonStats]:
         """Compare current approximation with a reference solution and return statistics
         about the differences.
 
@@ -75,7 +77,8 @@ class ComparisonMixin(TPFProtocol):
                 for the same problem.
 
         Returns:
-            _description_
+            A tuple of two ComparisonStats objects, representing the absolute and
+            relative differences between the current and reference solutions.
 
         """
         current_solution = self.equation_system.get_variable_values(
@@ -112,7 +115,7 @@ class ComparisonMixin(TPFProtocol):
             _difference_stats(solution_stats.wetting_flux, reference_stats.wetting_flux)
         )
 
-        return ComparisonStats(
+        absolute_stats = ComparisonStats(
             pressure_diff_norm=pressure_diff_norm,
             pressure_diff_max=pressure_diff_max,
             pressure_diff_min=pressure_diff_min,
@@ -130,6 +133,34 @@ class ComparisonMixin(TPFProtocol):
                 solution_stats.transport_residual
             ).item(),
         )
+
+        pressure_norm = np.linalg.norm(reference_stats.pressure).item()
+        saturation_norm = np.linalg.norm(reference_stats.saturation).item()
+        total_flux_norm = np.linalg.norm(reference_stats.total_flux).item()
+        wetting_flux_norm = np.linalg.norm(reference_stats.wetting_flux).item()
+
+        relative_stats = ComparisonStats(
+            pressure_diff_norm=pressure_diff_norm / pressure_norm,
+            pressure_diff_max=pressure_diff_max / pressure_norm,
+            pressure_diff_min=pressure_diff_min / pressure_norm,
+            saturation_diff_norm=saturation_diff_norm / saturation_norm,
+            saturation_diff_max=saturation_diff_max / saturation_norm,
+            saturation_diff_min=saturation_diff_min / saturation_norm,
+            total_flux_diff_norm=total_flux_diff_norm / total_flux_norm,
+            total_flux_diff_max=total_flux_diff_max / total_flux_norm,
+            total_flux_diff_min=total_flux_diff_min / total_flux_norm,
+            wetting_flux_diff_norm=wetting_flux_diff_norm / wetting_flux_norm,
+            wetting_flux_diff_max=wetting_flux_diff_max / wetting_flux_norm,
+            wetting_flux_diff_min=wetting_flux_diff_min / wetting_flux_norm,
+            flow_residual_norm=np.linalg.norm(solution_stats.flow_residual).item()
+            / np.linalg.norm(reference_stats.flow_residual).item(),
+            transport_residual_norm=np.linalg.norm(
+                solution_stats.transport_residual
+            ).item()
+            / np.linalg.norm(reference_stats.transport_residual).item(),
+        )
+
+        return absolute_stats, relative_stats
 
     def collect_solution_values(self) -> SolutionVals:
         g: pp.Grid = self.g

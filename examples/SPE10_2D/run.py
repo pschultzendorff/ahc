@@ -346,14 +346,21 @@ def run_simulation(
         # ReferenceSolution solver instead of the current solver.
         reference_solution_folder = pathlib.Path(
             *(
-                "ReferenceSolution" if p == config.solver_name else p
+                "ReferenceSolution_0.010_1.00e-02" if p == config.solver_specs() else p
                 for p in folder_name.parts
             )
         )
         reference_solution = np.load(reference_solution_folder / "solution.npy")
 
-        comparison_stats = model.compare_with_reference(reference_solution)
-        save_comparison_stats(comparison_stats, folder_name / "comparison_stats.json")
+        absolute_stats, relative_stats = model.compare_with_reference(
+            reference_solution
+        )
+        save_comparison_stats(
+            absolute_stats, folder_name / "absolute_comparison_stats.json"
+        )
+        save_comparison_stats(
+            relative_stats, folder_name / "relative_comparison_stats.json"
+        )
 
     # Save number of grid cells to a file.
     with (folder_name / "num_grid_cells.txt").open("w") as f:
@@ -750,14 +757,14 @@ def generate_buoyancy_varying_density() -> list[SimulationConfig]:
 
 studies: dict[str, list[SimulationConfig]] = {
     "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
-    # "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
-    # "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-    # "gravity_segregation": generate_gravity_segregation_cases(),
-    # "capillary_varying_rp": generate_capillary_varying_rp(),
-    # "capillary_varying_init_s": generate_capillary_varying_init_s(),
-    # "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
-    # "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
-    # "buoyancy_varying_density": generate_buoyancy_varying_density(),
+    "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
+    "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
+    "gravity_segregation": generate_gravity_segregation_cases(),
+    "capillary_varying_rp": generate_capillary_varying_rp(),
+    "capillary_varying_init_s": generate_capillary_varying_init_s(),
+    "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
+    "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
+    "buoyancy_varying_density": generate_buoyancy_varying_density(),
 }
 
 # endregion
