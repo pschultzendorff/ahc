@@ -881,6 +881,7 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
         self.nonlinear_solver_statistics.reset()
         self.convergence_status = False
 
+        # Use previous time step values as the initial Newton guess.
         time_step_values = self.equation_system.get_variable_values(time_step_index=0)
         self.equation_system.set_variable_values(
             time_step_values, iterate_index=0, additive=False
@@ -897,17 +898,21 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
             nonlinear_increment: The new solution, as computed by the non-linear solver.
 
         """
-        # Store the unbounded saturation. This is for reconstruction purposes only.
+
         if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
+            # Store the unbounded saturation. This is for reconstruction purposes only.
             self.unbounded_nonlinear_increment: np.ndarray = nonlinear_increment.copy()
 
-        # Apply Appleyard chopping and/or enforce physical saturation bounds.
-        # Saturation comes first in the nonlinear increment.
-        nonlinear_increment[: self.g.num_cells] = self.bound_saturation(
-            nonlinear_increment[: self.g.num_cells],
-            is_increment=True,
-            iterate_index=0,
-        )
+            # Apply Appleyard chopping and/or enforce physical saturation bounds.
+            # Saturation comes first in the nonlinear increment.
+            nonlinear_increment[: self.g.num_cells] = self.bound_saturation(
+                nonlinear_increment[: self.g.num_cells],
+                is_increment=True,
+                iterate_index=0,
+            )
+
+            # Store the bounded saturation. This is for reconstruction purposes only.
+            self.bounded_nonlinear_increment: np.ndarray = nonlinear_increment.copy()
 
         # Update primary variables.
         self.equation_system.shift_iterate_values(max_index=len(self.iterate_indices))

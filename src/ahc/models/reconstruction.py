@@ -683,7 +683,7 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
             # IMPLEMENTATION NOTE For some reason we need a minus sign instead of a plus
             # sign.
             equilibrated_flux -= self.equilibrate_increment_diff(
-                unbounded_nonlinear_increment - bounded_nonlinear_increment
+                bounded_nonlinear_increment - unbounded_nonlinear_increment
             )
 
         pp.set_solution_values(
@@ -978,10 +978,6 @@ class RecSolutionStrategy(  # type: ignore
         # `iterate_index` 0 and `time_step_index` 0.
         self.eval_postproc_qtys(time_step_index=0)
 
-        # # Flux equilibration needs two iterates. Initialize the current and the previous
-        # # ``iterate_index`` with the same data by calling ``eval_postproc_qtys`` twice.
-        # self.eval_postproc_qtys()
-
         self.postprocess_solution(
             unbounded_nonlinear_increment=np.zeros(self.g.num_cells * 2),
             bounded_nonlinear_increment=np.zeros(self.g.num_cells * 2),
@@ -990,8 +986,10 @@ class RecSolutionStrategy(  # type: ignore
 
     @typing.override
     def before_nonlinear_loop(self) -> None:
-        # Flux equilibration needs two iterates. Initialize the current and the previous
-        # ``iterate_index`` with the same data by calling ``eval_postproc_qtys`` twice.
+        super().before_nonlinear_loop()
+        # Flux equilibration needs values at the current and previous iterates.
+        # At the beginning of each time step, initialize once. These values will be
+        # shifted during after_nonlinear_iteration.
         self.eval_postproc_qtys()
 
     @typing.override
@@ -1021,14 +1019,16 @@ class RecSolutionStrategy(  # type: ignore
         # When Newton is run with Appleyard chopping, the unbounded nonlinear
         # increment has to be used to equilibrate the fluxes.
         if self._nl_appleyard_chopping or self._nl_enforce_physical_saturation:
-            if hasattr(self, "unbounded_nonlinear_increment"):
-                bounded_nonlinear_increment = nonlinear_increment
+            if hasattr(self, "unbounded_nonlinear_increment") and hasattr(
+                self, "bounded_nonlinear_increment"
+            ):
                 unbounded_nonlinear_increment = self.unbounded_nonlinear_increment
+                bounded_nonlinear_increment = self.bounded_nonlinear_increment
             else:
                 raise AttributeError(
-                    "The unbounded nonlinear increment vector has to be stored when"
-                    " Appleyard chopping or enforcing of physical saturations is"
-                    " enabled."
+                    "The bounded and unbounded nonlinear increment vectors have to be"
+                    " stored when Appleyard chopping or enforcing of physical"
+                    " saturations is enabled."
                 )
         else:
             bounded_nonlinear_increment = None
