@@ -48,7 +48,7 @@ class HCSolver:
         self.reference_solution = params.get("reference_solution", False)
 
     def solve(self, model: HCProtocol) -> tuple[bool, bool]:
-        """Solve the nonlinaer problem using the homotopy continuation (HC) algorithm.
+        """Solve the nonlinear problem using the homotopy continuation (HC) algorithm.
 
         Parameters:
             model: The model instance specifying the problem to be solved.
@@ -167,5 +167,5 @@ class HCSolver:
         else:
             raise RuntimeError(
                 "Cannot generate reference solution, since the HC got stuck in"
-                "a non-converged state."
+                " a non-converged state."
             )
