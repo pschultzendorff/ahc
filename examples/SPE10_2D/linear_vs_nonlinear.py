@@ -31,7 +31,7 @@ Model description:
     - Brooks-Corey-Mualem with :math:`n_b = 4, \eta = 2`
 - Capillary pressure model:
     - None
-    - Brooks-Corey with :math:`n_b = 4`
+    - Brooks-Corey with :math:`n_b = 4`, entry pressure 200 Pa
 
 """
 
@@ -43,7 +43,17 @@ import sys
 import warnings
 
 import numpy as np
-from run import cp_models, rp_models, run_simulation
+from run import (
+    CELL_SIZE,
+    SPE10_CASE,
+    SPE10_LAYER,
+    WATER_DENSITY,
+    ZERO_BUOYANCY_MODEL,
+    cp_models,
+    results_dir,
+    rp_models,
+    run_simulation,
+)
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -69,7 +79,6 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
-dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # endregion
 
@@ -78,55 +87,76 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 
 if __name__ == "__main__":
-    results_dir = dirname / "results"
     results_dir.mkdir(exist_ok=True)
 
-    spe10_layer: int = 55
     init_s: float = 0.3
+
     # Linear
     config = SimulationConfig(
-        file_name="linear",
-        folder_name=results_dir / "linear_vs_nonlinear" / f"linear_{init_s}",
+        results_dir=results_dir,
+        regime="viscous",
+        study="linear_vs_nonlinear",
+        case=f"linear_{init_s}",
         solver_name="AHC",
-        adaptive_error_ratio=1e-4,
+        hc_tol=1e-4,
+        nl_tol=0.1,
         init_s=init_s,
         rp_model_1=rp_models["linear"],
         rp_model_2=rp_models["linear"],
         cp_model_1=cp_models["None"],
         cp_model_2=cp_models["None"],
-        spe10_layer=spe10_layer,
+        buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+        buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+        spe10_cell_size=CELL_SIZE,
+        spe10_layer=SPE10_LAYER,
+        spe10_case=SPE10_CASE,
+        spe10_water_density=WATER_DENSITY,
     )
     run_simulation(config)
 
     # Nonlinear
     config = SimulationConfig(
-        file_name="nonlinear",
-        folder_name=results_dir / "linear_vs_nonlinear" / f"nonlinear_{init_s}",
+        results_dir=results_dir,
+        regime="viscous",
+        study="linear_vs_nonlinear",
+        case=f"nonlinear_{init_s}",
         solver_name="AHC",
-        adaptive_error_ratio=1e-4,
+        hc_tol=1e-4,
+        nl_tol=0.1,
         init_s=init_s,
         rp_model_1=copy.deepcopy(rp_models["linear"]),
         rp_model_2=copy.deepcopy(rp_models["Brooks-Corey_nb_4"]),
         cp_model_1=copy.deepcopy(cp_models["None"]),
-        cp_model_2=copy.deepcopy(cp_models["linear"]),
-        spe10_layer=spe10_layer,
+        cp_model_2=copy.deepcopy(cp_models["Brooks-Corey_nb_4"]),
+        buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+        buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+        spe10_cell_size=CELL_SIZE,
+        spe10_layer=SPE10_LAYER,
+        spe10_case=SPE10_CASE,
+        spe10_water_density=WATER_DENSITY,
     )
     run_simulation(config)
 
     # Nonlinear but stop at the first homotopy step
     config = SimulationConfig(
-        file_name="nonlinear_stop_early",
-        folder_name=results_dir
-        / "linear_vs_nonlinear"
-        / f"nonlinear_stop_early_{init_s}",
+        results_dir=results_dir,
+        regime="viscous",
+        study="linear_vs_nonlinear",
+        case=f"nonlinear_stop_early_{init_s}",
         solver_name="AHC",
-        adaptive_error_ratio=1.0,  # Stop early
+        hc_tol=1e-4,
+        nl_tol=0.1,
         init_s=init_s,
         rp_model_1=rp_models["linear"],
         rp_model_2=rp_models["Brooks-Corey_nb_4"],
         cp_model_1=cp_models["None"],
-        cp_model_2=cp_models["linear"],
-        spe10_layer=spe10_layer,
+        cp_model_2=cp_models["Brooks-Corey_nb_4"],
+        buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+        buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+        spe10_cell_size=CELL_SIZE,
+        spe10_layer=SPE10_LAYER,
+        spe10_case=SPE10_CASE,
+        spe10_water_density=WATER_DENSITY,
     )
     run_simulation(config)
 

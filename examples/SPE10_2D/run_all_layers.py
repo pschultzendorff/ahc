@@ -38,6 +38,7 @@ Model description:
 
 """
 
+import logging
 import os
 import pathlib
 import sys
@@ -45,12 +46,17 @@ import warnings
 
 import numpy as np
 from run import (
+    CELL_SIZE,
     LINEAR_RP_MODEL,
+    SPE10_CASE,
+    WATER_DENSITY,
     ZERO_BUOYANCY_MODEL,
     ZERO_CP_MODEL,
     cp_models,
+    results_dir,
     rp_models,
     run_simulation,
+    solvers_and_tols,
 )
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
@@ -71,21 +77,14 @@ np.seterr(all="raise")
 np.seterr(under="ignore")
 warnings.filterwarnings("default")
 
-dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
-results_dir = dirname / "results"
+# Setup logging level.
+logger = logging.getLogger()
+logging.basicConfig(level=logging.INFO)
 
 # endregion
 
 
 # region RUN
-solvers_and_tols: list[tuple[str, float, float]] = [
-    ("AHC", 0.1, 0.1),
-    ("AHC", 0.01, 0.1),
-    ("HC", 0.01, 1e-3),
-    ("HC", 0.01, 1e-5),
-    ("Newton", 0.0, 0.1),
-    ("NewtonAppleyard", 0.0, 0.1),
-]
 
 
 def generate_cases() -> list[SimulationConfig]:
@@ -110,7 +109,10 @@ def generate_cases() -> list[SimulationConfig]:
                     cp_model_2=cp_models["Brooks-Corey_nb_4"],
                     buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
                     buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_cell_size=CELL_SIZE,
                     spe10_layer=spe10_layer,
+                    spe10_case=SPE10_CASE,
+                    spe10_water_density=WATER_DENSITY,
                 )
             )
 

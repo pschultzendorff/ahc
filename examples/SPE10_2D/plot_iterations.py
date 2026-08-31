@@ -35,8 +35,7 @@ Model description:
 - Rel. perm. models (model_2; model_1 is linear for AHC):
     - Brooks-Corey-Mualem with n_b=4, eta=2.
 - Capillary pressure model (model_2; model_1 is None for AHC):
-    - None.
-    - Linear, entry pressure 50 Pa.
+    - Brooks-Corey with n_b=4, entry pressure 200 Pa.
 
 """
 
@@ -48,7 +47,18 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import cp_models, rp_models, run_simulation, solvers_and_ratios
+from run import (
+    CELL_SIZE,
+    SPE10_CASE,
+    SPE10_LAYER,
+    WATER_DENSITY,
+    ZERO_BUOYANCY_MODEL,
+    cp_models,
+    results_dir,
+    rp_models,
+    run_simulation,
+    solvers_and_tols,
+)
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -70,11 +80,9 @@ np.seterr(under="ignore")
 
 warnings.filterwarnings("default")
 
-# Setup logging.
+# Setup logging level.
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
-
-dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # endregion
 
@@ -88,50 +96,48 @@ time_manager_params = {
 }
 
 
-def generate_configs() -> list[SimulationConfig]:
+def generate_cases() -> list[SimulationConfig]:
     """Generate all simulation configurations."""
-    results_dir = dirname / "results"
-    results_dir.mkdir(exist_ok=True)
 
-    configs = []
+    cases = []
 
     # Varying init_s for the Brooks-Corey model.
     for init_s in [0.2, 0.3, 0.5]:
-        for solver_name, adaptive_error_ratio in solvers_and_ratios:
-            if solver_name == "HC":
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            if solver_name in ["HC", "ReferenceSolution"]:
                 # HC solver is not of interest here.
                 continue
-            elif solver_name == "AHC" and adaptive_error_ratio == 0.1:
-                # Run only the AHC solve with the lower adaptive error ratio.
-                continue
-            file_name = f"init_s_{init_s:.2f}"
-            folder_name = (
-                results_dir
-                / "iteration_plotting"
-                / f"{solver_name}_{adaptive_error_ratio:.3f}"
-                / file_name
-            )
-            configs.append(
+            cases.append(
                 SimulationConfig(
-                    file_name=file_name,
-                    folder_name=folder_name,
+                    results_dir=results_dir,
+                    regime="viscous",
+                    study="iteration_plotting",
+                    case=f"init_s_{init_s:.2f}",
                     solver_name=solver_name,
-                    adaptive_error_ratio=adaptive_error_ratio,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
                     init_s=init_s,
                     rp_model_1=rp_models["linear"],
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=cp_models["None"],
-                    cp_model_2=cp_models["linear"],
-                    spe10_layer=spe10_layer,
+                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_cell_size=CELL_SIZE,
+                    spe10_layer=SPE10_LAYER,
+                    spe10_case=SPE10_CASE,
+                    spe10_water_density=WATER_DENSITY,
                 )
             )
 
-    return configs
+    return cases
 
 
 if __name__ == "__main__":
-    configs = generate_configs()
-    for config in configs:
+    results_dir.mkdir(exist_ok=True)
+
+    study = generate_cases()
+    for config in study:
         run_simulation(
             config, time_manager_params=time_manager_params, iteration_exporting=True
         )

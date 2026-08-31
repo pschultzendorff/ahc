@@ -9,6 +9,7 @@ X. Wang and H. A. Tchelepi, “Trust-region based solver for nonlinear transport
 
 Model description:
 - 1200x2200 ft domain
+- No sink or source terms. Pure gravity segregation.
 - Simulation time: 30 days
 - Solid properties:
     - Porosity: Layers 10 and 55 of SPE10, case 2A.
@@ -22,9 +23,9 @@ Model description:
       phase (water), and fully saturated in the lower half of the domain with the less
       dense phase (oil).
 - Rel. perm. model:
-    - Brooks-Corey-Mualem
+    - Brooks-Corey-Mualem.
 - Capillary pressure model:
-    - Linear, entry pressure 50 Pa.
+    - Brooks-Corey-Mualem, entry pressure 200 Pa.
 
 """
 
@@ -36,7 +37,14 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import buoyancy_constants, cp_models, rp_models, run_simulation
+from run import (
+    CELL_SIZE,
+    buoyancy_models,
+    cp_models,
+    results_dir,
+    rp_models,
+    run_simulation,
+)
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -58,45 +66,45 @@ np.seterr(under="ignore")
 
 warnings.filterwarnings("default")
 
-# Setup logging.
+# Setup logging level.
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
-
-dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # endregion
 
 
 # region RUN
 time_manager_params = {
-    "schedule": np.array([0.0, 500.0 * pp.DAY]),
-    "dt_init": 2.5 * pp.DAY,
+    "schedule": np.array([0.0, 30.0 * pp.DAY]),
+    "dt_init": 1.0 * pp.DAY,
     "constant_dt": True,
 }
 
 
 if __name__ == "__main__":
-    results_dir = dirname / "results"
     results_dir.mkdir(exist_ok=True)
 
     for spe10_layer in [10, 55]:
         config = SimulationConfig(
-            file_name=f"plotting_layer_{spe10_layer}_gravity",
-            folder_name=results_dir / f"plotting_layer_{spe10_layer}_gravity",
+            results_dir=results_dir,
+            regime="gravity_segregation",
+            study="plotting",
+            case=f"layer_{spe10_layer}",
             solver_name="NewtonAppleyard",
-            adaptive_error_ratio=0.0,  # Disregarded
-            init_s=0.3,
-            rp_model_1=rp_models["linear"],
-            rp_model_2=rp_models["linear"],
-            cp_model_1=cp_models["None"],
-            cp_model_2=cp_models["None"],
-            buoyancy_constants_1=buoyancy_constants["gravity_on"],
-            buoyancy_constants_2=buoyancy_constants["gravity_on"],
+            hc_tol=0.0,  # Disregarded
+            nl_tol=0.0,  # Disregarded
+            init_s=0.0,  # Disregarded
+            rp_model_1=rp_models["Brooks-Corey_nb_4"],
+            rp_model_2=rp_models["Brooks-Corey_nb_4"],
+            cp_model_1=cp_models["Brooks-Corey_nb_4"],
+            cp_model_2=cp_models["Brooks-Corey_nb_4"],
+            buoyancy_constants_1=buoyancy_models["gravity_on"],
+            buoyancy_constants_2=buoyancy_models["gravity_on"],
+            spe10_cell_size=CELL_SIZE,
             spe10_layer=spe10_layer,
             spe10_case="gravity_segregation",
+            spe10_water_density=10000.0,
         )
-        run_simulation(
-            config, time_manager_params=time_manager_params, iteration_exporting=True
-        )
+        run_simulation(config, time_manager_params=time_manager_params)
 
 # endregion

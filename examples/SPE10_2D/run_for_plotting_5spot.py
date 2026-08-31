@@ -24,9 +24,9 @@ Model description:
 - Initial values:
     - Saturation: 0.3.
 - Rel. perm. model:
-    - Brooks-Corey-Mualem
+    - Brooks-Corey-Mualem.
 - Capillary pressure model:
-    - Linear, entry pressure 50 Pa.
+    - Brooks-Corey-Mualem, entry pressure 200 Pa.
 
 """
 
@@ -38,7 +38,15 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import buoyancy_constants, cp_models, rp_models, run_simulation
+from run import (
+    CELL_SIZE,
+    WATER_DENSITY,
+    ZERO_BUOYANCY_MODEL,
+    cp_models,
+    results_dir,
+    rp_models,
+    run_simulation,
+)
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -60,11 +68,9 @@ np.seterr(under="ignore")
 
 warnings.filterwarnings("default")
 
-# Setup logging.
+# Setup logging level.
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
-
-dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 # endregion
 
@@ -78,24 +84,27 @@ time_manager_params = {
 
 
 if __name__ == "__main__":
-    results_dir = dirname / "results"
     results_dir.mkdir(exist_ok=True)
-
     for spe10_layer in [10, 55]:
         config = SimulationConfig(
-            file_name=f"plotting_layer_{spe10_layer}_5spot",
-            folder_name=results_dir / f"plotting_layer_{spe10_layer}_5spot",
+            results_dir=results_dir,
+            regime="five_spot",
+            study="plotting",
+            case=f"layer_{spe10_layer}",
             solver_name="NewtonAppleyard",
-            adaptive_error_ratio=0.0,  # Disregarded
+            hc_tol=0.0,  # Disregarded
+            nl_tol=0.0,  # Disregarded
             init_s=0.3,
             rp_model_1=rp_models["Brooks-Corey_nb_4"],
             rp_model_2=rp_models["Brooks-Corey_nb_4"],
-            cp_model_1=cp_models["linear"],
-            cp_model_2=cp_models["linear"],
-            buoyancy_constants_1=buoyancy_constants["gravity_off"],
-            buoyancy_constants_2=buoyancy_constants["gravity_off"],
+            cp_model_1=cp_models["Brooks-Corey_nb_4"],
+            cp_model_2=cp_models["Brooks-Corey_nb_4"],
+            buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+            buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+            spe10_cell_size=CELL_SIZE,
             spe10_layer=spe10_layer,
             spe10_case="five_spot",
+            spe10_water_density=WATER_DENSITY,
         )
         run_simulation(config, time_manager_params=time_manager_params)
 
