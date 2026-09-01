@@ -9,7 +9,7 @@ sys.path.append(str(pathlib.Path(__file__).parent.parent))
 from SPE10_2D.plotting import _key_varying_rp, plot_study
 from utils import (
     SimulationConfig,
-    SimulationStatistics,
+    SolverStats,
 )
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
@@ -20,7 +20,7 @@ rel_errors: dict[str, str] = {}
 
 
 def _key_varying_ref_factor(
-    config: SimulationConfig, stats: SimulationStatistics
+    config: SimulationConfig, stats: SolverStats
 ) -> tuple[str, str]:
     return config.solver_specs(), str(stats.num_grid_cells)
 

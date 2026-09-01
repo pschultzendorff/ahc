@@ -54,6 +54,7 @@ import pathlib
 import shutil
 import sys
 import warnings
+from typing import Any
 
 import numpy as np
 import porepy as pp
@@ -92,7 +93,7 @@ np.seterr(under="ignore")
 
 warnings.filterwarnings("default")
 
-# Setup logging.
+# Setup logging level.
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
@@ -198,7 +199,7 @@ class SPE10Newton(
 
 # region UTILS
 
-# Set solver and time manager parameters specific to the current simulation.
+# Set solver and time manager parameters specific to all SPE10 simulations.
 default_params = {
     "progressbars": True,
     # Model:
@@ -330,28 +331,31 @@ def run_simulation(
     try:
         model = model_class(params)
         pp.run_time_dependent_model(model=model, params=params)
-    except Exception as exception:
-        if is_reference_solution:
-            # The reference solution is not allowed to fail.
-            raise
 
-        # It is okay to catch general exceptions because we recognize failed simulations
-        # in plotting.py.
+        if is_reference_solution:
+            model.save_solution()
+
+    # It is okay to catch general exceptions because we recognize failed simulations
+    # in plotting.py.
+    except Exception as exception:  # noqa: BLE001
         logger.error(f"Run failed with exception: {exception}.")
 
-    if is_reference_solution:
-        model.save_solution()
-    else:
-        # The reference solution is saved in the parallel path for the
-        # ReferenceSolution solver instead of the current solver.
-        reference_solution_folder = pathlib.Path(
+    # Save comparison stats if a reference solution exists. If not, skip this step.
+
+    # The reference solution was saved in the parallel path for the
+    # ReferenceSolution solver instead of the current solver.
+    reference_solution_file = (
+        pathlib.Path(
             *(
                 "ReferenceSolution_0.010_1.00e-02" if p == config.solver_specs() else p
                 for p in folder_name.parts
             )
         )
-        reference_solution = np.load(reference_solution_folder / "solution.npy")
+        / "solution.npy"
+    )
 
+    if not is_reference_solution and reference_solution_file.exists():
+        reference_solution = np.load(reference_solution_file)
         absolute_stats, relative_stats = model.compare_with_reference(
             reference_solution
         )
@@ -371,14 +375,14 @@ def run_simulation(
 
 # region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
-    ("ReferenceSolution", 0.01, 0.01),
-    ("AHC", 0.01, 0.01),
-    ("AHC", 0.1, 0.1),
-    ("AHC", 0.1, 0.01),
-    ("AHC", 0.01, 0.01),
-    ("HC", 0.05, 1e-3),
-    ("HC", 0.01, 1e-3),
-    ("HC", 0.01, 1e-5),
+    # ("ReferenceSolution", 0.01, 0.01),
+    # ("AHC", 0.01, 0.01),
+    # ("AHC", 0.1, 0.1),
+    # ("AHC", 0.1, 0.01),
+    # ("AHC", 0.01, 0.01),
+    # ("HC", 0.05, 1e-3),
+    # ("HC", 0.01, 1e-3),
+    # ("HC", 0.01, 1e-5),
     ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]
@@ -389,7 +393,7 @@ SPE10_CASE: str = "five_spot"
 WATER_DENSITY: float = water["density"]
 
 LINEAR_RP_MODEL = {"model": "linear", "limit": True}
-rp_models = {
+rp_models: dict[str, Any] = {
     "Brooks-Corey_nb_4": {
         "model": "Brooks-Corey-Mualem",
         "limit": True,
@@ -407,7 +411,7 @@ rp_models = {
 }
 
 ZERO_CP_MODEL = {"model": None}
-cp_models = {
+cp_models: dict[str, Any] = {
     "linear": {
         "model": "linear",
         "entry_pressure": 50 * pp.PASCAL,

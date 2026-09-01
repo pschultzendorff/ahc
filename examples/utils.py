@@ -12,6 +12,7 @@ import seaborn as sns
 from ahc.derived_models.spe10 import water
 from ahc.numerics.nonlinear.hc_solver import HCSolver
 from ahc.numerics.nonlinear.newton import ModifiedNewtonSolver
+from ahc.utils.compare import ComparisonStats
 from ahc.utils.constants_and_typing import FEET
 from ahc.viz.solver_statistics import SolverStatisticsANewton, SolverStatisticsHC
 from matplotlib.ticker import (
@@ -277,32 +278,36 @@ def setup_porepy_params(
             )
 
         case "Newton":
-            params = {
-                # Metadata:
-                "nonlinear_solver_statistics": SolverStatisticsANewton,
-                "nonlinear_solver": ModifiedNewtonSolver,
-                # Adaptive stopping criteria for Newton:
-                "nl_adaptive": True,
-                "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
-                # Non-adaptive stopping parameters and other solver parameters:
-                "nl_convergence_tol_abs": 1e-5,
-                "nl_convergence_tol_rel": 1e-5,
-                "nl_appleyard_chopping": False,
-                "nl_enforce_physical_saturation": True,
-            }
+            params.update(
+                {
+                    # Metadata:
+                    "nonlinear_solver_statistics": SolverStatisticsANewton,
+                    "nonlinear_solver": ModifiedNewtonSolver,
+                    # Adaptive stopping criteria for Newton:
+                    "nl_adaptive": True,
+                    "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
+                    # Non-adaptive stopping parameters and other solver parameters:
+                    "nl_convergence_tol_abs": 1e-5,
+                    "nl_convergence_tol_rel": 1e-5,
+                    "nl_appleyard_chopping": False,
+                    "nl_enforce_physical_saturation": True,
+                }
+            )
         case "NewtonAppleyard":
-            params = {
-                # Metadata:
-                "nonlinear_solver_statistics": SolverStatisticsANewton,
-                "nonlinear_solver": ModifiedNewtonSolver,
-                # Adaptive stopping criteria for Newton:
-                "nl_adaptive": True,
-                "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
-                # Non-adaptive stopping parameters and other solver parameters:
-                "nl_convergence_tol_abs": 1e-5,
-                "nl_convergence_tol_rel": 1e-5,
-                "nl_appleyard_chopping": True,
-            }
+            params.update(
+                {
+                    # Metadata:
+                    "nonlinear_solver_statistics": SolverStatisticsANewton,
+                    "nonlinear_solver": ModifiedNewtonSolver,
+                    # Adaptive stopping criteria for Newton:
+                    "nl_adaptive": True,
+                    "nl_error_ratio": nl_tol,  # Adaptive error ratio for Newton.
+                    # Non-adaptive stopping parameters and other solver parameters:
+                    "nl_convergence_tol_abs": 1e-5,
+                    "nl_convergence_tol_rel": 1e-5,
+                    "nl_appleyard_chopping": True,
+                }
+            )
         case _:
             raise ValueError(f"Unknown solver: {solver_name}")
 
@@ -402,7 +407,7 @@ def clean_up_after_simulation(config: SimulationConfig) -> None:
 
 
 @dataclass
-class SimulationStatistics:
+class SolverStats:
     """Class to store statistics read from a 'solver_statistics.json' file."""
 
     # IMPLEMENTATION NOTE The type of the list element will vary depending on the solver
@@ -478,15 +483,15 @@ def _parse_newton_steps(
     )
 
 
-def read_data(
+def read_solver_stats(
     config: SimulationConfig,
     expected_final_time: float,
-) -> SimulationStatistics:
+) -> SolverStats:
     with (config.folder_name() / "solver_statistics.json").open() as f:
         data: dict[str, Any] = json.load(f)
 
     time_steps = list(data.values())
-    stats = SimulationStatistics()
+    stats = SolverStats()
 
     # Read number of grid cells, before possibly returning empty statistics (when
     # failed).
@@ -541,8 +546,8 @@ def read_data(
     return stats
 
 
-def calc_relative_error(stats: SimulationStatistics) -> dict[str, float]:
-    """Calculate relative errors at the end of the simulation."""
+def calc_relative_est(stats: SolverStats) -> dict[str, float]:
+    """Calculate relative error estimators at the end of the simulation."""
     # Determine the solver by number of nested loops.
     solver_type = "Newton" if isinstance(stats.energy_norm[-1][-1], float) else "HC"
 
@@ -552,8 +557,8 @@ def calc_relative_error(stats: SimulationStatistics) -> dict[str, float]:
         else stats.energy_norm[-1][-1][-1]
     )
     result = {}
-    for error_name in ["total", "lin", "spat", "temp", "hc"]:
-        if error_name == "total":
+    for est_name in ["total", "lin", "spat", "temp", "hc"]:
+        if est_name == "total":
             if solver_type == "Newton":
                 result["total"] = (
                     stats.lin_estimator[-1][-1]
@@ -567,24 +572,24 @@ def calc_relative_error(stats: SimulationStatistics) -> dict[str, float]:
                     + stats.spat_estimator[-1][-1][-1]
                     + stats.temp_estimator[-1][-1][-1]
                 ) / energy_norm
-        elif error_name == "hc":
+        elif est_name == "hc":
             if solver_type == "HC":
-                result[error_name] = stats.hc_estimator[-1][-1][-1] / energy_norm
+                result[est_name] = stats.hc_estimator[-1][-1][-1] / energy_norm
         else:
             if solver_type == "Newton":
-                result[error_name] = (
-                    getattr(stats, error_name + "_estimator")[-1][-1] / energy_norm
+                result[est_name] = (
+                    getattr(stats, est_name + "_estimator")[-1][-1] / energy_norm
                 )
             else:
-                result[error_name] = (
-                    getattr(stats, error_name + "_estimator")[-1][-1][-1] / energy_norm
+                result[est_name] = (
+                    getattr(stats, est_name + "_estimator")[-1][-1][-1] / energy_norm
                 )
 
     return result
 
 
 def plot_nl_iterations(
-    data: dict[tuple[str, str], SimulationStatistics],
+    data: dict[tuple[str, str], SolverStats],
     varying_param_name: str,
     title: str | None = None,
     **kwargs,
@@ -614,6 +619,7 @@ def plot_nl_iterations(
         ]
     )
     data_as_array = np.zeros(len(data), dtype=data_dtype)
+
     for i, ((solver_specs, parameter_value), stats) in enumerate(data.items()):
         # Transform the solver specs into annotations. Unique annotations for each
         # combination of solver name and specs.
@@ -650,7 +656,6 @@ def plot_nl_iterations(
         if not stats.converged:
             data_as_array[i]["final_time"] = stats.final_time
             # Leave the other statistics empty if the solver did not converge.
-            continue
 
         tot_nl_iterations = (
             sum(stats.timestep_nl_iters)
@@ -727,10 +732,8 @@ def plot_nl_iterations(
         ax.text(
             j + 0.5,
             i + 0.5,
-            (
-                r"Reached min. $\Delta t$"
-                f"\nat t={grids['final_time'][i, j] / 86400:.1f} d"
-            ),
+            f"failed at t={grids['final_time'][i, j] / 86400:.1f} d\n"
+            + grids["annotation"][i, j],
             ha="center",
             va="center",
             fontsize=10,
@@ -772,7 +775,7 @@ def plot_nl_iterations(
 
 
 def plot_estimators(
-    stats: SimulationStatistics,
+    stats: SolverStats,
     title: str | None = None,
     combine_disc_est: bool = False,
     **kwargs,
@@ -970,7 +973,7 @@ def plot_estimators(
 
 
 def plot_convergence(
-    stats: list[SimulationStatistics],
+    stats: list[SolverStats],
     parameters: list[float],
     parameter_name: str,
 ) -> plt.Figure:
@@ -1037,24 +1040,23 @@ def plot_convergence(
         x_label = "Number of grid cells"
         y_label = r"$\eta_{\mathrm{spat}}$"
         title = "Convergence of Spatial Error Estimator"
+
+        inset_loc = "lower left"
+        slope = -1.0  # Spatial estimator decreases with higher cell count.
+
     elif parameter_name == "time_step_size":
         x_label = "Time step size ($s$)"
         y_label = r"$\eta_{\mathrm{temp}}$"
         title = "Convergence of Temporal Error Estimator"
+
+        inset_loc = "lower right"
+        slope = 1.0  # Temporal estimator increases with larger time step.
 
     ax.set_xlabel(x_label, fontsize=14, fontweight="bold")
     ax.set_ylabel(y_label, fontsize=14, fontweight="bold")
     ax.set_title(title, fontsize=16, fontweight="bold")
 
     ax.grid(True, which="both", linestyle="--", linewidth=0.5, alpha=0.7)
-
-    # Add linear and quadratic reference lines on log-log scale.
-    if parameter_name == "num_grid_cells":
-        inset_loc = "lower left"
-        slope = -1.0  # Spatial estimator decreases with higher cell count.
-    elif parameter_name == "time_step_size":
-        inset_loc = "lower right"
-        slope = 1.0  # Temporal estimator increases with larger time step.
 
     ax_ins = inset_axes(ax, width="30%", height="30%", loc=inset_loc, borderpad=2)
 
@@ -1088,3 +1090,30 @@ def plot_convergence(
 
     fig.tight_layout()
     return fig
+
+
+def read_comparison_stats(
+    config: SimulationConfig,
+    comparison_stats: ComparisonStats,
+    expected_final_time: float,
+) -> ComparisonStats:
+    """Read statistics from a comparison simulation.
+
+    Note: It only makes sense to compare both, if both simulations converged in a single
+    time step.
+
+    Parameters:
+        config: The simulation configuration.
+        expected_final_time: The expected final time of the simulation.
+
+    Returns:
+        A SolverStats object containing the statistics of the simulation.
+
+    """
+    stats = read_solver_stats(config, expected_final_time)
+
+    # Check if the reference solution converged in a single time step.
+
+    # Check if the config solution converged in a single time step.
+
+    # Add to ...

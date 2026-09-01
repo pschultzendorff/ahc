@@ -45,6 +45,7 @@ from ahc.derived_models.spe11 import SPE11Mixin, case_B
 from ahc.models.adaptive_newton import TwoPhaseFlowANewton
 from ahc.models.homotopy_continuation import TwoPhaseFlowHC
 from ahc.models.protocol import TPFProtocol
+from ahc.utils.compare import ComparisonMixin, save_comparison_stats
 from ahc.viz.iteration_exporting import IterationExportingMixin
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
@@ -52,7 +53,6 @@ sys.path.append(str(pathlib.Path(__file__).parent.parent))
 from utils import SimulationConfig, clean_up_after_simulation, setup_porepy_params
 
 # region SETUP
-
 
 # Limit number of threads for NREC.
 N_THREADS = "4"
@@ -103,6 +103,7 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class SPE11HC(
+    ComparisonMixin,
     InitialConditionsMixin,
     SPE11Mixin,
     TwoPhaseFlowHC,
@@ -111,6 +112,7 @@ class SPE11HC(
 
 
 class SPE11Newton(
+    ComparisonMixin,
     InitialConditionsMixin,
     SPE11Mixin,
     TwoPhaseFlowANewton,
@@ -122,19 +124,17 @@ class SPE11Newton(
 
 # region UTILS
 
-default_solver_params = {
+# Set solver and time manager parameters specific to all SPE11 simulations.
+default_params = {
     "progressbars": True,
     # Model:
     "material_constants": {},
-    "rel_perm_constants": {},
-    "cap_press_constants": {},
     "grid_type": "simplex",
     # SPE11 parameters:
     "spe11_case": "B",
     "spe11_heterogeneous_cap_pressure": False,
-    "spe11_entry_pressure": 30.0,  # [Pa]
-    # Nonlinear solver:
-    "nl_enforce_physical_saturation": True,
+    # Error estimator:
+    "disable_spatial_est": False,
 }
 
 
@@ -143,10 +143,6 @@ default_time_manager_params = {
     "dt_init": 3000.0 * pp.DAY,
     "constant_dt": False,
     "dt_min_max": (1 * pp.DAY, 3000.0 * pp.DAY),
-    "iter_optimal_range": (9, 12),
-    "iter_relax_factors": (0.7, 1.3),
-    "recomp_factor": 0.1,
-    "recomp_max": 10,
 }
 
 
@@ -164,7 +160,7 @@ def setup_porepy_model(
         The model class with the correct adaptive solver.
 
     """
-    if config.solver_name in ["HC", "AHC"]:
+    if config.solver_name in ["HC", "AHC", "ReferenceSolution"]:
         model_class = SPE11HC
     elif config.solver_name in ["Newton", "NewtonAppleyard"]:
         model_class = SPE11Newton
@@ -183,11 +179,22 @@ def setup_porepy_model(
 
 def run_simulation(
     config: SimulationConfig,
-    solver_params: dict | None = None,
+    params: dict | None = None,
     time_manager_params: dict | None = None,
     **kwargs,
 ) -> None:
-    """Run simulation for a single configuration."""
+    """Run simulation for a single configuration.
+
+    Parameters:
+        config: The simulation configuration.
+        params: Optional dictionary of model and solver parameters. If None, default
+            parameters are used and updated with the parameters from the config.
+        time_manager_params: Optional dictionary of time manager parameters. If None,
+            default parameters are used and updated with the parameters from the config.
+        **kwargs: Additional keyword arguments to pass to the model setup and parameter
+            setup functions.
+
+    """
     logger.info(
         f"solver: {config.solver_name}, "
         f"HC tolerance: {config.hc_tol:.2f}, "
@@ -197,6 +204,7 @@ def run_simulation(
         f"RP model 1: {config.rp_model_1}, "
         f"RP model 2: {config.rp_model_2}, \n"
         f"CP model: {config.cp_model_2}."
+        f"Buoyancy: {config.buoyancy_constants_2}"
     )
 
     model_kwargs = kwargs.get("model_kwargs", {})
@@ -206,15 +214,11 @@ def run_simulation(
     additional_time_manager_params = kwargs.get("additional_time_manager_params", {})
 
     model_class = setup_porepy_model(config, **model_kwargs)
-    updated_solver_params, updated_time_manager_params = setup_porepy_params(config)
+    updated_params, updated_time_manager_params = setup_porepy_params(config)
 
     # Build porepy params dictionaries.
-    if solver_params is None:
-        solver_params = (
-            copy.deepcopy(default_solver_params)
-            | updated_solver_params
-            | additional_params
-        )
+    if params is None:
+        params = copy.deepcopy(default_params) | updated_params | additional_params
     if time_manager_params is None:
         time_manager_params = (
             copy.deepcopy(default_time_manager_params)
@@ -222,38 +226,24 @@ def run_simulation(
             | additional_time_manager_params
         )
 
-    # Newton and Appleyard Newton require only one of each constitutive law.
-    if config.solver_name.startswith("Newton"):
-        rel_perm_constants = config.rp_model_2
-        cap_press_constants = config.cp_model_2
-    else:
-        rel_perm_constants = {
-            "model_1": config.rp_model_1,
-            "model_2": config.rp_model_2,
-        }
-        cap_press_constants = {
-            "model_1": config.cp_model_1,
-            "model_2": config.cp_model_2,
-        }
-
     folder_name = config.folder_name()
+
+    # Update SPE11 specific params.
     # solver_params is not None at this point. Ignore pylance complaining.
-    solver_params.update(  # type: ignore
+    params.update(  # type: ignore
         {
             # Meshing and model:
             "meshing_arguments": {
                 "spe11_refinement_factor": config.spe11_refinement_factor
             },
-            "rel_perm_constants": rel_perm_constants,
-            "cap_press_constants": cap_press_constants,
             "spe11_initial_saturation": config.init_s,
             "spe11_entry_pressure": config.spe11_entry_pressure,
-            # Output:
-            "folder_name": folder_name,
-            "file_name": config.case.name
-            if isinstance(config.case, pathlib.Path)
-            else config.case,
-            "solver_statistics_file_name": folder_name / "solver_statistics.json",
+        }
+    )
+
+    # Add TimeManager to params.
+    params.update(  # type: ignore
+        {
             # All required parameters for TimeManager are included, ignore pylance
             # complaining.
             "time_manager": pp.TimeManager(**time_manager_params),  # type: ignore
@@ -264,14 +254,45 @@ def run_simulation(
     shutil.rmtree(folder_name, ignore_errors=True)
     folder_name.mkdir(parents=True)
 
-    try:
-        model = model_class(solver_params)
-        pp.run_time_dependent_model(model=model, params=solver_params)
+    is_reference_solution = config.solver_name == "ReferenceSolution"
 
-    # It is okay to catch general exceptions because we recognize failed
-    # simulations in plotting.py.
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Run failed with exception: {e}.")
+    try:
+        model = model_class(params)
+        pp.run_time_dependent_model(model=model, params=params)
+
+        if is_reference_solution:
+            model.save_solution()
+
+    # It is okay to catch general exceptions because we recognize failed simulations
+    # in plotting.py.
+    except Exception as exception:  # noqa: BLE001
+        logger.error(f"Run failed with exception: {exception}.")
+
+    # Save comparison stats if a reference solution exists. If not, skip this step.
+
+    # The reference solution was saved in the parallel path for the
+    # ReferenceSolution solver instead of the current solver.
+    reference_solution_file = (
+        pathlib.Path(
+            *(
+                "ReferenceSolution_0.010_1.00e-02" if p == config.solver_specs() else p
+                for p in folder_name.parts
+            )
+        )
+        / "solution.npy"
+    )
+
+    if not is_reference_solution and reference_solution_file.exists():
+        reference_solution = np.load(reference_solution_file)
+        absolute_stats, relative_stats = model.compare_with_reference(
+            reference_solution
+        )
+        save_comparison_stats(
+            absolute_stats, folder_name / "absolute_comparison_stats.json"
+        )
+        save_comparison_stats(
+            relative_stats, folder_name / "relative_comparison_stats.json"
+        )
 
     # Save number of grid cells to a file.
     with (folder_name / "num_grid_cells.txt").open("w") as f:
@@ -283,14 +304,19 @@ def run_simulation(
 # region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
     ("ReferenceSolution", 0.01, 0.01),
+    ("AHC", 0.01, 0.01),
     ("AHC", 0.1, 0.1),
-    ("AHC", 0.01, 0.1),
+    ("AHC", 0.1, 0.01),
+    ("AHC", 0.01, 0.01),
+    ("HC", 0.05, 1e-3),
     ("HC", 0.01, 1e-3),
     ("HC", 0.01, 1e-5),
     ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]
 refinement_factors: list[float] = [10, 5, 1]
+SPE11_ENTRY_PRESSURE: float = 100.0  # [Pa]
+
 
 LINEAR_RP_MODEL = {"model": "linear", "limit": True}
 rp_models: dict[str, Any] = {
@@ -306,8 +332,8 @@ rp_models: dict[str, Any] = {
         "n_b": 2.0,
         "eta": 2.0,
     },  #  n_1 = eta = 2, n_2 = 1 + 1/n_b = 2, n_3 = 1
-    "Corey_power_2": {"model": "Corey", "limit": True, "power": 2},
-    "Corey_power_3": {"model": "Corey", "limit": True, "power": 3},
+    "Corey_power_2": {"model": "Corey", "power": 2, "limit": True},
+    "Corey_power_3": {"model": "Corey", "power": 3, "limit": True},
 }
 
 ZERO_CP_MODEL = {"model": None}
@@ -348,6 +374,8 @@ def generate_viscous_varying_rp_cases(init_s: float) -> list[SimulationConfig]:
                     cp_model_2=cp_models["Brooks-Corey_nb_4"],
                     buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
                     buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe11_refinement_factor=refinement_factors[2],
+                    spe11_entry_pressure=SPE11_ENTRY_PRESSURE,
                 )
             )
 
@@ -379,6 +407,8 @@ def generate_viscous_varying_ref_factor(init_s: float) -> list[SimulationConfig]
                     cp_model_2=cp_models["Brooks-Corey_nb_4"],
                     buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
                     buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe11_refinement_factor=refinement_factors[2],
+                    spe11_entry_pressure=SPE11_ENTRY_PRESSURE,
                 )
             )
 

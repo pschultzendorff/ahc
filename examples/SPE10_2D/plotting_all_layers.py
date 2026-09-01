@@ -11,10 +11,10 @@ from run_all_layers import generate_cases
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from utils import (
-    SimulationStatistics,
+    SolverStats,
     _flatten_nested_list,
-    calc_relative_error,
-    read_data,
+    calc_relative_est,
+    read_solver_stats,
 )
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
@@ -55,7 +55,7 @@ def _mark_failed_runs(ax, x: np.ndarray, y: np.ndarray, color: str):
 
 
 def plot_statistics(
-    data: dict[str, SimulationStatistics],
+    data: dict[str, SolverStats],
 ):
     # Collect num_time_steps and num_iterations per solver and layer.
     num_iterations: dict[str, dict[str, float]] = defaultdict(dict)
@@ -82,7 +82,7 @@ def plot_statistics(
         # Forgot to save global energy norm for adaptive Newton, thus we use AHC to
         # calculate the relative errors.
         if solver.startswith("AHC"):
-            relative_errors[layer] = calc_relative_error(stats)
+            relative_errors[layer] = calc_relative_est(stats)
 
     # Turn into sorted arrays. Sorting in the first dimension is solvers/error_key, in
     # the second dimension layers.
@@ -207,7 +207,7 @@ if __name__ == "__main__":
         key = (
             f"{config.solver_name}_{config.hc_tol}_{config.nl_tol}_{config.spe10_layer}"
         )
-        data[key] = read_data(config, EXPECTED_FINAL_TIME)
+        data[key] = read_solver_stats(config, EXPECTED_FINAL_TIME)
     fig1, fig2, fig3 = plot_statistics(
         data,
     )

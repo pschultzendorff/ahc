@@ -13,22 +13,22 @@ sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
 from utils import (
     SimulationConfig,
-    SimulationStatistics,
-    calc_relative_error,
+    SolverStats,
+    calc_relative_est,
     plot_nl_iterations,
-    read_data,
+    read_solver_stats,
 )
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]  # type: ignore
 
-rel_errors: dict[str, str] = {}
+rel_ests: dict[str, str] = {}
 
 
 def plot_study(
     cases: list[SimulationConfig],
-    key_func: Callable[[SimulationConfig, SimulationStatistics], tuple[str, str]],
+    key_func: Callable[[SimulationConfig, SolverStats], tuple[str, str]],
     varying_param_name: str,
     **kwargs,
 ) -> Figure:
@@ -36,24 +36,27 @@ def plot_study(
     # plot_nl_iterations, we use tuples of strings as keys. The first string is the
     # solver name plus all relevant specs, while the second string is the parameter
     # value. See the various helper functions below for details.
-    data: dict[tuple[str, str], SimulationStatistics] = {}
+    data: dict[tuple[str, str], SolverStats] = {}
     for config in cases:
-        stats = read_data(config, EXPECTED_FINAL_TIME)
+        if config.solver_name == "ReferenceSolution":
+            # The solver statistics of the reference solution are not of interest.
+            continue
+        stats = read_solver_stats(config, EXPECTED_FINAL_TIME)
         key = key_func(config, stats)
         data[key] = stats
+
+        # Calculate relative estimator values for the finest AHC solution
         if config.solver_name == "AHC" and config.hc_tol == 0.01:
             if stats.converged:
-                rel_errors[f"{config.folder_name()}_{key}"] = (
-                    f"{calc_relative_error(stats)['total']:.2f}"
+                rel_ests[f"{config.folder_name()}_{key}"] = (
+                    f"{calc_relative_est(stats)['total']:.2f}"
                 )
             else:
-                rel_errors[f"{config.folder_name()}_{key}"] = "not converged"
+                rel_ests[f"{config.folder_name()}_{key}"] = "not converged"
     return plot_nl_iterations(data, varying_param_name, **kwargs)
 
 
-def _key_varying_rp(
-    config: SimulationConfig, stats: SimulationStatistics
-) -> tuple[str, str]:
+def _key_varying_rp(config: SimulationConfig, stats: SolverStats) -> tuple[str, str]:
     match config.rp_model_2["model"]:
         case "Corey":
             parameter_value = (
@@ -69,14 +72,12 @@ def _key_varying_rp(
 
 
 def _key_varying_init_s(
-    config: SimulationConfig, stats: SimulationStatistics
+    config: SimulationConfig, stats: SolverStats
 ) -> tuple[str, str]:
     return config.solver_specs(), str(config.init_s)
 
 
-def _key_varying_cap(
-    config: SimulationConfig, stats: SimulationStatistics
-) -> tuple[str, str]:
+def _key_varying_cap(config: SimulationConfig, stats: SolverStats) -> tuple[str, str]:
     parameter_value = f"Br.-C. $nb={config.cp_model_2['n_b']}$\n"
     match config.rp_model_2["model"]:
         case "Brooks-Corey-Mualem":
@@ -89,13 +90,13 @@ def _key_varying_cap(
 
 
 def _key_varying_entry_pressure(
-    config: SimulationConfig, stats: SimulationStatistics
+    config: SimulationConfig, stats: SolverStats
 ) -> tuple[str, str]:
     return config.solver_specs(), str(config.cp_model_2["entry_pressure"])
 
 
 def _key_varying_water_density(
-    config: SimulationConfig, stats: SimulationStatistics
+    config: SimulationConfig, stats: SolverStats
 ) -> tuple[str, str]:
     return config.solver_specs(), str(config.spe10_water_density)
 
@@ -104,7 +105,7 @@ if __name__ == "__main__":
     fig_dir = dirname / "figures"
     fig_dir.mkdir(exist_ok=True)
 
-    for study_name, (study, _) in studies.items():
+    for study_name, study in studies.items():
         kwargs = {}
         match study_name:
             case (
@@ -144,4 +145,4 @@ if __name__ == "__main__":
         fig.savefig(fig_dir / f"nl_iters_{study_name}.png")
 
     with (fig_dir / "relative_errors.txt").open("w") as f:
-        json.dump(rel_errors, f, indent=2)
+        json.dump(rel_ests, f, indent=2)

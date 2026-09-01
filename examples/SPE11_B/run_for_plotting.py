@@ -27,7 +27,14 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import cp_models, rp_models, run_simulation
+from run import (
+    SPE11_ENTRY_PRESSURE,
+    ZERO_BUOYANCY_MODEL,
+    cp_models,
+    results_dir,
+    rp_models,
+    run_simulation,
+)
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -67,20 +74,25 @@ time_manager_params = {
 }
 
 if __name__ == "__main__":
-    results_dir = dirname / "results"
     results_dir.mkdir(exist_ok=True)
 
     config = SimulationConfig(
-        file_name="plotting",
-        folder_name=results_dir / "plotting",
-        solver_name="NewtonAppleyard",  # NewtonAppleyard requires too many time steps
-        adaptive_error_ratio=0.00001,  # Almost disregarded
-        refinement_factor=1.0,
+        results_dir=results_dir,
+        regime="viscous",
+        study="plotting",
+        case="plotting",
+        solver_name="NewtonAppleyard",
+        hc_tol=0.0,  # Disregarded
+        nl_tol=1e-5,  # Almost disregarded
         init_s=0.8,
         rp_model_1=rp_models["linear"],
         rp_model_2=rp_models["Brooks-Corey_nb_4"],
         cp_model_1=cp_models["None"],
         cp_model_2=cp_models["Brooks-Corey_nb_4"],
+        buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+        buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+        spe11_refinement_factor=1.0,
+        spe11_entry_pressure=SPE11_ENTRY_PRESSURE,  # [Pa]
     )
     run_simulation(config, time_manager_params=time_manager_params)
 # endregion
