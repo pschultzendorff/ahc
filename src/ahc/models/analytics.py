@@ -7,6 +7,8 @@ from typing import Literal
 
 import numpy as np
 import porepy as pp
+from porepy.viz.exporter import DataInput
+
 from ahc.models.error_estimate import ErrorEstimatesTwoPhaseFlow
 from ahc.models.protocol import EstimatesProtocol
 from ahc.models.reconstruction import (
@@ -23,7 +25,6 @@ from ahc.utils.constants_and_typing import (
     WETTING_FLUX,
 )
 from ahc.viz.plot_quadratic_pressures import plot_quadratic_pressures
-from porepy.viz.exporter import DataInput
 
 logger = logging.getLogger(__name__)
 
@@ -125,21 +126,13 @@ class ErrorEstimateAnalyticsMixin(EstimatesProtocol):
         else:
             raise ValueError("Not implemented for tensor permeability.")
 
-        # 2: Get reconstructed pressure coefficients and mobilities.
-        if flux_name == TOTAL_FLUX:
-            pressure_keys = [GLOBAL_PRESSURE]
-            mobility_keys = ["total_mobility"]
-        elif flux_name == WETTING_FLUX:
-            pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
-            mobility_keys = ["total_mobility", "fractional_flow"]
-        else:
-            raise ValueError(f"Unknown flux name: {flux_name}")
-
+        # 2: Get post processed pressure coefficients.
         pressure_coeffs_new: dict[str, np.ndarray] = {}
         pressure_coeffs_old: dict[str, np.ndarray] = {}
         mobilities_new: dict[str, np.ndarray] = {}
         mobilities_old: dict[str, np.ndarray] = {}
 
+        pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
         for pressure_key in pressure_keys:
             pressure_coeffs_new[pressure_key] = pp.get_solution_values(
                 f"{pressure_key}_coeffs_postproc", self.g_data, iterate_index=0
@@ -148,15 +141,34 @@ class ErrorEstimateAnalyticsMixin(EstimatesProtocol):
                 f"{pressure_key}_coeffs_postproc", self.g_data, time_step_index=0
             )
 
-        for mobility_key in mobility_keys:
-            mobilities_new[mobility_key] = pp.get_solution_values(
-                mobility_key, self.g_data, iterate_index=0
-            )
-            mobilities_old[mobility_key] = pp.get_solution_values(
-                mobility_key, self.g_data, time_step_index=0
-            )
+        # 3: Define helper functions to evaluate mobilities from complementary pressure.
+        if flux_name == TOTAL_FLUX:
 
-        # 3: Define helper functions to evaluate fluxes from reconstructed pressures and
+            def evaluate_mobilities_from_pressure(
+                x: np.ndarray, coeffs: np.ndarray
+            ) -> np.ndarray:
+                q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
+                s_p2 = self.eval_saturation(q_p2)
+
+                # Non-upwinded total mobility.
+                return (
+                    self.rel_perm_np(s_p2, self.wetting) / self.wetting.viscosity
+                    + self.rel_perm_np(s_p2, self.nonwetting)
+                    / self.nonwetting.viscosity
+                )
+
+        elif flux_name == WETTING_FLUX:
+
+            def evaluate_mobilities_from_pressure(
+                x: np.ndarray, coeffs: np.ndarray
+            ) -> np.ndarray:
+                q_p2 = evaluate_poly_at_points(coeffs, x[..., 0], x[..., 1])
+                s_p2 = self.eval_saturation(q_p2)
+
+                # Non-upwinded wetting mobility.
+                return self.rel_perm_np(s_p2, self.wetting) / self.wetting.viscosity
+
+        # 4: Define helper functions to evaluate fluxes from reconstructed pressures and
         # P0 mobilities.
         if flux_name == TOTAL_FLUX:
 
@@ -172,11 +184,19 @@ class ErrorEstimateAnalyticsMixin(EstimatesProtocol):
                         pressure_coeffs[GLOBAL_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
-                total_mobility = phase_mobilities["total_mobility"]
+                total_mobility = evaluate_mobilities_from_pressure(
+                    x, pressure_coeffs[COMPLEMENTARY_PRESSURE]
+                )
+                # FIXME Include correct buoyancy terms!
+                wetting_buoyancy = 0.0
+                nonwetting_buoyancy = 0.0
+
                 return (
                     -perm_arr[None, :, None]
-                    * total_mobility[None, :, None]
+                    * total_mobility[..., None]
                     * global_pressure_pot
+                    - wetting_buoyancy
+                    - nonwetting_buoyancy
                 )
 
         elif flux_name == WETTING_FLUX:
@@ -196,17 +216,19 @@ class ErrorEstimateAnalyticsMixin(EstimatesProtocol):
                         pressure_coeffs[COMPLEMENTARY_PRESSURE], x[..., 0], x[..., 1]
                     )
                 )
-                wetting_mobility = (
-                    phase_mobilities["fractional_flow"]
-                    * phase_mobilities["total_mobility"]
+                wetting_mobility = evaluate_mobilities_from_pressure(
+                    x, pressure_coeffs[COMPLEMENTARY_PRESSURE]
                 )
+                # FIXME Include correct buoyancy term!
+                wetting_buoyancy = 0.0
 
                 return -perm_arr[None, :, None] * (
-                    wetting_mobility[None, :, None] * global_pressure_pot
+                    wetting_mobility[..., None] * global_pressure_pot
                     + complementary_pressure_pot
+                    - wetting_buoyancy
                 )
 
-        # 4: Define integrand that computes either the norm or the inner product of the
+        # 5: Define integrand that computes either the norm or the inner product of the
         # flux differences.
         def integrand(
             x: np.ndarray,

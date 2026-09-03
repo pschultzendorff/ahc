@@ -45,7 +45,7 @@ def plot_quadratic_pressures(
     nodes_of_cell = cell_nodes_map.reshape(g.num_cells, g.dim + 1)
 
     viz_mesh_to_grid = find_points_in_triangles(
-        xv_flat, yv, g.nodes[:2].T[nodes_of_cell]
+        xv_flat, yv_flat, g.nodes[:2].T[nodes_of_cell]
     )
     viz_mesh_coeffs = coeffs[viz_mesh_to_grid]
 
