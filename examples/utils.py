@@ -506,7 +506,6 @@ def read_solver_stats(
     stats.final_time = time_steps[-1]["current time"]
     if not np.isclose(stats.final_time, expected_final_time):
         stats.converged = False
-        return stats
 
     for time_step in time_steps[1:]:
         if config.solver_name.endswith("HC"):
