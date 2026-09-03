@@ -240,12 +240,12 @@ def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
 
         # Add all squares as physical surfaces.
         surface_lines[26] = (
-            "Physical Surface(Facies 5', 5) = {2, 3, 4, 5, 6, "
+            'Physical Surface("Facies 5", 5) = {2, 3, 4, 5, 6, '
             + ", ".join([f"{400 + i * 100 + 22}" for i in range(NUM_SQUARES)])
             + "};\n"
         )
         surface_lines[54] = (
-            "Physical Surface(Facies 4', 4) = {10, 11, 12, 13, 14, 15, 22, "
+            'Physical Surface("Facies 4", 4) = {10, 11, 12, 13, 14, 15, 22, '
             + ", ".join([f"{400 + i * 100 + 23}" for i in range(NUM_SQUARES)])
             + "};\n"
         )
@@ -328,13 +328,16 @@ def write_well_positions(geo_file: pathlib.Path, case: dict[str, Any]) -> None:
 
 
 def fix_face_normals(
-    gmsh_file: pathlib.Path, mesh_normal: np.ndarray = np.array([0, 0, 1])
+    gmsh_file: pathlib.Path, mesh_normal: np.ndarray | None = None
 ) -> pathlib.Path:
     """Fix the SPE11 mesh s.t. all face normals point in the same direction.
 
     Writes the fixed mesh to a `.msh` file with the same name as the input file.
 
     """
+    if mesh_normal is None:
+        mesh_normal = np.array([0, 0, 1])
+
     if gmsh_file.suffix == ".msh":
         out_file: pathlib.Path = gmsh_file
         gmsh.open(str(gmsh_file))
