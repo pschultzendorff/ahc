@@ -423,9 +423,8 @@ class EstimatesHCMixin(HCProtocol):
         is decomposed and separated into the temporal, continuation and linearization
         estimator.
 
-        Note: Appleyard damping or physical saturation clipping is used, the residual
-            estimator does, in general, NOT vanish, because the modified Newton update
-            does not align with the direction given by the Jacobian and residual.
+        The remaining residual error estimate is zero in theory and negligible in
+        practice. For faster evaluation, it may not be evaluated.
 
         Note: The residual estimator is not time dependent, hence we multiply the
         value at :math:`t_n` by :math:`\Delta t` to get the time integral.
@@ -434,23 +433,26 @@ class EstimatesHCMixin(HCProtocol):
             estimator: Global discretization error estimator.
 
         """
-        estimators: list[float] = []
-        for flux_name in (TOTAL_FLUX, WETTING_FLUX):
-            # Calculate local estimators.
-            self.local_residual_est(flux_name)
-            local_integral_R: np.ndarray = pp.get_solution_values(
-                f"{flux_name}_R_estimator", self.g_data, iterate_index=0
-            )
+        if self.params.get("ahc_fast_evaluation", True):
+            return 0.0
+        else:
+            estimators: list[float] = []
+            for flux_name in (TOTAL_FLUX, WETTING_FLUX):
+                # Calculate local estimators.
+                self.local_residual_est(flux_name)
+                local_integral_R: np.ndarray = pp.get_solution_values(
+                    f"{flux_name}_R_estimator", self.g_data, iterate_index=0
+                )
 
-            # NOTE The stored values are squared, hence we do not need to square
-            # here.
-            global_integral: float = local_integral_R.sum()
-            # Integrate in time by multiplying constant value with time step size.
-            estimators.append(self.time_manager.dt * global_integral)
-        # Sum estimators for both equations.
-        est: float = sum(estimators) ** 1 / 2
-        logger.info(f"Global residual error estimator: {est}")
-        return est
+                # NOTE The stored values are squared, hence we do not need to square
+                # here.
+                global_integral: float = local_integral_R.sum()
+                # Integrate in time by multiplying constant value with time step size.
+                estimators.append(self.time_manager.dt * global_integral)
+            # Sum estimators for both equations.
+            est: float = sum(estimators) ** 1 / 2
+            logger.info(f"Global residual error estimator: {est}")
+            return est
 
     def global_nc_est(self) -> tuple[float, float]:
         """Global nonconformity error estimates.
