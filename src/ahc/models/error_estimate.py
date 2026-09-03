@@ -275,13 +275,17 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 total_mobility = evaluate_mobilities_from_pressure(
                     x, pressure_coeffs[COMPLEMENTARY_PRESSURE]
                 )
+                # FIXME Include correct buoyancy terms!
+                wetting_buoyancy = 0.0
+                nonwetting_buoyancy = 0.0
+
                 return (
                     -perm_arr[None, :, None]
                     * total_mobility[..., None]
                     * global_pressure_pot
+                    - wetting_buoyancy
+                    - nonwetting_buoyancy
                 )
-
-        # FIXME Include buoyancy!
 
         elif flux_name == WETTING_FLUX:
 
@@ -290,7 +294,7 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 pressure_coeffs: dict[str, np.ndarray],
                 phase_mobilities: dict[str, np.ndarray],
             ) -> np.ndarray:
-                """Calculate the total flux from reconstructed pressures and P0
+                """Calculate the wetting flux from reconstructed pressures and P0
                 mobilities."""
                 global_pressure_pot = self._evaluate_pressure_potential_at_points(
                     pressure_coeffs[GLOBAL_PRESSURE], x[..., 0], x[..., 1]
@@ -303,10 +307,13 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 wetting_mobility = evaluate_mobilities_from_pressure(
                     x, pressure_coeffs[COMPLEMENTARY_PRESSURE]
                 )
+                # FIXME Include correct buoyancy term!
+                wetting_buoyancy = 0.0
 
                 return -perm_arr[None, :, None] * (
                     wetting_mobility[..., None] * global_pressure_pot
                     + complementary_pressure_pot
+                    - wetting_buoyancy
                 )
 
         # 5: Define integrand that computes either the norm or the inner product of the
@@ -328,6 +335,7 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 x, pressure_coeffs_new, phase_mobilities_new
             )
 
+            # FIXME the magnitude of both doesn't align.
             flux_diff_new = fv_flux_new - rec_flux_new
 
             if specifier == "_norm":

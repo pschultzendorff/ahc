@@ -306,6 +306,10 @@ class PressureReconstructionMixin(ReconstructionProtocol):
                         self.g_data,
                         iterate_index=0,
                     )
+                    # NOTE Substract the buoyancy contribution from the total flux to be
+                    # left with only viscous and capillary contributions. The gradient
+                    # of the global pressure equals - viscous and capillary
+                    # contributions.
                     - pp.get_solution_values(
                         f"{BUOYANCY_FLUX}{specifier}_RT0_coeffs",
                         self.g_data,
@@ -502,19 +506,6 @@ class PressureReconstructionMixin(ReconstructionProtocol):
             )
             coeffs_rec = linalg_solve_batch(A_elements, point_val)
 
-            # dirname = (
-            #     pathlib.Path(__file__).parent
-            #     / ".."
-            #     / ".."
-            #     / ".."
-            #     / "pressure_plots"
-            #     / (
-            #         f"{pressure_key}_{self.time_manager.time_index}"
-            #         + f"_{self.nonlinear_solver_statistics.num_iteration}"
-            #     )
-            # )
-            # dirname.mkdir(parents=True, exist_ok=True)
-
         # Store in data dictionary.
         pp.set_solution_values(
             f"{pressure_key}_coeffs_rec",
@@ -682,9 +673,10 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
         ):
             # IMPLEMENTATION NOTE For some reason we need a minus sign instead of a plus
             # sign.
-            equilibrated_flux -= self.equilibrate_increment_diff(
-                bounded_nonlinear_increment - unbounded_nonlinear_increment
-            )
+            # equilibrated_flux -= self.equilibrate_increment_diff(
+            #     bounded_nonlinear_increment - unbounded_nonlinear_increment
+            # )
+            pass
 
         pp.set_solution_values(
             f"{flux_name}_equil", equilibrated_flux, self.g_data, iterate_index=0
@@ -886,7 +878,15 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
         buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
         buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
 
-        capillary_flux = fractional_flow_upwinded * mobility_n * capillary_potential
+        # NOTE The capillary contribution is negative just as in :meth:`total_flux` and
+        # :meth:`wetting_flux`.
+        capillary_flux = (
+            pp.ad.Scalar(-1.0)
+            * fractional_flow_upwinded
+            * mobility_n
+            * capillary_potential
+        )
+        # NOTE The buoyancy contribution is positive just as in :meth:`total_flux`.
         buoyancy_flux = (
             mobility_w * buoyancy_potential_w + mobility_n * buoyancy_potential_n
         )

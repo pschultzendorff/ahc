@@ -1045,7 +1045,7 @@ class DarcyFluxes(TPFProtocol):
             - mobility_w * capillary_potential
             + mobility_w * buoyancy_potential_w
             # NOTE mobility_t * phase_potential_n includes mobility_t *
-            # buoyancy_potential_n, hence we need to subtract it here to get mobility_n
+            # buoyancy_potential_n, hence we need to subtract it here to get +mobility_n
             # * buoyancy_potential_n in the total flux. We also substract the epsilon
             #   term in mobility_t.
             - mobility_w * buoyancy_potential_n
