@@ -315,8 +315,7 @@ class PressureReconstructionMixin(ReconstructionProtocol):
                         self.g_data,
                         iterate_index=0,
                     )
-                    / total_mobility[..., None]
-                )
+                ) / total_mobility[..., None]
             elif pressure_key == COMPLEMENTARY_PRESSURE:
                 # - Complementary pressure gradient x permeability = capillary flux.
                 coeffs_flux = pp.get_solution_values(
@@ -880,6 +879,8 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
 
         # NOTE The capillary contribution is negative just as in :meth:`total_flux` and
         # :meth:`wetting_flux`.
+        # FIXME
+        # NOT SURE IF THIS IS CORRECT
         capillary_flux = (
             pp.ad.Scalar(-1.0)
             * fractional_flow_upwinded

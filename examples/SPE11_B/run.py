@@ -319,7 +319,7 @@ solvers_and_tols: list[tuple[str, float, float]] = [
     ("NewtonAppleyard", 0.0, 0.1),
 ]
 refinement_factors: list[float] = [10, 5, 1]
-SPE11_ENTRY_PRESSURE: float = 1.0  # [Pa]
+SPE11_ENTRY_PRESSURE: float = 200.0  # [Pa]
 
 
 LINEAR_RP_MODEL = {"model": "linear", "limit": True}
