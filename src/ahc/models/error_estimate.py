@@ -217,8 +217,6 @@ class ErrorEstimatesMixin(EstimatesProtocol):
         # 2: Get reconstructed pressure coefficients and mobilities
         pressure_coeffs_new: dict[str, np.ndarray] = {}
         pressure_coeffs_old: dict[str, np.ndarray] = {}
-        phase_mobilities_new: dict[str, np.ndarray] = {}
-        phase_mobilities_old: dict[str, np.ndarray] = {}
 
         pressure_keys = [GLOBAL_PRESSURE, COMPLEMENTARY_PRESSURE]
         for pressure_key in pressure_keys:
@@ -263,7 +261,6 @@ class ErrorEstimatesMixin(EstimatesProtocol):
             def evaluate_flux_from_reconstructions(
                 x: np.ndarray,
                 pressure_coeffs: dict[str, np.ndarray],
-                phase_mobilities: dict[str, np.ndarray],
             ) -> np.ndarray:
                 """Calculate the total flux from reconstructed pressures and P0
                 mobilities."""
@@ -292,7 +289,6 @@ class ErrorEstimatesMixin(EstimatesProtocol):
             def evaluate_flux_from_reconstructions(
                 x: np.ndarray,
                 pressure_coeffs: dict[str, np.ndarray],
-                phase_mobilities: dict[str, np.ndarray],
             ) -> np.ndarray:
                 """Calculate the wetting flux from reconstructed pressures and P0
                 mobilities."""
@@ -331,9 +327,7 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 x[..., 0],
                 x[..., 1],
             )
-            rec_flux_new = evaluate_flux_from_reconstructions(
-                x, pressure_coeffs_new, phase_mobilities_new
-            )
+            rec_flux_new = evaluate_flux_from_reconstructions(x, pressure_coeffs_new)
 
             # FIXME the magnitude of both doesn't align.
             flux_diff_new = fv_flux_new - rec_flux_new
@@ -350,7 +344,7 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                     x[..., 1],
                 )
                 rec_flux_old = evaluate_flux_from_reconstructions(
-                    x, pressure_coeffs_old, phase_mobilities_old
+                    x, pressure_coeffs_old
                 )
                 flux_diff_old = fv_flux_old - rec_flux_old
 
@@ -430,7 +424,7 @@ class ErrorEstimatesMixin(EstimatesProtocol):
             COMPLEMENTARY_PRESSURE + "_coeffs_rec", self.g_data, iterate_index=0
         )
 
-        # Porosity and length scale [m] for sclaing in the estimator.
+        # Porosity and length scale [m] for scaling in the estimator.
         porosity: np.ndarray = self.porosity(self.g)
         length_scale: np.ndarray = self.g.cell_volumes ** (1 / self.nd)
 
