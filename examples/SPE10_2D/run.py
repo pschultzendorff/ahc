@@ -375,14 +375,14 @@ def run_simulation(
 
 # region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
-    # ("ReferenceSolution", 0.01, 0.01),
-    # ("AHC", 0.01, 0.01),
-    # ("AHC", 0.1, 0.1),
-    # ("AHC", 0.1, 0.01),
-    # ("AHC", 0.01, 0.01),
-    # ("HC", 0.05, 1e-3),
-    # ("HC", 0.01, 1e-3),
-    # ("HC", 0.01, 1e-5),
+    ("ReferenceSolution", 0.01, 0.01),
+    ("AHC", 0.01, 0.01),
+    ("AHC", 0.1, 0.1),
+    ("AHC", 0.1, 0.01),
+    ("AHC", 0.01, 0.01),
+    ("HC", 0.05, 1e-3),
+    ("HC", 0.01, 1e-3),
+    ("HC", 0.01, 1e-5),
     ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]
@@ -627,7 +627,7 @@ def generate_capillary_varying_entry_pressure() -> list[SimulationConfig]:
 
     """
     cases = []
-    for entry_pressure in [200, 500, 1000]:
+    for entry_pressure in [200, 500, 1000, 2000.0]:
         for solver_name, hc_tol, nl_tol in solvers_and_tols:
             cp_model_2 = cp_models["Brooks-Corey_nb_4"].copy()
             cp_model_2["entry_pressure"] = entry_pressure * pp.PASCAL
@@ -659,8 +659,9 @@ def generate_capillary_varying_entry_pressure() -> list[SimulationConfig]:
 
 def generate_buoyancy_varying_rp() -> list[SimulationConfig]:
     """Generate simulations for coupled viscous-capillary-gravity flow with varying rel.
-    perm. models, Brooks-Corey capillary pressure, and an initial saturation of
-    :math:`0.3`.
+    perm. models, Brooks-Corey capillary pressure. The initial wetting saturation is set
+    to the residual saturation of :math:`0.2` to ensure the system is in gravitational
+    equilibrium at the start of the simulation.
 
     Note: The HC solvers are run both from gravity on and gravity off as an auxiliary
         problem.
@@ -694,7 +695,7 @@ def generate_buoyancy_varying_rp() -> list[SimulationConfig]:
                         solver_name_postfix=solver_name_postfix,
                         hc_tol=hc_tol,
                         nl_tol=nl_tol,
-                        init_s=0.3,
+                        init_s=0.2,
                         rp_model_1=LINEAR_RP_MODEL,
                         rp_model_2=rp_model,
                         cp_model_1=ZERO_CP_MODEL,
@@ -714,7 +715,9 @@ def generate_buoyancy_varying_rp() -> list[SimulationConfig]:
 def generate_buoyancy_varying_density() -> list[SimulationConfig]:
     """Generate simulations for coupled viscous-capillary-gravity flow with varying
     density contrast, the less challenging Brooks-Corey rel. perm. and capillary
-    pressure models, and an initial saturation of :math:`0.3`.
+    pressure models. The initial wetting saturation is set to the residual saturation of
+    :math:`0.2` to ensure the system is in gravitational equilibrium at the start of the
+    simulation.
 
     Note: The HC solvers are run both from gravity on and gravity off as an auxiliary
         problem.
@@ -742,7 +745,7 @@ def generate_buoyancy_varying_density() -> list[SimulationConfig]:
                         solver_name_postfix=solver_name_postfix,
                         hc_tol=hc_tol,
                         nl_tol=nl_tol,
-                        init_s=0.3,
+                        init_s=0.2,
                         rp_model_1=LINEAR_RP_MODEL,
                         rp_model_2=rp_models["Brooks-Corey_nb_4"],
                         cp_model_1=ZERO_CP_MODEL,
@@ -759,16 +762,70 @@ def generate_buoyancy_varying_density() -> list[SimulationConfig]:
     return cases
 
 
+def generate_buoyancy_varying_entry_pressure() -> list[SimulationConfig]:
+    """Generate simulations for coupled viscous-capillary-gravity flow with varying
+    entry pressure, the less challenging Brooks-Corey rel. perm. and capillary
+    pressure models. The initial wetting saturation is set to the residual saturation of
+    :math:`0.2` to ensure the system is in gravitational equilibrium at the start of the
+    simulation.
+
+    Note: The HC solvers are run both from gravity on and gravity off as an auxiliary
+        problem.
+
+    """
+    cases = []
+    for entry_pressure in [200.0, 500.0, 1000.0, 2000.0]:
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cp_model_2 = cp_models["Brooks-Corey_nb_4"].copy()
+            cp_model_2["entry_pressure"] = entry_pressure * pp.PASCAL
+
+            if solver_name.endswith("HC"):
+                hc_gravity_cases = [
+                    ("", ZERO_BUOYANCY_MODEL),
+                    ("from_gravity_on", buoyancy_models["gravity_on"]),
+                ]
+            else:
+                hc_gravity_cases = [("", ZERO_BUOYANCY_MODEL)]
+
+            for solver_name_postfix, buoyancy_constants_1 in hc_gravity_cases:
+                cases.append(
+                    SimulationConfig(
+                        results_dir=results_dir,
+                        regime="viscous_and_capillary_and_gravity",
+                        study="varying_entry_pressure",
+                        case=f"entry_pressure_{entry_pressure:.2f}",
+                        solver_name=solver_name,
+                        solver_name_postfix=solver_name_postfix,
+                        hc_tol=hc_tol,
+                        nl_tol=nl_tol,
+                        init_s=0.2,
+                        rp_model_1=LINEAR_RP_MODEL,
+                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                        cp_model_1=ZERO_CP_MODEL,
+                        cp_model_2=cp_model_2,
+                        buoyancy_constants_1=buoyancy_constants_1,
+                        buoyancy_constants_2=buoyancy_models["gravity_on"],
+                        spe10_cell_size=CELL_SIZE,
+                        spe10_layer=SPE10_LAYER,
+                        spe10_case=SPE10_CASE,
+                        spe10_water_density=WATER_DENSITY,  # kg/m^3
+                    )
+                )
+
+    return cases
+
+
 studies: dict[str, list[SimulationConfig]] = {
-    "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
-    "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
-    "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-    "gravity_segregation": generate_gravity_segregation_cases(),
-    "capillary_varying_rp": generate_capillary_varying_rp(),
-    "capillary_varying_init_s": generate_capillary_varying_init_s(),
-    "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
-    "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
-    "buoyancy_varying_density": generate_buoyancy_varying_density(),
+    # "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
+    # "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
+    # "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
+    # "gravity_segregation": generate_gravity_segregation_cases(),
+    # "capillary_varying_rp": generate_capillary_varying_rp(),
+    # "capillary_varying_init_s": generate_capillary_varying_init_s(),
+    # "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
+    # "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
+    # "buoyancy_varying_density": generate_buoyancy_varying_density(),
+    "buoyancy_varying_entry_pressure": generate_buoyancy_varying_entry_pressure(),
 }
 
 # endregion

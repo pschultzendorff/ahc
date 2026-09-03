@@ -45,12 +45,13 @@ import warnings
 import numpy as np
 from run import (
     CELL_SIZE,
+    LINEAR_RP_MODEL,
     SPE10_CASE,
     SPE10_LAYER,
     WATER_DENSITY,
     ZERO_BUOYANCY_MODEL,
+    ZERO_CP_MODEL,
     cp_models,
-    results_dir,
     rp_models,
     run_simulation,
 )
@@ -79,6 +80,9 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
+# Directories for results.
+dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
+results_dir = dirname / "results_linear_vs_nonlinear"
 
 # endregion
 
@@ -101,10 +105,10 @@ if __name__ == "__main__":
         hc_tol=1e-4,
         nl_tol=0.1,
         init_s=init_s,
-        rp_model_1=rp_models["linear"],
-        rp_model_2=rp_models["linear"],
-        cp_model_1=cp_models["None"],
-        cp_model_2=cp_models["None"],
+        rp_model_1=LINEAR_RP_MODEL,
+        rp_model_2=LINEAR_RP_MODEL,
+        cp_model_1=ZERO_CP_MODEL,
+        cp_model_2=ZERO_CP_MODEL,
         buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
         buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
         spe10_cell_size=CELL_SIZE,
@@ -124,9 +128,9 @@ if __name__ == "__main__":
         hc_tol=1e-4,
         nl_tol=0.1,
         init_s=init_s,
-        rp_model_1=copy.deepcopy(rp_models["linear"]),
+        rp_model_1=copy.deepcopy(LINEAR_RP_MODEL),
         rp_model_2=copy.deepcopy(rp_models["Brooks-Corey_nb_4"]),
-        cp_model_1=copy.deepcopy(cp_models["None"]),
+        cp_model_1=copy.deepcopy(ZERO_CP_MODEL),
         cp_model_2=copy.deepcopy(cp_models["Brooks-Corey_nb_4"]),
         buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
         buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
@@ -147,9 +151,9 @@ if __name__ == "__main__":
         hc_tol=1e-4,
         nl_tol=0.1,
         init_s=init_s,
-        rp_model_1=rp_models["linear"],
+        rp_model_1=LINEAR_RP_MODEL,
         rp_model_2=rp_models["Brooks-Corey_nb_4"],
-        cp_model_1=cp_models["None"],
+        cp_model_1=ZERO_CP_MODEL,
         cp_model_2=cp_models["Brooks-Corey_nb_4"],
         buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
         buoyancy_constants_2=ZERO_BUOYANCY_MODEL,

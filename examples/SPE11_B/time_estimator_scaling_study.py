@@ -14,14 +14,7 @@ import warnings
 
 import numpy as np
 import porepy as pp
-from run import (
-    SPE11_ENTRY_PRESSURE,
-    ZERO_BUOYANCY_MODEL,
-    cp_models,
-    results_dir,
-    rp_models,
-    run_simulation,
-)
+from run import cp_models, rp_models, run_simulation
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
@@ -55,130 +48,98 @@ logging.basicConfig(level=logging.INFO)
 
 # Directories for results.
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
-results_dir = dirname / "results_plot_convergence_study"
+results_dir = dirname / "results_plot_time_estimator_scaling_study"
 
 # endregion
 
 
 # region RUN
+refinement_factors: list[float] = [10, 5, 1, 0.5]
+time_step_sizes: list[float] = [1000, 500, 250, 100, 50, 25, 12.5]
+time_step_sizes = [ts * pp.DAY for ts in time_step_sizes]
 
 
-def generate_temporal_convergence_cases() -> list[SimulationConfig]:
-    cases = []
+def generate_configs() -> list[SimulationConfig]:
+    """Generate all simulation configurations."""
+    results_dir = dirname / "results"
+    results_dir.mkdir(exist_ok=True)
 
-    time_step_sizes: list[float] = [1000, 500, 250, 100, 50, 25, 12.5]
-    time_step_sizes = [ts * pp.DAY for ts in time_step_sizes]
+    configs = []
 
     for time_step_size in time_step_sizes:
         folder_name = (
             results_dir / "temporal_estimator_convergence" / f"dt_{time_step_size:.1f}"
         )
-        cases.append(
+        configs.append(
             SimulationConfig(
                 file_name="temporal_estimator_convergence",
                 folder_name=folder_name,
                 solver_name="AHC",
-                hc_tol=1e-5,  # Fixed for temporal study.
-                nl_tol=0.1,
+                adaptive_error_ratio=1e-5,  # Fixed for temporal study.
+                spe11_refinement_factor=refinement_factors[2],
                 init_s=0.8,
                 rp_model_1=rp_models["linear"],
                 rp_model_2=rp_models["Brooks-Corey_nb_4"],
                 cp_model_1=cp_models["None"],
                 cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
-                buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
-                spe11_refinement_factor=refinement_factors[2],
-                spe11_entry_pressure=SPE11_ENTRY_PRESSURE,
             )
         )
-    return cases
 
-
-def generate_spatial_convergence_cases() -> list[SimulationConfig]:
-    cases = []
-
-    for refinement_factor in = [10, 5, 1, 0.5]:
+    for refinement_factor in refinement_factors:
         folder_name = (
             results_dir / "spatial_estimator_convergence" / f"r_{refinement_factor:.1f}"
         )
-        cases.append(
+        configs.append(
             SimulationConfig(
                 file_name="spatial_estimator_convergence",
                 folder_name=folder_name,
                 solver_name="AHC",
-                hc_tol=1e-5,  # Fixed for spatial study.
-                nl_tol=0.1,
+                adaptive_error_ratio=1e-5,  # Fixed for spatial study.
+                spe11_refinement_factor=refinement_factor,
                 init_s=0.8,
                 rp_model_1=rp_models["linear"],
                 rp_model_2=rp_models["Brooks-Corey_nb_4"],
                 cp_model_1=cp_models["None"],
                 cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
-                buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
-                spe11_refinement_factor=refinement_factor,
-                spe11_entry_pressure=SPE11_ENTRY_PRESSURE,
             )
         )
-    return cases
 
-def generate_hc_convergence_cases() -> list[SimulationConfig]:
-    cases = []
-
-    cases.append(
+    configs.append(
         SimulationConfig(
             file_name="hc_estimator_convergence",
             folder_name=results_dir / "hc_estimator_convergence",
             solver_name="AHC",
             adaptive_error_ratio=0.01,
+            spe11_refinement_factor=refinement_factors[2],
             init_s=0.8,
             rp_model_1=rp_models["linear"],
             rp_model_2=rp_models["Brooks-Corey_nb_4"],
             cp_model_1=cp_models["None"],
             cp_model_2=cp_models["Brooks-Corey_nb_4"],
-            buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
-            buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
-            spe11_refinement_factor=refinement_factors[2],
-            spe11_entry_pressure=SPE11_ENTRY_PRESSURE,
         )
     )
-    return cases
 
-def generate_hc_divergence_cases() -> list[SimulationConfig]:
-    cases = []
-    
-    cases.append(
+    configs.append(
         SimulationConfig(
             file_name="hc_estimator_divergence",
             folder_name=results_dir / "hc_estimator_divergence",
             solver_name="AHC",
             adaptive_error_ratio=0.01,
+            spe11_refinement_factor=refinement_factors[2],
             init_s=0.9,
             rp_model_1=rp_models["linear"],
             rp_model_2=rp_models["Brooks-Corey_nb_4"],
             cp_model_1=cp_models["None"],
             cp_model_2=cp_models["Brooks-Corey_nb_4"],
-            buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
-            buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
-            spe11_refinement_factor=refinement_factors[2],
-            spe11_entry_pressure=2000 * pp.PASCAL,  # Larger to ensure divergence.
+            spe11_entry_pressure=200 * pp.PASCAL,  # Larger to ensure divergence.
         )
     )
 
-    return cases
+    return configs
 
-studies: dict[str, list[SimulationConfig]] = {
-    "temporal_estimator_convergence": generate_temporal_convergence_cases(),
-    "spatial_estimator_convergence": generate_spatial_convergence_cases(),
-    "hc_estimator_convergence": generate_hc_convergence_cases(),
-    "hc_estimator_divergence": generate_hc_divergence_cases(),
-}
 
 if __name__ == "__main__":
-    results_dir.mkdir(exist_ok=True)
-    for study in studies.values():
-        for config in study:
-            run_simulation(config)
-            clean_up_after_simulation(config)
+    configs = generate_configs()
 
     for i, config in enumerate(configs):
         if "temporal" in config.folder_name.parent.name:
@@ -200,6 +161,7 @@ if __name__ == "__main__":
             # effect of time step cutting on the estimators.
             additional_params={"extrapolate_temp_estimator_after_cutting": 0.0},
         )
+        # FIXME Run with different values for the exponent!!!!!!
 
         clean_up_after_simulation(config)
 

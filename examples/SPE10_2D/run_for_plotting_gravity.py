@@ -39,9 +39,10 @@ import numpy as np
 import porepy as pp
 from run import (
     CELL_SIZE,
+    LINEAR_RP_MODEL,
+    ZERO_CP_MODEL,
     buoyancy_models,
     cp_models,
-    results_dir,
     rp_models,
     run_simulation,
 )
@@ -70,12 +71,17 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
+# Directories for results.
+dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
+results_dir = dirname / "results_plotting"
+
 # endregion
 
 
 # region RUN
 time_manager_params = {
     "schedule": np.array([0.0, 30.0 * pp.DAY]),
+    # Smaller initial time step to ensure convergence of the gravity segregation.
     "dt_init": 1.0 * pp.DAY,
     "constant_dt": True,
 }
@@ -90,13 +96,13 @@ if __name__ == "__main__":
             regime="gravity_segregation",
             study="plotting",
             case=f"layer_{spe10_layer}",
-            solver_name="NewtonAppleyard",
-            hc_tol=0.0,  # Disregarded
-            nl_tol=0.0,  # Disregarded
+            solver_name="ReferenceSolution",
+            hc_tol=0.01,
+            nl_tol=0.01,
             init_s=0.0,  # Disregarded
-            rp_model_1=rp_models["Brooks-Corey_nb_4"],
+            rp_model_1=LINEAR_RP_MODEL,
             rp_model_2=rp_models["Brooks-Corey_nb_4"],
-            cp_model_1=cp_models["Brooks-Corey_nb_4"],
+            cp_model_1=ZERO_CP_MODEL,
             cp_model_2=cp_models["Brooks-Corey_nb_4"],
             buoyancy_constants_1=buoyancy_models["gravity_on"],
             buoyancy_constants_2=buoyancy_models["gravity_on"],

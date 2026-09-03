@@ -31,7 +31,6 @@ from run import (
     SPE11_ENTRY_PRESSURE,
     ZERO_BUOYANCY_MODEL,
     cp_models,
-    results_dir,
     rp_models,
     run_simulation,
 )
@@ -60,7 +59,9 @@ warnings.filterwarnings("default")
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
+# Directories for results.
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
+results_dir = dirname / "results_plotting"
 
 # endregion
 

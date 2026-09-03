@@ -127,7 +127,7 @@ if __name__ == "__main__":
                     "rotate_x_labels": True,
                     "extended_figure_height": True,
                 }
-            case "capillary_varying_entry_pressure":
+            case "capillary_varying_entry_pressure" | "buoyancy_varying_entry_pressure":
                 key_func = _key_varying_entry_pressure
                 varying_param_name = r"$p_\mathrm{e}$"
             case "buoyancy_varying_density" | "gravity_segregation":
@@ -135,6 +135,8 @@ if __name__ == "__main__":
                 varying_param_name = r"$\rho_\mathrm{w}$"
             case _:
                 raise ValueError(f"Unknown study: {study_name}")
+
+        # FIXME Add cases from viscous rel. perm studies to init_s studies.
 
         fig = plot_study(
             study,

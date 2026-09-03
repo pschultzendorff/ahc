@@ -43,6 +43,7 @@ import numpy as np
 import porepy as pp
 from ahc.derived_models.spe11 import SPE11Mixin, case_B
 from ahc.models.adaptive_newton import TwoPhaseFlowANewton
+from ahc.models.analytics import ErrorEstimateAnalyticsMixin
 from ahc.models.homotopy_continuation import TwoPhaseFlowHC
 from ahc.models.protocol import TPFProtocol
 from ahc.utils.compare import ComparisonMixin, save_comparison_stats
@@ -50,7 +51,7 @@ from ahc.viz.iteration_exporting import IterationExportingMixin
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, clean_up_after_simulation, setup_porepy_params
+from utils import SimulationConfig, setup_porepy_params
 
 # region SETUP
 
@@ -103,6 +104,7 @@ class InitialConditionsMixin(TPFProtocol):
 
 
 class SPE11HC(
+    ErrorEstimateAnalyticsMixin,
     ComparisonMixin,
     InitialConditionsMixin,
     SPE11Mixin,
@@ -112,6 +114,7 @@ class SPE11HC(
 
 
 class SPE11Newton(
+    ErrorEstimateAnalyticsMixin,
     ComparisonMixin,
     InitialConditionsMixin,
     SPE11Mixin,
@@ -265,8 +268,9 @@ def run_simulation(
 
     # It is okay to catch general exceptions because we recognize failed simulations
     # in plotting.py.
-    except Exception as exception:  # noqa: BLE001
+    except Exception as exception:
         logger.error(f"Run failed with exception: {exception}.")
+        raise exception
 
     # Save comparison stats if a reference solution exists. If not, skip this step.
 
@@ -303,19 +307,19 @@ def run_simulation(
 
 # region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
-    ("ReferenceSolution", 0.01, 0.01),
-    ("AHC", 0.01, 0.01),
-    ("AHC", 0.1, 0.1),
-    ("AHC", 0.1, 0.01),
-    ("AHC", 0.01, 0.01),
-    ("HC", 0.05, 1e-3),
-    ("HC", 0.01, 1e-3),
-    ("HC", 0.01, 1e-5),
-    ("Newton", 0.0, 0.1),
+    # ("ReferenceSolution", 0.01, 0.01),
+    # ("AHC", 0.01, 0.01),
+    # ("AHC", 0.1, 0.1),
+    # ("AHC", 0.1, 0.01),
+    # ("AHC", 0.01, 0.01),
+    # ("HC", 0.05, 1e-3),
+    # ("HC", 0.01, 1e-3),
+    # ("HC", 0.01, 1e-5),
+    # ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]
 refinement_factors: list[float] = [10, 5, 1]
-SPE11_ENTRY_PRESSURE: float = 100.0  # [Pa]
+SPE11_ENTRY_PRESSURE: float = 1.0  # [Pa]
 
 
 LINEAR_RP_MODEL = {"model": "linear", "limit": True}
@@ -433,4 +437,4 @@ if __name__ == "__main__":
     for study in studies.values():
         for config in study:
             run_simulation(config)
-            clean_up_after_simulation(config)
+            # clean_up_after_simulation(config)
