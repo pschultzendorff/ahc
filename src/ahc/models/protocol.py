@@ -11,27 +11,42 @@ from ahc.viz.solver_statistics import (
 
 if not TYPE_CHECKING:
     # This branch is accessed during python runtime.
+    # IMPLEMENTATION NOTE: Protocols must not appear in the runtime MRO, not even as
+    # empty classes to avoid issues with the method resolution order when combining
+    # multiple mixins and protocols. See
+    # https://github.com/pmgbergen/porepy/blob/develop/src/porepy/models/protocol.py
+    # for a longer explanation. We implement the same solution as in the link.
 
-    class TPFProtocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+    class _TPFModelPlaceholder:
+        __name__ = "TPFModel"
+        __qualname__ = "TPFModel"
 
-    class ReconstructionProtocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+        def __mro_entries__(self, bases: tuple) -> tuple:
+            return ()
 
-    class EstimatesProtocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+        def __repr__(self) -> str:
+            return "<protocol ahc.models.protocol.TPFModel>"
 
-    class HCProtocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+    TPFProtocol = _TPFModelPlaceholder()
+    """This is an empty placeholder of the protocol, used for type hints."""
 
-    class AdaptiveNewtonProtocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+    ReconstructionProtocol = _TPFModelPlaceholder()
+    """This is an empty placeholder of the protocol, used for type hints."""
 
-    class SPE11Protocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+    EstimatesProtocol = _TPFModelPlaceholder()
+    """This is an empty placeholder of the protocol, used for type hints."""
 
-    class IterationDataSavingProtocol:
-        """This is an empty placeholder of the protocol, used for type hints."""
+    HCProtocol = _TPFModelPlaceholder()
+    """This is an empty placeholder of the protocol, used for type hints."""
+
+    AdaptiveNewtonProtocol = _TPFModelPlaceholder()
+    """This is an empty placeholder of the protocol, used for type hints."""
+
+    SPE11Protocol = _TPFModelPlaceholder()
+    """This is an empty placeholder of the protocol, used for type hints."""
+
+    IterationDataSavingProtocol = _TPFModelPlaceholder()
+    """This is an empty placeholder of the protocol, used for type hints."""
 
 else:
     # This branch is accessed by mypy and linters.
