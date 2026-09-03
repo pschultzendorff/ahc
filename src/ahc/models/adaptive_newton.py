@@ -412,6 +412,13 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
                 f"{flux_name}_{estimator_name}", flux_values, self.g_data, hc_index=0
             )
 
+        # This was already run in the super method of
+        # pp.models.solution_strategy.SolutionStrategy, but we need to run it here to
+        # ensure that the estimators which were save in
+        # EstimatesSolutionStrategy.after_nonlinear_convergence only afterwards are
+        # exported.
+        self.write_pvd_and_vtu()  # type: ignore
+
     def after_nonlinear_failure(self) -> None:
         self.convergence_status = False
         self.save_data_time_step()
