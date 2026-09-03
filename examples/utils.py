@@ -668,7 +668,9 @@ def plot_nl_iterations(
         # #time_steps.
         if solver_name.endswith("HC"):
             tot_hc_iters = len(_flatten_nested_list(stats.timestep_nl_iters))
-            final_lambda = stats.lambdas[-1][-1]
+            # At the last lambda, the Newton solver was not run anymore. Check
+            # solver_statistics.
+            final_lambda = stats.lambdas[-1][-2]
             data_as_array[i]["annotation"] = (
                 f"{tot_nl_iterations}/{tot_hc_iters}/{final_lambda:.4f}\n"
                 + f"({len(stats.discrete_times)})"
