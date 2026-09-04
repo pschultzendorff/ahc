@@ -276,6 +276,8 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 wetting_buoyancy = 0.0
                 nonwetting_buoyancy = 0.0
 
+                # NOTE Signs of global_pressure_pot is consistent with the fluxes that
+                # we use in postprocess_pressure_vohralik and their signs in total_flux.
                 return (
                     -perm_arr[None, :, None]
                     * total_mobility[..., None]
@@ -306,6 +308,9 @@ class ErrorEstimatesMixin(EstimatesProtocol):
                 # FIXME Include correct buoyancy term!
                 wetting_buoyancy = 0.0
 
+                # NOTE Signs of global_pressure_pot and complementary_pressure_pot are
+                # consistent with the fluxes that we use in
+                # postprocess_pressure_vohralik and their signs in wetting_flux.
                 return -perm_arr[None, :, None] * (
                     wetting_mobility[..., None] * global_pressure_pot
                     + complementary_pressure_pot

@@ -307,9 +307,11 @@ class PressureReconstructionMixin(ReconstructionProtocol):
                         iterate_index=0,
                     )
                     # NOTE Substract the buoyancy contribution from the total flux to be
-                    # left with only viscous and capillary contributions. The gradient
-                    # of the global pressure equals - viscous and capillary
-                    # contributions.
+                    # left with only viscous and capillary contributions. This is
+                    # consistent with total_flux, where the buoyancy contribution is
+                    # added to the total flux and RecSolutionStrategy.set_equations,
+                    # where the buoyancy contribution (which is what we remove here) has
+                    # the same sign as in the total flux.
                     - pp.get_solution_values(
                         f"{BUOYANCY_FLUX}{specifier}_RT0_coeffs",
                         self.g_data,
@@ -317,7 +319,11 @@ class PressureReconstructionMixin(ReconstructionProtocol):
                     )
                 ) / total_mobility[..., None]
             elif pressure_key == COMPLEMENTARY_PRESSURE:
-                # - Complementary pressure gradient x permeability = capillary flux.
+                # -1 * Complementary pressure gradient x permeability = capillary flux.
+                # This is consistent with wetting_flux where the scaled capillary
+                # contribution is substracted from the total flux contribution and
+                # RecSolutionStrategy.set_equations, where the capillary contribution
+                # has the same sign as in the wetting flux.
                 coeffs_flux = pp.get_solution_values(
                     f"{CAPILLARY_FLUX}{specifier}_RT0_coeffs",
                     self.g_data,
@@ -857,7 +863,6 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
                 self.rel_perm(self.wetting.s, phase) / viscosity
             )
         total_mobility = pp.ad.sum_operator_list(list(phase_mobilities.values()))
-        # fractional_flow = phase_mobilities[self.wetting.name] / total_mobility
 
         # Get data and spatial discretization.
         tpfa = self.phase_potential_discretization(self.g)
@@ -877,10 +882,7 @@ class RecEquations(ReconstructionProtocol, TPFEquations):
         buoyancy_potential_w = tpfa.vector_source() @ vector_source_w
         buoyancy_potential_n = tpfa.vector_source() @ vector_source_n
 
-        # NOTE The capillary contribution is negative just as in :meth:`total_flux` and
-        # :meth:`wetting_flux`.
-        # FIXME
-        # NOT SURE IF THIS IS CORRECT
+        # NOTE The capillary contribution is negative just as in :meth:`wetting_flux`.
         capillary_flux = (
             pp.ad.Scalar(-1.0)
             * fractional_flow_upwinded
