@@ -678,10 +678,9 @@ class EquilibratedFluxMixin(ReconstructionProtocol):
         ):
             # IMPLEMENTATION NOTE For some reason we need a minus sign instead of a plus
             # sign.
-            # equilibrated_flux -= self.equilibrate_increment_diff(
-            #     bounded_nonlinear_increment - unbounded_nonlinear_increment
-            # )
-            pass
+            equilibrated_flux -= self.equilibrate_increment_diff(
+                bounded_nonlinear_increment - unbounded_nonlinear_increment
+            )
 
         pp.set_solution_values(
             f"{flux_name}_equil", equilibrated_flux, self.g_data, iterate_index=0
