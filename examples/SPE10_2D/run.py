@@ -815,6 +815,82 @@ def generate_buoyancy_varying_entry_pressure() -> list[SimulationConfig]:
     return cases
 
 
+def generate_viscous_varying_rp_cases_with_spatial_estimators(
+    init_s: float,
+) -> list[SimulationConfig]:
+    """Generate simulation configurations for viscous-dominated flow with varying
+    relative permeability models, linear capillary pressure, and prescribed initial
+    saturation.
+
+    """
+    results_dir_with_spatial_estimators = dirname / "results_with_spatial_estimators"
+    cases = []
+    for rp_model_name, rp_model in rp_models.items():
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir_with_spatial_estimators,
+                    regime="viscous",
+                    study="varying_rp",
+                    case=pathlib.Path(f"init_s_{init_s}") / rp_model_name,
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=init_s,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_model,
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["linear"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_cell_size=CELL_SIZE,
+                    spe10_layer=SPE10_LAYER,
+                    spe10_case=SPE10_CASE,
+                    spe10_water_density=WATER_DENSITY,  # kg/m^3
+                )
+            )
+
+    return cases
+
+
+def generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+    r: float,
+) -> list[SimulationConfig]:
+    """Generate simulation configurations for viscous-dominated flow with varying
+    relative permeability models, linear capillary pressure, and prescribed initial
+    saturation.
+
+    """
+    results_dir_varying_temp_est_scaling = dirname / "results_varying_temp_est_scaling"
+    cases = []
+    for rp_model_name, rp_model in rp_models.items():
+        for solver_name, hc_tol, nl_tol in solvers_and_tols:
+            cases.append(
+                SimulationConfig(
+                    results_dir=results_dir_varying_temp_est_scaling,
+                    regime="viscous",
+                    study="varying_rp",
+                    case=pathlib.Path(f"r_{r}") / rp_model_name,
+                    solver_name=solver_name,
+                    hc_tol=hc_tol,
+                    nl_tol=nl_tol,
+                    init_s=0.2,
+                    rp_model_1=LINEAR_RP_MODEL,
+                    rp_model_2=rp_model,
+                    cp_model_1=ZERO_CP_MODEL,
+                    cp_model_2=cp_models["linear"],
+                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
+                    buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
+                    spe10_cell_size=CELL_SIZE,
+                    spe10_layer=SPE10_LAYER,
+                    spe10_case=SPE10_CASE,
+                    spe10_water_density=WATER_DENSITY,  # kg/m^3
+                )
+            )
+
+    return cases
+
+
 studies: dict[str, list[SimulationConfig]] = {
     # "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
     # "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
@@ -825,14 +901,37 @@ studies: dict[str, list[SimulationConfig]] = {
     # "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
     # "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
     # "buoyancy_varying_density": generate_buoyancy_varying_density(),
-    "buoyancy_varying_entry_pressure": generate_buoyancy_varying_entry_pressure(),
+    # "buoyancy_varying_entry_pressure": generate_buoyancy_varying_entry_pressure(),
+    "viscous_varying_rp_with_spatial_estimators_init_s_02": generate_viscous_varying_rp_cases_with_spatial_estimators(
+        init_s=0.2
+    ),
+    "viscous_varying_rp_varying_temp_est_scaling_init_r_0.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+        r=0.5
+    ),
+    "viscous_varying_rp_varying_temp_est_scaling_init_r_1.0": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+        r=1.0
+    ),
+    "viscous_varying_rp_varying_temp_est_scaling_init_r_1.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+        r=1.5
+    ),
 }
 
 # endregion
 
 if __name__ == "__main__":
     results_dir.mkdir(exist_ok=True)
-    for study in studies.values():
+    for study_name, study in studies.items():
+        if study_name == "viscous_varying_rp_with_spatial_estimators_init_s_02":
+            additional_params = {"disable_spatial_est": False}
+        elif study_name.startswith("viscous_varying_rp_varying_temp_est_scaling"):
+            additional_params = {
+                "extrapolate_temp_estimator_after_cutting": float(
+                    study_name.split("_")[-1]
+                )
+            }
+        else:
+            additional_params = {}
+
         for config in study:
-            run_simulation(config)
+            run_simulation(config, additional_params=additional_params)
             clean_up_after_simulation(config)

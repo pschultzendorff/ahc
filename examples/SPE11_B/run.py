@@ -51,7 +51,7 @@ from ahc.viz.iteration_exporting import IterationExportingMixin
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
 
-from utils import SimulationConfig, setup_porepy_params
+from utils import SimulationConfig, clean_up_after_simulation, setup_porepy_params
 
 # region SETUP
 
@@ -268,9 +268,8 @@ def run_simulation(
 
     # It is okay to catch general exceptions because we recognize failed simulations
     # in plotting.py.
-    except Exception as exception:
+    except Exception as exception:  # noqa: BLE001
         logger.error(f"Run failed with exception: {exception}.")
-        raise exception
 
     # Save comparison stats if a reference solution exists. If not, skip this step.
 
@@ -307,15 +306,15 @@ def run_simulation(
 
 # region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
-    # ("ReferenceSolution", 0.01, 0.01),
-    # ("AHC", 0.01, 0.01),
-    # ("AHC", 0.1, 0.1),
-    # ("AHC", 0.1, 0.01),
-    # ("AHC", 0.01, 0.01),
-    # ("HC", 0.05, 1e-3),
-    # ("HC", 0.01, 1e-3),
-    # ("HC", 0.01, 1e-5),
-    # ("Newton", 0.0, 0.1),
+    ("ReferenceSolution", 0.01, 0.01),
+    ("AHC", 0.01, 0.01),
+    ("AHC", 0.1, 0.1),
+    ("AHC", 0.1, 0.01),
+    ("AHC", 0.01, 0.01),
+    ("HC", 0.05, 1e-3),
+    ("HC", 0.01, 1e-3),
+    ("HC", 0.01, 1e-5),
+    ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]
 refinement_factors: list[float] = [10, 5, 1]
@@ -437,4 +436,4 @@ if __name__ == "__main__":
     for study in studies.values():
         for config in study:
             run_simulation(config)
-            # clean_up_after_simulation(config)
+            clean_up_after_simulation(config)
