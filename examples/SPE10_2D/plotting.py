@@ -45,7 +45,7 @@ def plot_study(
         key = key_func(config, stats)
         data[key] = stats
 
-        # Calculate relative estimator values for the finest AHC solution
+        # Calculate relative estimator values for the finest AHC solution.
         if config.solver_name == "AHC" and config.hc_tol == 0.01:
             if stats.converged:
                 rel_ests[f"{config.folder_name()}_{key}"] = (

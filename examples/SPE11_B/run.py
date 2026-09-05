@@ -410,7 +410,7 @@ def generate_viscous_varying_ref_factor(init_s: float) -> list[SimulationConfig]
                     cp_model_2=cp_models["Brooks-Corey_nb_4"],
                     buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
                     buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
-                    spe11_refinement_factor=refinement_factors[2],
+                    spe11_refinement_factor=ref_factor,
                     spe11_entry_pressure=SPE11_ENTRY_PRESSURE,
                 )
             )
@@ -419,8 +419,8 @@ def generate_viscous_varying_ref_factor(init_s: float) -> list[SimulationConfig]
 
 
 studies: dict[str, list[SimulationConfig]] = {
-    "viscous_varying_rp_init_s_08": generate_viscous_varying_rp_cases(init_s=0.8),
-    "viscous_varying_rp_init_s_09": generate_viscous_varying_rp_cases(init_s=0.9),
+    # "viscous_varying_rp_init_s_08": generate_viscous_varying_rp_cases(init_s=0.8),
+    # "viscous_varying_rp_init_s_09": generate_viscous_varying_rp_cases(init_s=0.9),
     "viscous_varying_ref_factor_init_s_08": generate_viscous_varying_ref_factor(
         init_s=0.8
     ),
