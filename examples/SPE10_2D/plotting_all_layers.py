@@ -73,9 +73,9 @@ def plot_statistics(
             solver_label = rf"{solver} $\gamma_\mathrm{{lin}} = {nl_tol}$"
 
         num_iterations[solver_label][layer] = (
-            sum(stats.timestep_nl_iters)
+            sum(stats.time_step_nl_iters)
             if solver.startswith("Newton")
-            else sum(_flatten_nested_list(stats.timestep_nl_iters))
+            else sum(_flatten_nested_list(stats.time_step_nl_iters))
         )
         num_time_steps[solver_label][layer] = len(stats.discrete_times)
 

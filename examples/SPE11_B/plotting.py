@@ -3,6 +3,7 @@ import pathlib
 import sys
 
 import porepy as pp
+from matplotlib import pyplot as plt
 from run import studies
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
@@ -51,6 +52,7 @@ if __name__ == "__main__":
             **kwargs,
         )
         fig.savefig(fig_dir / f"nl_iters_{study_name}.png")
+        plt.close(fig)
 
     with (fig_dir / "relative_errors.txt").open("w") as f:
         json.dump(rel_errors, f, indent=2)

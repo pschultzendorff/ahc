@@ -280,11 +280,11 @@ def run_simulation(
         f"Buoyancy: {config.buoyancy_constants_2}"
     )
 
-    model_kwargs = kwargs.get("model_kwargs", {})
+    model_kwargs = kwargs.pop("model_kwargs", {})
     # This triple parameter dict construction is ugly, but we avoid adding every
     # parameter we ever want to change to SimulationConfig or setup_porepy_params.
-    additional_params = kwargs.get("additional_params", {})
-    additional_time_manager_params = kwargs.get("additional_time_manager_params", {})
+    additional_params = kwargs.pop("additional_params", {})
+    additional_time_manager_params = kwargs.pop("additional_time_manager_params", {})
 
     model_class = setup_porepy_model(config, **model_kwargs)
     updated_params, updated_time_manager_params = setup_porepy_params(config, **kwargs)
@@ -518,28 +518,37 @@ def generate_gravity_segregation_cases() -> list[SimulationConfig]:
     cases = []
     for water_density in [10000.0, 5000.0, water["density"], 200.0]:
         for solver_name, hc_tol, nl_tol in solvers_and_tols:
-            cases.append(
-                SimulationConfig(
-                    results_dir=results_dir,
-                    regime="gravity_segregation",
-                    study="varying_water_density",
-                    case=f"water_density_{water_density:.2f}",
-                    solver_name=solver_name,
-                    hc_tol=hc_tol,
-                    nl_tol=nl_tol,
-                    init_s=0.0,  # NOTE This is overwritten for spe10_case="gravity_segregation".
-                    rp_model_1=LINEAR_RP_MODEL,
-                    rp_model_2=rp_models["Brooks-Corey_nb_4"],
-                    cp_model_1=ZERO_CP_MODEL,
-                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
-                    buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
-                    buoyancy_constants_2=buoyancy_models["gravity_on"],
-                    spe10_cell_size=CELL_SIZE,
-                    spe10_layer=SPE10_LAYER,
-                    spe10_case="gravity_segregation",
-                    spe10_water_density=water_density,  # kg/m^3
+            if solver_name.endswith("HC"):
+                hc_gravity_cases = [
+                    ("", ZERO_BUOYANCY_MODEL),
+                    ("from_gravity_on", buoyancy_models["gravity_on"]),
+                ]
+            else:
+                hc_gravity_cases = [("", ZERO_BUOYANCY_MODEL)]
+            for solver_name_postfix, buoyancy_constants_1 in hc_gravity_cases:
+                cases.append(
+                    SimulationConfig(
+                        results_dir=results_dir,
+                        regime="gravity_segregation",
+                        study="varying_water_density",
+                        case=f"water_density_{water_density:.2f}",
+                        solver_name=solver_name,
+                        solver_name_postfix=solver_name_postfix,
+                        hc_tol=hc_tol,
+                        nl_tol=nl_tol,
+                        init_s=0.0,  # NOTE This is overwritten for spe10_case="gravity_segregation".
+                        rp_model_1=LINEAR_RP_MODEL,
+                        rp_model_2=rp_models["Brooks-Corey_nb_4"],
+                        cp_model_1=ZERO_CP_MODEL,
+                        cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                        buoyancy_constants_1=buoyancy_constants_1,
+                        buoyancy_constants_2=buoyancy_models["gravity_on"],
+                        spe10_cell_size=CELL_SIZE,
+                        spe10_layer=SPE10_LAYER,
+                        spe10_case="gravity_segregation",
+                        spe10_water_density=water_density,  # kg/m^3
+                    )
                 )
-            )
 
     return cases
 
@@ -905,15 +914,15 @@ studies: dict[str, list[SimulationConfig]] = {
     "viscous_varying_rp_with_spatial_estimators_init_s_02": generate_viscous_varying_rp_cases_with_spatial_estimators(
         init_s=0.2
     ),
-    "viscous_varying_rp_varying_temp_est_scaling_init_r_0.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
-        r=0.5
-    ),
-    "viscous_varying_rp_varying_temp_est_scaling_init_r_1.0": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
-        r=1.0
-    ),
-    "viscous_varying_rp_varying_temp_est_scaling_init_r_1.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
-        r=1.5
-    ),
+    # "viscous_varying_rp_varying_temp_est_scaling_init_r_0.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+    #     r=0.5
+    # ),
+    # "viscous_varying_rp_varying_temp_est_scaling_init_r_1.0": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+    #     r=1.0
+    # ),
+    # "viscous_varying_rp_varying_temp_est_scaling_init_r_1.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+    #     r=1.5
+    # ),
 }
 
 # endregion

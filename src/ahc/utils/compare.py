@@ -24,24 +24,33 @@ class SolutionVals:
 # No attributes are added dynamically -> use slots=True for memory efficiency.
 @dataclass(slots=True)
 class ComparisonStats:
-    pressure_diff_norm: float
-    pressure_diff_max: float
-    pressure_diff_min: float
+    """Norms of differences between approximation solution and reference solution of
+    different quantities.
 
-    saturation_diff_norm: float
-    saturation_diff_max: float
-    saturation_diff_min: float
+    Note: The default value of -1.0 is used to indicate that the comparison statistics
+        have not been calculated yet. While min and max values might be negative, the
+        norms of true differences are always non-negative.
 
-    total_flux_diff_norm: float
-    total_flux_diff_max: float
-    total_flux_diff_min: float
+    """
 
-    wetting_flux_diff_norm: float
-    wetting_flux_diff_max: float
-    wetting_flux_diff_min: float
+    pressure_diff_norm: float = -1.0
+    pressure_diff_max: float = -1.0
+    pressure_diff_min: float = -1.0
 
-    flow_residual_norm: float
-    transport_residual_norm: float
+    saturation_diff_norm: float = -1.0
+    saturation_diff_max: float = -1.0
+    saturation_diff_min: float = -1.0
+
+    total_flux_diff_norm: float = -1.0
+    total_flux_diff_max: float = -1.0
+    total_flux_diff_min: float = -1.0
+
+    wetting_flux_diff_norm: float = -1.0
+    wetting_flux_diff_max: float = -1.0
+    wetting_flux_diff_min: float = -1.0
+
+    flow_residual_norm: float = -1.0
+    transport_residual_norm: float = -1.0
 
 
 def _difference_stats(

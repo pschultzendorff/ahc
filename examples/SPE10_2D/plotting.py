@@ -1,9 +1,11 @@
+import csv
 import json
 import pathlib
 import sys
 from collections.abc import Callable
 
-from matplotlib.figure import Figure
+from ahc.utils.compare import ComparisonStats
+from matplotlib import pyplot as plt
 from run import (
     default_time_manager_params,
     studies,
@@ -16,44 +18,88 @@ from utils import (
     SolverStats,
     calc_relative_est,
     plot_nl_iterations,
+    read_comparison_stats,
     read_solver_stats,
+    tabulate_comparison_stats,
 )
 
 dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]  # type: ignore
 
-rel_ests: dict[str, str] = {}
+REL_ESTS: dict[str, str] = {}
 
 
-def plot_study(
+def analyze_study(
     cases: list[SimulationConfig],
     key_func: Callable[[SimulationConfig, SolverStats], tuple[str, str]],
     varying_param_name: str,
+    figure_save_path: pathlib.Path,
+    table_save_path: pathlib.Path,
     **kwargs,
-) -> Figure:
+) -> None:
+    """Read all cases from a study, plot solver statistics, tabulate comparison
+    statistics, and save the results.
+
+    Raises:
+        ValueError: If any of the reference solutions did not converge in a single time
+            step. In that case, the comparison statistics are not meaningful and cannot
+            be tabulated.
+
+    """
     # To allow for easy sorting of the data by solver specs and parameter values in
     # plot_nl_iterations, we use tuples of strings as keys. The first string is the
     # solver name plus all relevant specs, while the second string is the parameter
     # value. See the various helper functions below for details.
-    data: dict[tuple[str, str], SolverStats] = {}
-    for config in cases:
-        if config.solver_name == "ReferenceSolution":
-            # The solver statistics of the reference solution are not of interest.
-            continue
-        stats = read_solver_stats(config, EXPECTED_FINAL_TIME)
-        key = key_func(config, stats)
-        data[key] = stats
+    data_solver: dict[tuple[str, str], SolverStats] = {}
+    data_comparison: dict[tuple[str, str], ComparisonStats] = {}
 
-        # Calculate relative estimator values for the finest AHC solution.
-        if config.solver_name == "AHC" and config.hc_tol == 0.01:
-            if stats.converged:
-                rel_ests[f"{config.folder_name()}_{key}"] = (
-                    f"{calc_relative_est(stats)['total']:.2f}"
+    # Read solver and comparison statistics for all cases.
+    for config in cases:
+        solver_stats = read_solver_stats(config, EXPECTED_FINAL_TIME)
+        if config.solver_name == "ReferenceSolution":
+            if not solver_stats.converged or len(solver_stats.discrete_times) != 1:
+                raise ValueError(
+                    f"Reference solution {config.folder_name()} did not converge in a "
+                    "single time step. Comparison statistics are not meaningful."
                 )
             else:
-                rel_ests[f"{config.folder_name()}_{key}"] = "not converged"
-    return plot_nl_iterations(data, varying_param_name, **kwargs)
+                # The reference solution is not of interest for plotting solver
+                # statistics or tabulating comparison statistics.
+                continue
+
+        comparison_stats = read_comparison_stats(config, solver_stats)
+
+        key = key_func(config, solver_stats)
+
+        data_solver[key] = solver_stats
+        data_comparison[key] = comparison_stats
+
+        # Calculate relative estimator values from the finest AHC solution.
+        if (
+            config.solver_name == "AHC"
+            and config.hc_tol == 0.01
+            and config.nl_tol == 0.01
+        ):
+            if solver_stats.converged:
+                REL_ESTS[f"{config.folder_name()}_{key}"] = (
+                    f"{calc_relative_est(solver_stats)['total']:.2f}"
+                )
+            else:
+                REL_ESTS[f"{config.folder_name()}_{key}"] = "not converged"
+
+    # Plot solver statistics and tabulate comparison statistics.
+    solver_stats_fig = plot_nl_iterations(data_solver, varying_param_name, **kwargs)
+    comparison_stats_table = tabulate_comparison_stats(
+        data_comparison, varying_param_name, **kwargs
+    )
+
+    solver_stats_fig.savefig(figure_save_path)
+    plt.close(solver_stats_fig)
+
+    with table_save_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerows(comparison_stats_table)
 
 
 def _key_varying_rp(config: SimulationConfig, stats: SolverStats) -> tuple[str, str]:
@@ -103,7 +149,9 @@ def _key_varying_water_density(
 
 if __name__ == "__main__":
     fig_dir = dirname / "figures"
+    comparison_dir = dirname / "comparison_stats"
     fig_dir.mkdir(exist_ok=True)
+    comparison_dir.mkdir(exist_ok=True)
 
     for study_name, study in studies.items():
         kwargs = {}
@@ -113,6 +161,7 @@ if __name__ == "__main__":
                 | "viscous_varying_rp_init_s_02_spat_est_on"
                 | "viscous_varying_rp_init_s_03"
                 | "buoyancy_varying_rp"
+                | "viscous_varying_rp_with_spatial_estimators_init_s_02"
             ):
                 key_func = _key_varying_rp
                 varying_param_name = "Relative permeability model"
@@ -138,13 +187,14 @@ if __name__ == "__main__":
 
         # FIXME Add cases from viscous rel. perm studies to init_s studies.
 
-        fig = plot_study(
+        fig = analyze_study(
             study,
             key_func=key_func,
             varying_param_name=varying_param_name,
+            figure_save_path=fig_dir / f"nl_iters_{study_name}.png",
+            table_save_path=comparison_dir / f"comparison_stats_{study_name}.csv",
             **kwargs,
         )
-        fig.savefig(fig_dir / f"nl_iters_{study_name}.png")
 
     with (fig_dir / "relative_errors.txt").open("w") as f:
-        json.dump(rel_ests, f, indent=2)
+        json.dump(REL_ESTS, f, indent=2)

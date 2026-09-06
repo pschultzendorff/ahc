@@ -414,7 +414,13 @@ class SolverStats:
     # type, as the HC solvers have nested lists for the inner loops We do not specify
     # this here.
     discrete_times: list = field(default_factory=list)
-    timestep_nl_iters: list = field(default_factory=list)
+    time_step_convergence: np.ndarray = field(
+        default_factory=lambda: np.array([], dtype=bool)
+    )
+    time_step_sizes: np.ndarray = field(
+        default_factory=lambda: np.array([], dtype=float)
+    )
+    time_step_nl_iters: list = field(default_factory=list)
 
     spat_estimator: list = field(default_factory=list)
     temp_estimator: list = field(default_factory=list)
@@ -433,7 +439,6 @@ def _flatten_nested_list(xx: list[list]) -> list:
     return [x for sublist in xx for x in sublist]
 
 
-# TODO Unify the naming of the error estimators for Newton and HC.
 def _parse_hc_steps(
     time_step: dict[str, Any],
 ) -> tuple[
@@ -467,7 +472,7 @@ def _parse_hc_steps(
 
 def _parse_newton_steps(
     time_step: dict[str, Any],
-) -> tuple[int, list[float], list[float], list[float]]:
+) -> tuple[int, list[float], list[float], list[float], list[float]]:
     """Helper function to parse Newton iterations within a time step and return the
     relevant statistics.
 
@@ -477,9 +482,7 @@ def _parse_newton_steps(
         time_step["spatial_est"],
         time_step["temp_est"],
         time_step["lin_est"],
-        # NOTE Forgot to implement saving save global energy norm for adaptive
-        # Newton, hence this will be empty.
-        # time_step["global_energy_norm"]
+        time_step["global_energy_norm"],
     )
 
 
@@ -487,6 +490,20 @@ def read_solver_stats(
     config: SimulationConfig,
     expected_final_time: float,
 ) -> SolverStats:
+    """Read solver stats from a `.json` file.
+
+
+    Parameters:
+        config: _description_
+        expected_final_time: _description_
+
+    Raises:
+        ValueError: _description_
+
+    Returns:
+        _description_
+
+    """
     with (config.folder_name() / "solver_statistics.json").open() as f:
         data: dict[str, Any] = json.load(f)
 
@@ -503,12 +520,21 @@ def read_solver_stats(
         return stats
 
     # Check if the simulation reached the final time.
+    # NOTE In theory, the last time step could reach the final time but not converge,
+    # with the simulation failing afterwards because time step size couldn't be reduced
+    # further. This is rather unlikely, so we assume that the last time step converged
+    # if the final time was reached. The better solution would be to store the
+    # convergence status of each time step in nonlinear_solver_statistics.
     stats.final_time = time_steps[-1]["current time"]
     if not np.isclose(stats.final_time, expected_final_time):
         stats.converged = False
 
+    # Skip the zeroth time step t=0.
     for time_step in time_steps[1:]:
-        if config.solver_name.endswith("HC"):
+        if (
+            config.solver_name.endswith("HC")
+            or config.solver_name == "ReferenceSolution"
+        ):
             (
                 num_nl_iterations,
                 spat_estimator,
@@ -522,25 +548,43 @@ def read_solver_stats(
             stats.lambdas.append(time_step["hc_lambdas"])
             stats.energy_norm.append(energy_norm)
         elif config.solver_name.startswith("Newton"):
-            num_nl_iterations, spat_estimator, temp_estimator, lin_estimator = (
-                _parse_newton_steps(time_step)
-            )
+            (
+                num_nl_iterations,
+                spat_estimator,
+                temp_estimator,
+                lin_estimator,
+                energy_norm,
+            ) = _parse_newton_steps(time_step)
         else:
             raise ValueError(f"Unknown solver: {config.solver_name}")
 
         # Append data to the statistics object.
         stats.discrete_times.append(time_step["current time"])
-        stats.timestep_nl_iters.append(num_nl_iterations)
+        stats.time_step_nl_iters.append(num_nl_iterations)
         stats.spat_estimator.append(spat_estimator)
         stats.temp_estimator.append(temp_estimator)
         stats.lin_estimator.append(lin_estimator)
 
-    # Reset discrete time values at failed time steps. Failed time steps are recognized
-    # by the fact that the time step was retried with a shorter time step size.
-    for i in range(len(stats.discrete_times) - 2, -1, -1):
-        stats.discrete_times[i] = min(
-            stats.discrete_times[i], stats.discrete_times[i + 1]
-        )
+    # Find failed time steps by checking whether the discrete time value is smaller than
+    # the previous time step. the first value of
+    # The zeroth discrete time (t=0) is not saved in stats.discrete_times.
+    num_time_steps = len(stats.discrete_times)
+    stats.time_step_convergence = np.empty(num_time_steps, dtype=bool)
+    stats.time_step_sizes = np.empty(num_time_steps, dtype=float)
+
+    last_converged_time: float = 0.0
+
+    for step, (current_time, next_time) in enumerate(
+        zip(stats.discrete_times[:-1], stats.discrete_times[1:])
+    ):
+        stats.time_step_convergence[step] = current_time < next_time
+        stats.time_step_sizes[step] = current_time - last_converged_time
+        if stats.time_step_convergence[step]:
+            last_converged_time = current_time
+
+    # The last time step's convergence is determined by the overall convergence.
+    stats.time_step_convergence[-1] = stats.converged
+    stats.time_step_sizes[-1] = stats.final_time - last_converged_time
 
     return stats
 
@@ -615,6 +659,7 @@ def plot_nl_iterations(
             ("annotation", "U100"),
             ("converged", "?"),
             ("final_time", "float32"),
+            ("final_time_step_size", "float32"),
         ]
     )
     data_as_array = np.zeros(len(data), dtype=data_dtype)
@@ -654,12 +699,13 @@ def plot_nl_iterations(
         data_as_array[i]["converged"] = stats.converged
         if not stats.converged:
             data_as_array[i]["final_time"] = stats.final_time
+            data_as_array[i]["final_time_step_size"] = stats.time_step_sizes[-1]
             # Leave the other statistics empty if the solver did not converge.
 
         tot_nl_iterations = (
-            sum(stats.timestep_nl_iters)
+            sum(stats.time_step_nl_iters)
             if solver_name.startswith("Newton")
-            else sum(_flatten_nested_list(stats.timestep_nl_iters))
+            else sum(_flatten_nested_list(stats.time_step_nl_iters))
         )
         data_as_array[i]["nl_iterations"] = tot_nl_iterations
 
@@ -667,18 +713,19 @@ def plot_nl_iterations(
         # For HC and AHC, these include #nl_iters, #hc_iters, final beta value, and
         # #time_steps.
         if solver_name.endswith("HC"):
-            tot_hc_iters = len(_flatten_nested_list(stats.timestep_nl_iters))
+            tot_hc_iters = len(_flatten_nested_list(stats.time_step_nl_iters))
             # At the last lambda, the Newton solver was not run anymore. Check
             # solver_statistics.
             final_lambda = stats.lambdas[-1][-2]
             data_as_array[i]["annotation"] = (
                 f"{tot_nl_iterations}/{tot_hc_iters}/{final_lambda:.4f}\n"
-                + f"({len(stats.discrete_times)})"
+                f"({len(stats.discrete_times)}/{np.sum(np.logical_not(stats.time_step_convergence))})"
             )
         # For Newton, these include only #nl_iters and #time_steps.
         else:
             data_as_array[i]["annotation"] = (
-                f"{tot_nl_iterations}\n({len(stats.discrete_times)})"
+                f"{tot_nl_iterations}\n"
+                f"({len(stats.discrete_times)}/{np.sum(np.logical_not(stats.time_step_convergence))})"
             )
 
     # Create ticks for x- and y-axes.
@@ -687,15 +734,16 @@ def plot_nl_iterations(
 
     # Sort indices first by solver_specs, then by parameter_value.
     idx = np.lexsort((data_as_array["parameter_value"], data_as_array["solver_specs"]))
-    # Sort stats in the same way.
-    stats_as_array = data_as_array[idx]
+    # Apply sorting to data.
+    data_as_array = data_as_array[idx]
 
     # Reshape each data column into an array of shape=(len(x_ticks), len(y_ticks)) for
-    # the heatmap.
+    # the heatmap. Due to the previous sorting, the column value will appear at the x, y
+    # value corresponding to the solver_specs and parameter_value.
     grids = {
-        col: stats_as_array[col].reshape(len(y_ticks), len(x_ticks))
+        col: data_as_array[col].reshape(len(y_ticks), len(x_ticks))
         # stats_as_array.dtype.names will not be None. Ignore pylance.
-        for col in stats_as_array.dtype.names  # type: ignore
+        for col in data_as_array.dtype.names  # type: ignore
         if col not in ("solver_specs", "parameter_value")
     }
 
@@ -733,7 +781,10 @@ def plot_nl_iterations(
         ax.text(
             j + 0.5,
             i + 0.5,
-            f"failed at t={grids['final_time'][i, j] / 86400:.1f} d\n"
+            rf"$\Delta t = {grids['final_time_step_size'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
+            + "\n"
+            rf"$t={grids['final_time'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
+            + "\n"
             + grids["annotation"][i, j],
             ha="center",
             va="center",
@@ -746,7 +797,9 @@ def plot_nl_iterations(
     ax.set_ylabel("Solver & adaptive error ratio", fontsize=12, fontweight="bold")
     ax.set_title(
         title
-        or r"# cumulative NL iters/#HC iters/final $\beta$" + "\n" + "(#time steps)\n",
+        or r"# cumulative NL iters/#HC iters/final $\beta$"
+        + "\n"
+        + "(#total time steps/#failed time steps) \n",
         # + f"by solver and {varying_param_name}",
         fontsize=14,
         fontweight="bold",
@@ -1095,26 +1148,125 @@ def plot_convergence(
 
 def read_comparison_stats(
     config: SimulationConfig,
-    comparison_stats: ComparisonStats,
-    expected_final_time: float,
+    solver_stats: SolverStats,
+    relative_comparison: bool = True,
 ) -> ComparisonStats:
     """Read statistics from a comparison simulation.
 
-    Note: It only makes sense to compare both, if both simulations converged in a single
-    time step.
+    Note: Comparison statistics only make sense if the simulation converged in a single
+        time step, i.e., if the simulation and the reference solution solved the same
+        problem.
 
     Parameters:
         config: The simulation configuration.
-        expected_final_time: The expected final time of the simulation.
+        solver_stats: The solver statistics of the simulation.
+        relative_comparison: Whether to read relative comparison statistics (True) or
+            absolute comparison statistics (False).
 
     Returns:
-        A SolverStats object containing the statistics of the simulation.
+        A ComparisonStats object containing the comparison statistics.
 
     """
-    stats = read_solver_stats(config, expected_final_time)
+    filename = (
+        "relative_comparison_stats.json"
+        if relative_comparison
+        else "absolute_comparison_stats.json"
+    )
 
-    # Check if the reference solution converged in a single time step.
+    if solver_stats.converged and len(solver_stats.discrete_times) == 1:
+        with (config.folder_name() / filename).open() as f:
+            data: dict[str, Any] = json.load(f)
+        return ComparisonStats(**data)
+    else:
+        return ComparisonStats()
 
-    # Check if the config solution converged in a single time step.
 
-    # Add to ...
+def tabulate_comparison_stats(
+    data: dict[tuple[str, str], ComparisonStats], varying_param_name: str, **kwargs
+) -> list[str]:
+    """Tabulate comparison statistics for different solvers and parameter values from one study.
+
+    Parameters:
+        data: Dictionary mapping solver specs and varying parameter values (as a tuple
+            of strings) to comparison statistics.
+        varying_param_name: Name of the parameter that varies between the
+            configurations. This will be the title of the x-axis.
+
+    """
+    # Same construction as in plot_nl_iterations, but we only tabulate the data and do
+    # not reshape the columns.
+    data_dtype = np.dtype(
+        [
+            # Make the strings long enough to avoid any issues.
+            ("solver_specs", "U200"),
+            ("parameter_value", "U100"),
+            ("pressure_diff_norm", "float32"),
+            ("saturation_diff_norm", "float32"),
+            ("total_flux_diff_norm", "float32"),
+            ("wetting_flux_diff_norm", "float32"),
+            ("flow_residual_norm", "float32"),
+            ("transport_residual_norm", "float32"),
+        ]
+    )
+    data_as_array = np.zeros(len(data), dtype=data_dtype)
+
+    for i, ((solver_specs, parameter_value), stats) in enumerate(data.items()):
+        data_as_array[i]["solver_specs"] = solver_specs
+        data_as_array[i]["parameter_value"] = parameter_value
+
+        # Now, read the stats of the case.
+        data_as_array[i]["pressure_diff_norm"] = stats.pressure_diff_norm
+        data_as_array[i]["saturation_diff_norm"] = stats.saturation_diff_norm
+        data_as_array[i]["total_flux_diff_norm"] = stats.total_flux_diff_norm
+        data_as_array[i]["wetting_flux_diff_norm"] = stats.wetting_flux_diff_norm
+        data_as_array[i]["flow_residual_norm"] = stats.flow_residual_norm
+        data_as_array[i]["transport_residual_norm"] = stats.transport_residual_norm
+
+    # Sort indices first by parameter_value, then by solver_specs.
+    idx = np.lexsort(
+        (
+            data_as_array["solver_specs"],
+            data_as_array["parameter_value"],
+        )
+    )
+    # Apply sorting to data.
+    data_as_array = data_as_array[idx]
+
+    # Tabulate the data.
+    table_lines = []
+    header = (
+        "Solver Name",
+        "hc_tol",
+        "nl_tol",
+        varying_param_name,
+        "pressure_diff_norm",
+        "saturation_diff_norm",
+        "total_flux_diff_norm",
+        "wetting_flux_diff_norm",
+        "flow_residual_norm",
+        "transport_residual_norm",
+    )
+    table_lines.append(header)
+
+    for row in data_as_array:
+        solver_specs_list: list[str] = row["solver_specs"].split("_")
+        solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 3 else ""
+        solver_name = solver_specs_list[0] + solver_name_postfix
+        hc_tol, nl_tol = solver_specs_list[-2], solver_specs_list[-1]
+
+        table_lines.append(
+            (
+                solver_name,
+                hc_tol,
+                nl_tol,
+                row["parameter_value"],
+                row["pressure_diff_norm"],
+                row["saturation_diff_norm"],
+                row["total_flux_diff_norm"],
+                row["wetting_flux_diff_norm"],
+                row["flow_residual_norm"],
+                row["transport_residual_norm"],
+            )
+        )
+
+    return table_lines

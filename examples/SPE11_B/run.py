@@ -419,8 +419,8 @@ def generate_viscous_varying_ref_factor(init_s: float) -> list[SimulationConfig]
 
 
 studies: dict[str, list[SimulationConfig]] = {
-    # "viscous_varying_rp_init_s_08": generate_viscous_varying_rp_cases(init_s=0.8),
-    # "viscous_varying_rp_init_s_09": generate_viscous_varying_rp_cases(init_s=0.9),
+    "viscous_varying_rp_init_s_08": generate_viscous_varying_rp_cases(init_s=0.8),
+    "viscous_varying_rp_init_s_09": generate_viscous_varying_rp_cases(init_s=0.9),
     "viscous_varying_ref_factor_init_s_08": generate_viscous_varying_ref_factor(
         init_s=0.8
     ),
