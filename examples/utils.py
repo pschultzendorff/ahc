@@ -180,7 +180,7 @@ def setup_porepy_params(
     params = {
         # NOTE The first two are only needed for adaptive solvers. For the nonadaptive
         # HC solver, it won't have any effect.
-        "adaptive_threshold_rel": 1e2,
+        "adaptive_threshold_rel": 10.0,
         # When cutting time steps, project the temporal estimator onto the
         # original time step length. This avoids strengthening the adaptive
         # criteria. The temporal convergence is assumed to be sublinear in the
@@ -566,25 +566,29 @@ def read_solver_stats(
         stats.lin_estimator.append(lin_estimator)
 
     # Find failed time steps by checking whether the discrete time value is smaller than
-    # the previous time step. the first value of
-    # The zeroth discrete time (t=0) is not saved in stats.discrete_times.
+    # the previous time step. The zeroth discrete time (t=0) is not saved in
+    # stats.discrete_times. Convergence of the last time step is given by convergence of
+    # the full simulation.
     num_time_steps = len(stats.discrete_times)
     stats.time_step_convergence = np.empty(num_time_steps, dtype=bool)
     stats.time_step_sizes = np.empty(num_time_steps, dtype=float)
 
-    last_converged_time: float = 0.0
+    # Some simulations may have empty solver statistics , e.g., the reference solution
+    # if it failed.
+    if num_time_steps >= 1:
+        last_converged_time: float = 0.0
 
-    for step, (current_time, next_time) in enumerate(
-        zip(stats.discrete_times[:-1], stats.discrete_times[1:])
-    ):
-        stats.time_step_convergence[step] = current_time < next_time
-        stats.time_step_sizes[step] = current_time - last_converged_time
-        if stats.time_step_convergence[step]:
-            last_converged_time = current_time
+        for step, (current_time, next_time) in enumerate(
+            zip(stats.discrete_times[:-1], stats.discrete_times[1:])
+        ):
+            stats.time_step_convergence[step] = current_time < next_time
+            stats.time_step_sizes[step] = current_time - last_converged_time
+            if stats.time_step_convergence[step]:
+                last_converged_time = current_time
 
-    # The last time step's convergence is determined by the overall convergence.
-    stats.time_step_convergence[-1] = stats.converged
-    stats.time_step_sizes[-1] = stats.final_time - last_converged_time
+        # The last time step's convergence is determined by the overall convergence.
+        stats.time_step_convergence[-1] = stats.converged
+        stats.time_step_sizes[-1] = stats.final_time - last_converged_time
 
     return stats
 
@@ -1157,6 +1161,9 @@ def read_comparison_stats(
         time step, i.e., if the simulation and the reference solution solved the same
         problem.
 
+    Note: If no comparison statistics are found, an empty ComparisonStats object is
+        returned.
+
     Parameters:
         config: The simulation configuration.
         solver_stats: The solver statistics of the simulation.
@@ -1174,9 +1181,12 @@ def read_comparison_stats(
     )
 
     if solver_stats.converged and len(solver_stats.discrete_times) == 1:
-        with (config.folder_name() / filename).open() as f:
-            data: dict[str, Any] = json.load(f)
-        return ComparisonStats(**data)
+        try:
+            with (config.folder_name() / filename).open() as f:
+                data: dict[str, Any] = json.load(f)
+                return ComparisonStats(**data)
+        except FileNotFoundError:
+            return ComparisonStats()
     else:
         return ComparisonStats()
 

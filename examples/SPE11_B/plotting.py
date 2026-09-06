@@ -3,11 +3,10 @@ import pathlib
 import sys
 
 import porepy as pp
-from matplotlib import pyplot as plt
 from run import studies
 
 sys.path.append(str(pathlib.Path(__file__).parent.parent))
-from SPE10_2D.plotting import _key_varying_rp, plot_study
+from SPE10_2D.plotting import _key_varying_rp, analyze_study
 from utils import (
     SimulationConfig,
     SolverStats,
@@ -28,7 +27,9 @@ def _key_varying_ref_factor(
 
 if __name__ == "__main__":
     fig_dir = dirname / "figures"
+    comparison_dir = dirname / "comparison_stats"
     fig_dir.mkdir(exist_ok=True)
+    comparison_dir.mkdir(exist_ok=True)
 
     for study_name, study in studies.items():
         kwargs = {}
@@ -45,14 +46,14 @@ if __name__ == "__main__":
             case _:
                 raise ValueError(f"Unknown study: {study_name}")
 
-        fig = plot_study(
+        fig = analyze_study(
             study,
             key_func=key_func,
             varying_param_name=varying_param_name,
+            figure_save_path=fig_dir / f"nl_iters_{study_name}.png",
+            table_save_path=comparison_dir / f"comparison_stats_{study_name}.csv",
             **kwargs,
         )
-        fig.savefig(fig_dir / f"nl_iters_{study_name}.png")
-        plt.close(fig)
 
     with (fig_dir / "relative_errors.txt").open("w") as f:
         json.dump(rel_errors, f, indent=2)

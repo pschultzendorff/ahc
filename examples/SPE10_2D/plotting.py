@@ -54,26 +54,36 @@ def analyze_study(
     data_solver: dict[tuple[str, str], SolverStats] = {}
     data_comparison: dict[tuple[str, str], ComparisonStats] = {}
 
+    # Store the parameter_values (second element of the key) for which the reference
+    # solution did not converge. The comparison statistics for these cases will be set
+    # to default values to indicate that they are not meaningful.
+    failed_reference_solutions: list[str] = []
+
     # Read solver and comparison statistics for all cases.
     for config in cases:
         solver_stats = read_solver_stats(config, EXPECTED_FINAL_TIME)
-        if config.solver_name == "ReferenceSolution":
-            if not solver_stats.converged or len(solver_stats.discrete_times) != 1:
-                raise ValueError(
-                    f"Reference solution {config.folder_name()} did not converge in a "
-                    "single time step. Comparison statistics are not meaningful."
-                )
-            else:
-                # The reference solution is not of interest for plotting solver
-                # statistics or tabulating comparison statistics.
-                continue
-
-        comparison_stats = read_comparison_stats(config, solver_stats)
-
         key = key_func(config, solver_stats)
 
-        data_solver[key] = solver_stats
-        data_comparison[key] = comparison_stats
+        # There are several cases to consider regarding the reference solution and the
+        # comparison statistics.
+        # - The reference solution exists but the solver did not converge in a single
+        #   time step. This is handled by read_comparison_stats.
+        # - The reference solver failed with an error at some point and no solution was
+        #   saved. This is handled by run, which does not save any comparison stats.
+        #   Read comparison stats will return a default ComparisonStats object in this
+        #   case.
+        # - The reference solver converged in more than one time step. This is handled
+        #   below.
+        if config.solver_name == "ReferenceSolution":
+            if not solver_stats.converged or len(solver_stats.discrete_times) != 1:
+                failed_reference_solutions.append(key[1])
+
+        else:
+            # For all other solvers, we store the solver and comparison stats.
+            # In no comparison
+            comparison_stats = read_comparison_stats(config, solver_stats)
+            data_solver[key] = solver_stats
+            data_comparison[key] = comparison_stats
 
         # Calculate relative estimator values from the finest AHC solution.
         if (
@@ -87,6 +97,14 @@ def analyze_study(
                 )
             else:
                 REL_ESTS[f"{config.folder_name()}_{key}"] = "not converged"
+
+    for parameter_value in failed_reference_solutions:
+        # Set the comparison statistics to default values to indicate that they are not
+        # meaningful.
+        for key in data_comparison:
+            if key[1] == parameter_value:
+                data_comparison[key] = ComparisonStats()
+                break
 
     # Plot solver statistics and tabulate comparison statistics.
     solver_stats_fig = plot_nl_iterations(data_solver, varying_param_name, **kwargs)
