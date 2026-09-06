@@ -346,27 +346,45 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
         # Adaptive stopping criterion.
         if not diverged and nl_params["nl_adaptive"]:
             nl_increment_sat_norm, nl_increment_press_norm = (
-                self.compute_nonlinear_increment_norm_per_variable(  # type: ignore
-                    nonlinear_increment
-                )
+                self.compute_nonlinear_increment_norm_per_variable(nonlinear_increment)
             )
+            residual_flow_norm, residual_transp_norm = (
+                self.compute_residual_norm_per_equation(residual)
+            )
+
             ref_increment_sat_norm, ref_increment_press_norm = (
                 self.compute_nonlinear_increment_norm_per_variable(reference_increment)
             )
+            ref_residual_flow_norm, ref_residual_transp_norm = (
+                self.compute_residual_norm_per_equation(reference_residual)
+            )
 
-            # Handle edge cases.
+            # Handle edge cases, e.g., in the first step of the pure gravity segratation
+            # example.
             if ref_increment_sat_norm == 0.0:
                 logger.warning(
-                    "Reference nonlinear increment norm for saturation is zero. Set to"
-                    " 1.0 to avoid division by zero."
+                    "Reference saturation increment norm is zero. Set to 1.0 to avoid"
+                    " division by zero."
                 )
                 ref_increment_sat_norm = 1.0
             if ref_increment_press_norm == 0.0:
                 logger.warning(
-                    "Reference nonlinear increment norm for pressure is zero. Set to"
-                    " 1.0 to avoid division by zero."
+                    "Reference pressure increment norm is zero. Set to 1.0 to avoid"
+                    " division by zero."
                 )
                 ref_increment_press_norm = 1.0
+            if ref_residual_flow_norm == 0.0:
+                logger.warning(
+                    "Reference flow residual norm is zero. Set to 1.0 to avoid division"
+                    " by zero."
+                )
+                ref_residual_flow_norm = 1.0
+            if ref_residual_transp_norm == 0.0:
+                logger.warning(
+                    "Reference transport residual norm is zero. Set to 1.0 to avoid"
+                    " division by zero."
+                )
+                ref_residual_transp_norm = 1.0
 
             rel_increment_sat_norm: float = (
                 nl_increment_sat_norm / ref_increment_sat_norm
@@ -374,14 +392,21 @@ class SolutionStrategyANewton(AdaptiveNewtonProtocol, EstimatesSolutionStrategy)
             rel_increment_press_norm: float = (
                 nl_increment_press_norm / ref_increment_press_norm
             )
+            rel_residual_flow_norm: float = residual_flow_norm / ref_residual_flow_norm
+            rel_residual_transp_norm: float = (
+                residual_transp_norm / ref_residual_transp_norm
+            )
 
             discretization_est: float = self.global_discr_est()
             # If Newton diverges, the estimators lose their meaning and the adaptive
             # criterion might incorrectly stop the Newton loop. Hence, we check that the
-            # relative nonlinear increment norms are not too large.
+            # relative nonlinear increment norms and relative residual norms are not too
+            # large.
             if (
                 rel_increment_sat_norm <= nl_params["adaptive_threshold_rel"]
                 and rel_increment_press_norm <= nl_params["adaptive_threshold_rel"]
+                and rel_residual_flow_norm <= nl_params["adaptive_threshold_rel"]
+                and rel_residual_transp_norm <= nl_params["adaptive_threshold_rel"]
                 and lin_est <= nl_params["nl_error_ratio"] * discretization_est
             ):
                 logger.info(
