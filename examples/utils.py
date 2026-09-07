@@ -575,6 +575,9 @@ def read_solver_stats(
 
     # Some simulations may have empty solver statistics , e.g., the reference solution
     # if it failed.
+    # FIXME 2026-09-07: hc_solver was fixed to run after_hc_failure() for a failed
+    # reference solution. Now, num_time_steps should always be >= 1. Currently, the
+    # check is kept for legacy reasons.
     if num_time_steps >= 1:
         last_converged_time: float = 0.0
 

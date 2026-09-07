@@ -160,6 +160,7 @@ class HCSolver:
             if nl_is_converged:
                 model.after_hc_convergence()
             else:
+                model.after_hc_failure()
                 raise RuntimeError(
                     "Cannot generate reference solution, since Newton did not"
                     " converge at lambda=0.0."
