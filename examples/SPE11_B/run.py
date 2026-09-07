@@ -317,9 +317,11 @@ solvers_and_tols: list[tuple[str, float, float]] = [
     ("Newton", 0.0, 0.1),
     ("NewtonAppleyard", 0.0, 0.1),
 ]
-refinement_factors: list[float] = [10, 5, 1]
-SPE11_ENTRY_PRESSURE: float = 200.0  # [Pa]
 
+refinement_factors: list[float] = [10.0, 5.0, 1.0]
+SPE11_REFINEMENT_FACTOR: float = 1.0
+
+SPE11_ENTRY_PRESSURE: float = 200.0  # [Pa]
 
 LINEAR_RP_MODEL = {"model": "linear", "limit": True}
 rp_models: dict[str, Any] = {
@@ -377,7 +379,7 @@ def generate_viscous_varying_rp_cases(init_s: float) -> list[SimulationConfig]:
                     cp_model_2=cp_models["Brooks-Corey_nb_4"],
                     buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
                     buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
-                    spe11_refinement_factor=refinement_factors[2],
+                    spe11_refinement_factor=SPE11_REFINEMENT_FACTOR,
                     spe11_entry_pressure=SPE11_ENTRY_PRESSURE,
                 )
             )
