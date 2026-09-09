@@ -63,12 +63,13 @@ from utils import SimulationConfig
 # region SETUP
 
 
-# Limit number of threads for NREC.
-N_THREADS = "4"
+# Limit number of threads to one to ensure that pypardiso is deterministic.
+N_THREADS = "1"
 os.environ["MKL_NUM_THREADS"] = N_THREADS
 os.environ["NUMEXPR_NUM_THREADS"] = N_THREADS
 os.environ["OMP_NUM_THREADS"] = N_THREADS
 os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
+os.environ["VECLIB_MAXIMUM_THREADS"] = N_THREADS
 
 # Catch all numpy errors except underflow, which may occur when calculating estimators.
 np.seterr(all="raise")
