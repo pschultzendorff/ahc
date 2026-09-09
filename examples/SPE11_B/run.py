@@ -55,12 +55,13 @@ from utils import SimulationConfig, clean_up_after_simulation, setup_porepy_para
 
 # region SETUP
 
-# Limit number of threads for NREC.
-N_THREADS = "4"
+# Limit number of threads to one to ensure that pypardiso is deterministic.
+N_THREADS = "1"
 os.environ["MKL_NUM_THREADS"] = N_THREADS
 os.environ["NUMEXPR_NUM_THREADS"] = N_THREADS
 os.environ["OMP_NUM_THREADS"] = N_THREADS
 os.environ["OPENBLAS_NUM_THREADS"] = N_THREADS
+os.environ["VECLIB_MAXIMUM_THREADS"] = N_THREADS
 
 # Catch all numpy errors except underflow, which may occur when calculating estimators.
 np.seterr(all="raise")
@@ -307,7 +308,6 @@ def run_simulation(
 # region SIMULATIONS
 solvers_and_tols: list[tuple[str, float, float]] = [
     ("ReferenceSolution", 0.01, 0.01),
-    ("AHC", 0.01, 0.01),
     ("AHC", 0.1, 0.1),
     ("AHC", 0.1, 0.01),
     ("AHC", 0.01, 0.01),

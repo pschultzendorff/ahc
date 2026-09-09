@@ -178,7 +178,6 @@ if __name__ == "__main__":
                 "viscous_varying_rp_init_s_02"
                 | "viscous_varying_rp_init_s_02_spat_est_on"
                 | "viscous_varying_rp_init_s_03"
-                | "buoyancy_varying_rp"
                 | "viscous_varying_rp_with_spatial_estimators_init_s_02"
             ):
                 key_func = _key_varying_rp
@@ -186,7 +185,7 @@ if __name__ == "__main__":
             case "viscous_varying_init_s" | "capillary_varying_init_s":
                 key_func = _key_varying_init_s
                 varying_param_name = r"$s_\mathrm{w}^0$"
-            case "capillary_varying_rp":
+            case "capillary_varying_rp" | "buoyancy_varying_rp":
                 key_func = _key_varying_cap
                 varying_param_name = "Capillary pressure & Relative permeability model"
                 kwargs = {
