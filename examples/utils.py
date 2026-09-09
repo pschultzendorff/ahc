@@ -573,25 +573,19 @@ def read_solver_stats(
     stats.time_step_convergence = np.empty(num_time_steps, dtype=bool)
     stats.time_step_sizes = np.empty(num_time_steps, dtype=float)
 
-    # Some simulations may have empty solver statistics , e.g., the reference solution
-    # if it failed.
-    # FIXME 2026-09-07: hc_solver was fixed to run after_hc_failure() for a failed
-    # reference solution. Now, num_time_steps should always be >= 1. Currently, the
-    # check is kept for legacy reasons.
-    if num_time_steps >= 1:
-        last_converged_time: float = 0.0
+    last_converged_time: float = 0.0
 
-        for step, (current_time, next_time) in enumerate(
-            zip(stats.discrete_times[:-1], stats.discrete_times[1:])
-        ):
-            stats.time_step_convergence[step] = current_time < next_time
-            stats.time_step_sizes[step] = current_time - last_converged_time
-            if stats.time_step_convergence[step]:
-                last_converged_time = current_time
+    for step, (current_time, next_time) in enumerate(
+        zip(stats.discrete_times[:-1], stats.discrete_times[1:])
+    ):
+        stats.time_step_convergence[step] = current_time < next_time
+        stats.time_step_sizes[step] = current_time - last_converged_time
+        if stats.time_step_convergence[step]:
+            last_converged_time = current_time
 
-        # The last time step's convergence is determined by the overall convergence.
-        stats.time_step_convergence[-1] = stats.converged
-        stats.time_step_sizes[-1] = stats.final_time - last_converged_time
+    # The last time step's convergence is determined by the overall convergence.
+    stats.time_step_convergence[-1] = stats.converged
+    stats.time_step_sizes[-1] = stats.final_time - last_converged_time
 
     return stats
 
