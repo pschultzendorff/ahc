@@ -175,6 +175,13 @@ class ComparisonMixin(TPFProtocol):
         g: pp.Grid = self.g
         es: pp.EquationSystem = self.equation_system
 
+        # Set homotopy parameter to 0 if applicable.
+        if self.uses_hc:
+            # Ignore mypy and pylance complaining about the attributes not existing or
+            # having not set_value method. If uses_hc is True, this works.
+            self.hc_toggle_fl = 0.0  # type: ignore
+            self.hc_toggle_ad.set_value(self.hc_toggle_fl)  # type: ignore
+
         primary_variables = es.get_variable_values(
             variables=[self.primary_saturation_var, self.primary_pressure_var],
             iterate_index=0,
@@ -196,6 +203,11 @@ class ComparisonMixin(TPFProtocol):
             np.ndarray,
             self.equation_system.equations[self.transport_equation].value(es),
         )
+
+        # Turn HC back on.
+        if self.uses_hc:
+            self.hc_toggle_fl = 1.0  # type: ignore
+            self.hc_toggle_ad.set_value(self.hc_toggle_fl)  # type: ignore
 
         return SolutionVals(
             pressure=pressure,
