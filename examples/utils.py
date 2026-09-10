@@ -130,6 +130,7 @@ class SimulationConfig:
         solver_name_with_params = (
             f"{self.solver_name}{postfix_with_underscore}"
             f"_{self.hc_tol:.1g}_{self.nl_tol:.1g}"
+            f"_{self.hc_tol:.1g}_{self.nl_tol:.1g}"
         )
         return solver_name_with_params
 
@@ -656,7 +657,7 @@ def plot_nl_iterations(
     data_dtype = np.dtype(
         [
             # Make the strings long enough to avoid any issues.
-            ("solver_name", "U200"),
+            ("solver_label", "U200"),
             ("varying_param_value", varying_param_dtype),
             ("nl_iterations", np.int32),
             ("annotation", "U100"),
@@ -672,43 +673,43 @@ def plot_nl_iterations(
         # Transform the solver specs into annotations. Unique annotations for each
         # combination of solver name and specs.
         solver_specs_list: list[str] = solver_specs.split("_")
-        solver_name = solver_specs_list[0]
+        solver_label = solver_specs_list[0]
         solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 3 else ""
-        match solver_name:
+        match solver_label:
             case "HC":
-                data_as_array[i]["solver_name"] = (
-                    f"{solver_name}{solver_name_postfix}\n"
+                data_as_array[i]["solver_label"] = (
+                    f"{solver_label}{solver_name_postfix}\n"
                     rf"$\beta_{{\min}} = {solver_specs_list[-2]}$"
                     "\n"
                     rf"$\epsilon_\mathrm{{Newton}} = {solver_specs_list[-1]}$"
                 )
             case "AHC":
-                data_as_array[i]["solver_name"] = (
-                    f"{solver_name}{solver_name_postfix}\n"
+                data_as_array[i]["solver_label"] = (
+                    f"{solver_label}{solver_name_postfix}\n"
                     rf"$\gamma_\mathrm{{HC}} = {solver_specs_list[-2]}$"
                     "\n"
                     rf"$\gamma_\mathrm{{lin}} = {solver_specs_list[-1]}$"
                 )
             case "Newton" | "NewtonAppleyard":
-                data_as_array[i]["solver_name"] = (
-                    f"{solver_name}{solver_name_postfix}\n"
+                data_as_array[i]["solver_label"] = (
+                    f"{solver_label}{solver_name_postfix}\n"
                     rf"$\gamma_\mathrm{{lin}} = {solver_specs_list[-1]}$"
                 )
             case _:
-                raise ValueError(f"Unknown solver: {solver_name}")
+                raise ValueError(f"Unknown solver: {solver_label}")
 
         # Now, read the stats of the case.
 
         tot_nl_iterations = (
             sum(stats.time_step_nl_iters)
-            if solver_name.startswith("Newton")
+            if solver_label.startswith("Newton")
             else sum(_flatten_nested_list(stats.time_step_nl_iters))
         )
 
         # Create annotations for the heatmap entries.
         # For HC and AHC, these include #nl_iters, #hc_iters, final beta value, and
         # #time_steps.
-        if solver_name.endswith("HC"):
+        if solver_label.endswith("HC"):
             tot_hc_iters = len(_flatten_nested_list(stats.time_step_nl_iters))
             # At the last lambda, the Newton solver was not run anymore. Check
             # solver_statistics.
@@ -740,38 +741,38 @@ def plot_nl_iterations(
 
     # Create ticks for x- and y-axes.
     x_ticks = np.unique(data_as_array["varying_param_value"])
-    y_ticks = np.unique(data_as_array["solver_name"])
+    y_ticks = np.unique(data_as_array["solver_label"])
 
     # Fill missing combinations of solver_specs and varying_param_value with empty
     # statistics. This ensures that the heatmap has a rectangular shape, even if some
     # combinations of solver_specs and varying_param_value are missing in the data.
-    for solver_name, varying_param_value in itertools.product(y_ticks, x_ticks):
+    for solver_label, varying_param_value in itertools.product(y_ticks, x_ticks):
         if not np.any(
-            (data_as_array["solver_name"] == solver_name)
+            (data_as_array["solver_label"] == solver_label)
             & (data_as_array["varying_param_value"] == varying_param_value)
         ):
             # Add an empty entry to the data array.
             empty_entry = np.zeros(1, dtype=data_dtype)
-            empty_entry["solver_name"] = solver_name
+            empty_entry["solver_label"] = solver_label
             empty_entry["varying_param_value"] = varying_param_value
             empty_entry["simulation_exists"] = False
             data_as_array = np.concatenate((data_as_array, empty_entry))
 
-    # Sort indices first by solver_specs, then by varying_param_value.
+    # Sort indices first by solver_label, then by varying_param_value.
     idx = np.lexsort(
-        (data_as_array["varying_param_value"], data_as_array["solver_name"])
+        (data_as_array["varying_param_value"], data_as_array["solver_label"])
     )
     # Apply sorting to data.
     data_as_array = data_as_array[idx]
 
-    # Reshape each data column into an array of shape=(len(x_ticks), len(y_ticks)) for
+    # Reshape each data column into an array of shape=(len(y_ticks), len(x_ticks)) for
     # the heatmap. Due to the previous sorting, the column value will appear at the x, y
     # value corresponding to the solver_specs and varying_param_value.
     grids = {
         col: data_as_array[col].reshape(len(y_ticks), len(x_ticks))
         # stats_as_array.dtype.names will not be None. Ignore pylance.
         for col in data_as_array.dtype.names  # type: ignore
-        if col not in ("solver_name", "varying_param_value")
+        if col not in ("solver_label", "varying_param_value")
     }
 
     # Now, we can finally create the heatmap figure.
@@ -816,22 +817,6 @@ def plot_nl_iterations(
         linewidths=0.8,
         ax=ax,
     )
-
-    # # Annotate failed simulations with the final time reached.
-    # for i, j in np.argwhere(np.logical_not(grids["converged"])):
-    #     ax.text(
-    #         j + 0.5,
-    #         i + 0.5,
-    #         rf"$\Delta t = {grids['final_time_step_size'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
-    #         + "\n"
-    #         rf"$t={grids['final_time'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
-    #         + "\n"
-    #         + grids["annotation"][i, j],
-    #         ha="center",
-    #         va="center",
-    #         fontsize=10,
-    #         color="black",
-    #     )
 
     # Set labels and title.
     ax.set_xlabel(varying_param_name, fontsize=12, fontweight="bold")
@@ -1248,7 +1233,7 @@ def tabulate_comparison_stats(
     data_dtype = np.dtype(
         [
             # Make the strings long enough to avoid any issues.
-            ("solver_name", "U200"),
+            ("solver_label", "U200"),
             ("varying_param_value", varying_param_dtype),
             ("pressure_diff_norm", np.float32),
             ("saturation_diff_norm", np.float32),
@@ -1261,7 +1246,7 @@ def tabulate_comparison_stats(
     data_as_array = np.zeros(len(data), dtype=data_dtype)
 
     for i, ((solver_specs, varying_param_value), stats) in enumerate(data.items()):
-        data_as_array[i]["solver_name"] = solver_specs
+        data_as_array[i]["solver_label"] = solver_specs
         data_as_array[i]["varying_param_value"] = varying_param_value
 
         # Now, read the stats of the case.
@@ -1274,10 +1259,7 @@ def tabulate_comparison_stats(
 
     # Sort indices first by varying_param_value, then by solver_specs.
     idx = np.lexsort(
-        (
-            data_as_array["solver_name"],
-            data_as_array["varying_param_value"],
-        )
+        (data_as_array["solver_label"], data_as_array["varying_param_value"])
     )
     # Apply sorting to data.
     data_as_array = data_as_array[idx]
@@ -1299,7 +1281,7 @@ def tabulate_comparison_stats(
     table_lines.append(header)
 
     for row in data_as_array:
-        solver_specs_list: list[str] = row["solver_name"].split("_")
+        solver_specs_list: list[str] = row["solver_label"].split("_")
         solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 3 else ""
         solver_name = solver_specs_list[0] + solver_name_postfix
         hc_tol, nl_tol = solver_specs_list[-2], solver_specs_list[-1]

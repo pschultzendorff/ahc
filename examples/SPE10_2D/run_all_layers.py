@@ -88,7 +88,7 @@ logging.basicConfig(level=logging.INFO)
 # region RUN
 
 
-def generate_cases() -> list[SimulationConfig]:
+def generate_all_layers() -> list[SimulationConfig]:
     """Generate simulation configurations for all layers and solvers."""
     cases = []
 
@@ -122,7 +122,7 @@ def generate_cases() -> list[SimulationConfig]:
 
 if __name__ == "__main__":
     results_dir.mkdir(exist_ok=True)
-    study = generate_cases()
+    study = generate_all_layers()
     for config in study:
         run_simulation(config)
         # Keep full simulation results for 2 simulations from the upper and lower

@@ -41,4 +41,4 @@ for idx, suffix in enumerate(suffixes):
         )
     else:
         subprocess.Popen(cmd, stderr=subprocess.STDOUT)
-        logger.info(f"Started sweep with {runfile} on CPU core {cpu_core}. ")
+        logger.info(f"Started sweep with {runfile} on CPU core {cpu_core}.")
