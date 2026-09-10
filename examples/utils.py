@@ -130,7 +130,6 @@ class SimulationConfig:
         solver_name_with_params = (
             f"{self.solver_name}{postfix_with_underscore}"
             f"_{self.hc_tol:.1g}_{self.nl_tol:.1g}"
-            f"_{self.hc_tol:.1g}_{self.nl_tol:.1g}"
         )
         return solver_name_with_params
 
