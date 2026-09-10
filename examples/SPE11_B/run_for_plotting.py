@@ -28,6 +28,7 @@ import warnings
 import numpy as np
 import porepy as pp
 from run import (
+    LINEAR_RP_MODEL,
     SPE11_ENTRY_PRESSURE,
     ZERO_BUOYANCY_MODEL,
     cp_models,
@@ -87,9 +88,9 @@ if __name__ == "__main__":
         hc_tol=0.0,  # Disregarded
         nl_tol=1e-5,  # Almost disregarded
         init_s=0.8,
-        rp_model_1=rp_models["linear"],
+        rp_model_1=LINEAR_RP_MODEL,
         rp_model_2=rp_models["Brooks-Corey_nb_4"],
-        cp_model_1=cp_models["None"],
+        cp_model_1=ZERO_BUOYANCY_MODEL,
         cp_model_2=cp_models["Brooks-Corey_nb_4"],
         buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
         buoyancy_constants_2=ZERO_BUOYANCY_MODEL,

@@ -150,7 +150,7 @@ class SimulationConfig:
 
 
 def setup_porepy_params(
-    config: SimulationConfig,
+    config: SimulationConfig, **kwargs
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     r"""Setup model, solver, and time manager parameters in PorePy format.
 

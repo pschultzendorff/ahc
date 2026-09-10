@@ -167,7 +167,7 @@ def generate_hc_divergence_cases() -> list[SimulationConfig]:
             buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
             buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
             spe11_refinement_factor=SPE11_REFINEMENT_FACTOR,
-            spe11_entry_pressure=10000 * pp.PASCAL,  # Very high to ensure divergence.
+            spe11_entry_pressure=20000 * pp.PASCAL,  # Very high to ensure divergence.
         )
     )
 
@@ -175,9 +175,9 @@ def generate_hc_divergence_cases() -> list[SimulationConfig]:
 
 
 studies: dict[str, list[SimulationConfig]] = {
-    # "temporal_estimator_convergence": generate_temporal_convergence_cases(),
+    "temporal_estimator_convergence": generate_temporal_convergence_cases(),
     "spatial_estimator_convergence": generate_spatial_convergence_cases(),
-    # "hc_estimator_convergence": generate_hc_convergence_cases(),
+    "hc_estimator_convergence": generate_hc_convergence_cases(),
     "hc_estimator_divergence": generate_hc_divergence_cases(),
 }
 

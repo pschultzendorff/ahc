@@ -92,6 +92,17 @@ if __name__ == "__main__":
     results_dir.mkdir(exist_ok=True)
 
     for spe10_layer in [10, 55]:
+        if spe10_layer == 55:
+            # Relaxed tolerances for the reference solution to ensure convergence.
+            additional_params = {
+                "reference_solution_newton_params": {
+                    "nl_convergence_tol_abs": 1e-3,
+                    "nl_convergence_tol_rel": 1e-3,
+                }
+            }
+        else:
+            additional_params = {}
+
         config = SimulationConfig(
             results_dir=results_dir,
             regime="gravity_segregation",
@@ -112,6 +123,10 @@ if __name__ == "__main__":
             spe10_case="gravity_segregation",
             spe10_water_density=10000.0,
         )
-        run_simulation(config, time_manager_params=time_manager_params)
+        run_simulation(
+            config,
+            time_manager_params=time_manager_params,
+            additional_params=additional_params,
+        )
 
 # endregion

@@ -132,20 +132,23 @@ class HCSolver:
 
             # Set Newton parameters to ensure best possible chance of
             # non-adaptive convergence for the target problem.
-            best_newton_params = self.params.copy()
+            best_newton_params = {
+                # Adaptive stopping criteria for Newton:
+                "hc_adaptive": False,  # This doesn't change anything as beta=0 anyways,
+                # but SolutionStrategyHC.check_convergence expects a value.
+                "nl_adaptive": False,
+                # Non-adaptive stopping parameters and other solver parameters:
+                "nl_convergence_tol_abs": 1e-5,
+                "nl_convergence_tol_rel": 1e-5,
+                "nl_divergence_tol": 1e30,
+                "nl_appleyard_chopping": True,
+                "nl_physical_damping": True,
+                "nl_max_iterations": 100,
+            }
             best_newton_params.update(
-                {
-                    # Adaptive stopping criteria for Newton:
-                    "nl_adaptive": False,
-                    # Non-adaptive stopping parameters and other solver parameters:
-                    "nl_convergence_tol_abs": 1e-5,
-                    "nl_convergence_tol_rel": 1e-5,
-                    "nl_divergence_tol": 1e30,
-                    "nl_appleyard_chopping": True,
-                    "nl_physical_damping": True,
-                    "nl_max_iterations": 100,
-                }
+                self.params.get("reference_solution_newton_params", {})
             )
+
             best_newton_solver = ModifiedNewtonSolver(best_newton_params)
 
             # Run one HC step at lambda=0.0.
