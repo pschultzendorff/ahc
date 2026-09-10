@@ -4,6 +4,7 @@ import pathlib
 import sys
 from collections.abc import Callable
 
+import numpy as np
 from ahc.utils.compare import ComparisonStats
 from matplotlib import pyplot as plt
 from run import (
@@ -34,6 +35,7 @@ def analyze_study(
     cases: list[SimulationConfig],
     key_func: Callable[[SimulationConfig, SolverStats], tuple[str, str]],
     varying_param_name: str,
+    varying_param_dtype,
     figure_save_path: pathlib.Path,
     table_save_path: pathlib.Path,
     **kwargs,
@@ -107,9 +109,11 @@ def analyze_study(
                 break
 
     # Plot solver statistics and tabulate comparison statistics.
-    solver_stats_fig = plot_nl_iterations(data_solver, varying_param_name, **kwargs)
+    solver_stats_fig = plot_nl_iterations(
+        data_solver, varying_param_name, varying_param_dtype, **kwargs
+    )
     comparison_stats_table = tabulate_comparison_stats(
-        data_comparison, varying_param_name, **kwargs
+        data_comparison, varying_param_name, varying_param_dtype, **kwargs
     )
 
     solver_stats_fig.savefig(figure_save_path)
@@ -182,12 +186,15 @@ if __name__ == "__main__":
             ):
                 key_func = _key_varying_rp
                 varying_param_name = "Relative permeability model"
+                varying_param_dtype = "U100"
             case "viscous_varying_init_s" | "capillary_varying_init_s":
                 key_func = _key_varying_init_s
                 varying_param_name = r"$s_\mathrm{w}^0$"
+                varying_param_dtype = np.float32
             case "capillary_varying_rp" | "buoyancy_varying_rp":
                 key_func = _key_varying_cap
                 varying_param_name = "Capillary pressure & Relative permeability model"
+                varying_param_dtype = "U100"
                 kwargs = {
                     "tight_layout": True,
                     "rotate_x_labels": True,
@@ -196,9 +203,11 @@ if __name__ == "__main__":
             case "capillary_varying_entry_pressure" | "buoyancy_varying_entry_pressure":
                 key_func = _key_varying_entry_pressure
                 varying_param_name = r"$p_\mathrm{e}$"
+                varying_param_dtype = np.float32
             case "buoyancy_varying_density" | "gravity_segregation":
                 key_func = _key_varying_water_density
                 varying_param_name = r"$\rho_\mathrm{w}$"
+                varying_param_dtype = np.float32
             case _:
                 raise ValueError(f"Unknown study: {study_name}")
 
@@ -208,6 +217,7 @@ if __name__ == "__main__":
             study,
             key_func=key_func,
             varying_param_name=varying_param_name,
+            varying_param_dtype=varying_param_dtype,
             figure_save_path=fig_dir / f"nl_iters_{study_name}.png",
             table_save_path=comparison_dir / f"comparison_stats_{study_name}.csv",
             **kwargs,

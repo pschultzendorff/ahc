@@ -2,6 +2,7 @@ import json
 import pathlib
 import sys
 
+import numpy as np
 import porepy as pp
 from run import studies
 
@@ -37,12 +38,14 @@ if __name__ == "__main__":
             case "viscous_varying_rp_init_s_08" | "viscous_varying_rp_init_s_09":
                 key_func = _key_varying_rp
                 varying_param_name = "Relative permeability model"
+                varying_dtype = "U100"
             case (
                 "viscous_varying_ref_factor_init_s_08"
                 | "viscous_varying_ref_factor_init_s_09"
             ):
                 key_func = _key_varying_ref_factor
                 varying_param_name = "Number of grid cells"
+                varying_dtype = np.int32
             case _:
                 raise ValueError(f"Unknown study: {study_name}")
 
@@ -50,6 +53,7 @@ if __name__ == "__main__":
             study,
             key_func=key_func,
             varying_param_name=varying_param_name,
+            varying_param_dtype=varying_dtype,
             figure_save_path=fig_dir / f"nl_iters_{study_name}.png",
             table_save_path=comparison_dir / f"comparison_stats_{study_name}.csv",
             **kwargs,
