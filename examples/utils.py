@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 import pathlib
@@ -128,7 +129,7 @@ class SimulationConfig:
         )
         solver_name_with_params = (
             f"{self.solver_name}{postfix_with_underscore}"
-            f"_{self.hc_tol:.3f}_{self.nl_tol:.2e}"
+            f"_{self.hc_tol:.1g}_{self.nl_tol:.1g}"
         )
         return solver_name_with_params
 
@@ -171,7 +172,7 @@ def setup_porepy_params(
     hc_tol = config.hc_tol
     nl_tol = config.nl_tol
     logger.info(
-        f"solver: {solver_name}, HC tolerance: {hc_tol:.2f}, NL tolerance: {nl_tol:.2f}."
+        f"solver: {solver_name}, HC tolerance: {hc_tol:.1g}, NL tolerance: {nl_tol:.1g}."
         " Generating solver and time manager parameters."
     )
 
@@ -635,6 +636,7 @@ def calc_relative_est(stats: SolverStats) -> dict[str, float]:
 def plot_nl_iterations(
     data: dict[tuple[str, str], SolverStats],
     varying_param_name: str,
+    varying_param_dtype,
     title: str | None = None,
     **kwargs,
 ):
@@ -650,22 +652,23 @@ def plot_nl_iterations(
 
     """
     # Loop through data and transform into an array that stores solver_specs,
-    # parameter_value, and the statistics of interest.
+    # varying_param_value, and the statistics of interest.
     data_dtype = np.dtype(
         [
             # Make the strings long enough to avoid any issues.
-            ("solver_specs", "U200"),
-            ("parameter_value", "U100"),
-            ("nl_iterations", "i8"),
+            ("solver_name", "U200"),
+            ("varying_param_value", varying_param_dtype),
+            ("nl_iterations", np.int32),
             ("annotation", "U100"),
-            ("converged", "?"),
-            ("final_time", "float32"),
-            ("final_time_step_size", "float32"),
+            ("simulation_exists", np.bool_),
         ]
     )
     data_as_array = np.zeros(len(data), dtype=data_dtype)
 
-    for i, ((solver_specs, parameter_value), stats) in enumerate(data.items()):
+    for i, ((solver_specs, varying_param_value), stats) in enumerate(data.items()):
+        data_as_array[i]["simulation_exists"] = True
+        data_as_array[i]["varying_param_value"] = varying_param_value
+
         # Transform the solver specs into annotations. Unique annotations for each
         # combination of solver name and specs.
         solver_specs_list: list[str] = solver_specs.split("_")
@@ -673,42 +676,34 @@ def plot_nl_iterations(
         solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 3 else ""
         match solver_name:
             case "HC":
-                data_as_array[i]["solver_specs"] = (
+                data_as_array[i]["solver_name"] = (
                     f"{solver_name}{solver_name_postfix}\n"
                     rf"$\beta_{{\min}} = {solver_specs_list[-2]}$"
                     "\n"
                     rf"$\epsilon_\mathrm{{Newton}} = {solver_specs_list[-1]}$"
                 )
             case "AHC":
-                data_as_array[i]["solver_specs"] = (
+                data_as_array[i]["solver_name"] = (
                     f"{solver_name}{solver_name_postfix}\n"
                     rf"$\gamma_\mathrm{{HC}} = {solver_specs_list[-2]}$"
                     "\n"
                     rf"$\gamma_\mathrm{{lin}} = {solver_specs_list[-1]}$"
                 )
             case "Newton" | "NewtonAppleyard":
-                data_as_array[i]["solver_specs"] = (
+                data_as_array[i]["solver_name"] = (
                     f"{solver_name}{solver_name_postfix}\n"
                     rf"$\gamma_\mathrm{{lin}} = {solver_specs_list[-1]}$"
                 )
             case _:
                 raise ValueError(f"Unknown solver: {solver_name}")
 
-        data_as_array[i]["parameter_value"] = parameter_value
-
         # Now, read the stats of the case.
-        data_as_array[i]["converged"] = stats.converged
-        if not stats.converged:
-            data_as_array[i]["final_time"] = stats.final_time
-            data_as_array[i]["final_time_step_size"] = stats.time_step_sizes[-1]
-            # Leave the other statistics empty if the solver did not converge.
 
         tot_nl_iterations = (
             sum(stats.time_step_nl_iters)
             if solver_name.startswith("Newton")
             else sum(_flatten_nested_list(stats.time_step_nl_iters))
         )
-        data_as_array[i]["nl_iterations"] = tot_nl_iterations
 
         # Create annotations for the heatmap entries.
         # For HC and AHC, these include #nl_iters, #hc_iters, final beta value, and
@@ -729,23 +724,54 @@ def plot_nl_iterations(
                 f"({len(stats.discrete_times)}/{np.sum(np.logical_not(stats.time_step_convergence))})"
             )
 
-    # Create ticks for x- and y-axes.
-    x_ticks = np.unique(data_as_array["parameter_value"])
-    y_ticks = np.unique(data_as_array["solver_specs"])
+        if stats.converged:
+            data_as_array[i]["nl_iterations"] = tot_nl_iterations
 
-    # Sort indices first by solver_specs, then by parameter_value.
-    idx = np.lexsort((data_as_array["parameter_value"], data_as_array["solver_specs"]))
+        else:
+            # Failed simulations are marked with -1.0 and later masked in the heatmap.
+            data_as_array[i]["nl_iterations"] = -1.0
+            data_as_array[i]["annotation"] = (
+                rf"$\Delta t = {stats.time_step_sizes[-1] / 86400:.1f}\,\mathrm{{d}}$"
+                + "\n"
+                rf"$t={stats.final_time / 86400:.1f}\,\mathrm{{d}}$"
+                + "\n"
+                + data_as_array[i]["annotation"]
+            )
+
+    # Create ticks for x- and y-axes.
+    x_ticks = np.unique(data_as_array["varying_param_value"])
+    y_ticks = np.unique(data_as_array["solver_name"])
+
+    # Fill missing combinations of solver_specs and varying_param_value with empty
+    # statistics. This ensures that the heatmap has a rectangular shape, even if some
+    # combinations of solver_specs and varying_param_value are missing in the data.
+    for solver_name, varying_param_value in itertools.product(y_ticks, x_ticks):
+        if not np.any(
+            (data_as_array["solver_name"] == solver_name)
+            & (data_as_array["varying_param_value"] == varying_param_value)
+        ):
+            # Add an empty entry to the data array.
+            empty_entry = np.zeros(1, dtype=data_dtype)
+            empty_entry["solver_name"] = solver_name
+            empty_entry["varying_param_value"] = varying_param_value
+            empty_entry["simulation_exists"] = False
+            data_as_array = np.concatenate((data_as_array, empty_entry))
+
+    # Sort indices first by solver_specs, then by varying_param_value.
+    idx = np.lexsort(
+        (data_as_array["varying_param_value"], data_as_array["solver_name"])
+    )
     # Apply sorting to data.
     data_as_array = data_as_array[idx]
 
     # Reshape each data column into an array of shape=(len(x_ticks), len(y_ticks)) for
     # the heatmap. Due to the previous sorting, the column value will appear at the x, y
-    # value corresponding to the solver_specs and parameter_value.
+    # value corresponding to the solver_specs and varying_param_value.
     grids = {
         col: data_as_array[col].reshape(len(y_ticks), len(x_ticks))
         # stats_as_array.dtype.names will not be None. Ignore pylance.
         for col in data_as_array.dtype.names  # type: ignore
-        if col not in ("solver_specs", "parameter_value")
+        if col not in ("solver_name", "varying_param_value")
     }
 
     # Now, we can finally create the heatmap figure.
@@ -753,15 +779,15 @@ def plot_nl_iterations(
     fig_width = len(x_ticks) * 2
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-    # Number of total nonlinear iterations corresponds to shade of blue. Failed time
-    # steps are marked red.
+    # Number of cumulative nonlinear iterations corresponds to shade of blue. Failed
+    # simulations are marked red.
     cmap = matplotlib.colormaps["Blues"]
-    cmap.set_bad(color="red")
+    cmap.set_under(color="red")
 
     sns.heatmap(
         grids["nl_iterations"],
-        mask=np.logical_not(grids["converged"]),
         annot=grids["annotation"],
+        vmin=0.0,  # Failed simulations are marked with -1.0.
         fmt="s",
         cmap=cmap,
         cbar=True,
@@ -777,21 +803,35 @@ def plot_nl_iterations(
         ax=ax,
     )
 
-    # Annotate failed simulations with the final time reached.
-    for i, j in np.argwhere(np.logical_not(grids["converged"])):
-        ax.text(
-            j + 0.5,
-            i + 0.5,
-            rf"$\Delta t = {grids['final_time_step_size'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
-            + "\n"
-            rf"$t={grids['final_time'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
-            + "\n"
-            + grids["annotation"][i, j],
-            ha="center",
-            va="center",
-            fontsize=10,
-            color="black",
-        )
+    # Overlay a second heatmap to mask simulations that don't exist with a grey
+    # rectangle.
+    sns.heatmap(
+        np.zeros_like(grids["simulation_exists"], dtype=float),
+        mask=grids["simulation_exists"],
+        cmap=sns.color_palette(["0.8"], as_cmap=True),
+        cbar=False,
+        # It's okay to use numpy arrays here. Ignore pylance.
+        xticklabels=x_ticks,  # type: ignore
+        yticklabels=y_ticks,  # type: ignore
+        linewidths=0.8,
+        ax=ax,
+    )
+
+    # # Annotate failed simulations with the final time reached.
+    # for i, j in np.argwhere(np.logical_not(grids["converged"])):
+    #     ax.text(
+    #         j + 0.5,
+    #         i + 0.5,
+    #         rf"$\Delta t = {grids['final_time_step_size'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
+    #         + "\n"
+    #         rf"$t={grids['final_time'][i, j] / 86400:.1f}\,\mathrm{{d}}$"
+    #         + "\n"
+    #         + grids["annotation"][i, j],
+    #         ha="center",
+    #         va="center",
+    #         fontsize=10,
+    #         color="black",
+    #     )
 
     # Set labels and title.
     ax.set_xlabel(varying_param_name, fontsize=12, fontweight="bold")
@@ -1189,7 +1229,10 @@ def read_comparison_stats(
 
 
 def tabulate_comparison_stats(
-    data: dict[tuple[str, str], ComparisonStats], varying_param_name: str, **kwargs
+    data: dict[tuple[str, str], ComparisonStats],
+    varying_param_name: str,
+    varying_param_dtype,
+    **kwargs,
 ) -> list[str]:
     """Tabulate comparison statistics for different solvers and parameter values from one study.
 
@@ -1205,21 +1248,21 @@ def tabulate_comparison_stats(
     data_dtype = np.dtype(
         [
             # Make the strings long enough to avoid any issues.
-            ("solver_specs", "U200"),
-            ("parameter_value", "U100"),
-            ("pressure_diff_norm", "float32"),
-            ("saturation_diff_norm", "float32"),
-            ("total_flux_diff_norm", "float32"),
-            ("wetting_flux_diff_norm", "float32"),
-            ("flow_residual_norm", "float32"),
-            ("transport_residual_norm", "float32"),
+            ("solver_name", "U200"),
+            ("varying_param_value", varying_param_dtype),
+            ("pressure_diff_norm", np.float32),
+            ("saturation_diff_norm", np.float32),
+            ("total_flux_diff_norm", np.float32),
+            ("wetting_flux_diff_norm", np.float32),
+            ("flow_residual_norm", np.float32),
+            ("transport_residual_norm", np.float32),
         ]
     )
     data_as_array = np.zeros(len(data), dtype=data_dtype)
 
-    for i, ((solver_specs, parameter_value), stats) in enumerate(data.items()):
-        data_as_array[i]["solver_specs"] = solver_specs
-        data_as_array[i]["parameter_value"] = parameter_value
+    for i, ((solver_specs, varying_param_value), stats) in enumerate(data.items()):
+        data_as_array[i]["solver_name"] = solver_specs
+        data_as_array[i]["varying_param_value"] = varying_param_value
 
         # Now, read the stats of the case.
         data_as_array[i]["pressure_diff_norm"] = stats.pressure_diff_norm
@@ -1229,11 +1272,11 @@ def tabulate_comparison_stats(
         data_as_array[i]["flow_residual_norm"] = stats.flow_residual_norm
         data_as_array[i]["transport_residual_norm"] = stats.transport_residual_norm
 
-    # Sort indices first by parameter_value, then by solver_specs.
+    # Sort indices first by varying_param_value, then by solver_specs.
     idx = np.lexsort(
         (
-            data_as_array["solver_specs"],
-            data_as_array["parameter_value"],
+            data_as_array["solver_name"],
+            data_as_array["varying_param_value"],
         )
     )
     # Apply sorting to data.
@@ -1256,7 +1299,7 @@ def tabulate_comparison_stats(
     table_lines.append(header)
 
     for row in data_as_array:
-        solver_specs_list: list[str] = row["solver_specs"].split("_")
+        solver_specs_list: list[str] = row["solver_name"].split("_")
         solver_name_postfix = solver_specs_list[1] if len(solver_specs_list) > 3 else ""
         solver_name = solver_specs_list[0] + solver_name_postfix
         hc_tol, nl_tol = solver_specs_list[-2], solver_specs_list[-1]
@@ -1266,7 +1309,7 @@ def tabulate_comparison_stats(
                 solver_name,
                 hc_tol,
                 nl_tol,
-                row["parameter_value"],
+                row["varying_param_value"],
                 row["pressure_diff_norm"],
                 row["saturation_diff_norm"],
                 row["total_flux_diff_norm"],
