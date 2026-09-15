@@ -183,6 +183,9 @@ if __name__ == "__main__":
                 | "viscous_varying_rp_init_s_02_spat_est_on"
                 | "viscous_varying_rp_init_s_03"
                 | "viscous_varying_rp_with_spatial_estimators_init_s_02"
+                | "viscous_varying_rp_varying_temp_est_scaling_init_r_0.5"
+                | "viscous_varying_rp_varying_temp_est_scaling_init_r_1.0"
+                | "viscous_varying_rp_varying_temp_est_scaling_init_r_1.5"
             ):
                 key_func = _key_varying_rp
                 varying_param_name = "Relative permeability model"

@@ -279,7 +279,7 @@ def run_simulation(
     reference_solution_file = (
         pathlib.Path(
             *(
-                "ReferenceSolution_0.010_1.00e-02" if p == config.solver_specs() else p
+                "ReferenceSolution_0.01_0.01" if p == config.solver_specs() else p
                 for p in folder_name.parts
             )
         )

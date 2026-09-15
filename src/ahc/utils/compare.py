@@ -1,11 +1,10 @@
 import json
 import pathlib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import cast
 
 import numpy as np
 import porepy as pp
-from matplotlib.pylab import cast
 
 from ahc.models.protocol import TPFProtocol
 
@@ -13,12 +12,12 @@ from ahc.models.protocol import TPFProtocol
 # No attributes are added dynamically -> use slots=True for memory efficiency.
 @dataclass(slots=True)
 class SolutionVals:
-    pressure: np.ndarray
-    saturation: np.ndarray
-    total_flux: np.ndarray
-    wetting_flux: np.ndarray
-    flow_residual: np.ndarray
-    transport_residual: np.ndarray
+    pressure: np.ndarray = field(default_factory=lambda: np.array([]))
+    saturation: np.ndarray = field(default_factory=lambda: np.array([]))
+    total_flux: np.ndarray = field(default_factory=lambda: np.array([]))
+    wetting_flux: np.ndarray = field(default_factory=lambda: np.array([]))
+    flow_residual: np.ndarray = field(default_factory=lambda: np.array([]))
+    transport_residual: np.ndarray = field(default_factory=lambda: np.array([]))
 
 
 # No attributes are added dynamically -> use slots=True for memory efficiency.
@@ -94,20 +93,25 @@ class ComparisonMixin(TPFProtocol):
             variables=[self.primary_saturation_var, self.primary_pressure_var],
             iterate_index=0,
         )
-        # Evaluate current and reference solution statistics
         solution_stats = self.collect_solution_values()
+
+        # Change to the reference solution and collect statistics for it.
         self.equation_system.set_variable_values(
             values=reference_solution,
             variables=[self.primary_saturation_var, self.primary_pressure_var],
             iterate_index=0,
         )
         reference_stats = self.collect_solution_values()
+
         # Restore the current solution values.
         self.equation_system.set_variable_values(
             values=current_solution,
             variables=[self.primary_saturation_var, self.primary_pressure_var],
             iterate_index=0,
         )
+        self.eval_secondary_variables()  # type: ignore[attr-defined]
+        self.set_discretization_parameters()  # type: ignore[attr-defined]
+        self.equation_system.discretize()  # type: ignore[attr-defined]
 
         # Calculate differences between current and reference statistics.
 
@@ -181,6 +185,17 @@ class ComparisonMixin(TPFProtocol):
             # having not set_value method. If uses_hc is True, this works.
             self.hc_toggle_fl = 0.0  # type: ignore
             self.hc_toggle_ad.set_value(self.hc_toggle_fl)  # type: ignore
+
+        # Phase mobilities and capillary pressures depend on the solution state, which
+        # in turn depend on the primary variables the upwind discretization, and the HC
+        # parameters value . The upwind discretization itself depends on the secondary
+        # wetting pressure variable. We evaluate the secondary variables and
+        # rediscritize the system to ensure that the fluxes and residuals are
+        # consistent with the current HC parameter value and the solution state, which
+        # was possibly loaded in from a file in compare_with_reference.
+        self.eval_secondary_variables()  # type: ignore[attr-defined]
+        self.set_discretization_parameters()  # type: ignore[attr-defined]
+        self.equation_system.discretize()  # type: ignore[attr-defined]
 
         primary_variables = es.get_variable_values(
             variables=[self.primary_saturation_var, self.primary_pressure_var],
