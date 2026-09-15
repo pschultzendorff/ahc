@@ -95,7 +95,7 @@ class ComparisonMixin(TPFProtocol):
         )
         solution_stats = self.collect_solution_values()
 
-        # Change to the reference solution and collect statistics for it.
+        # Change system state to the reference solution and collect statistics for it.
         self.equation_system.set_variable_values(
             values=reference_solution,
             variables=[self.primary_saturation_var, self.primary_pressure_var],
@@ -103,7 +103,8 @@ class ComparisonMixin(TPFProtocol):
         )
         reference_stats = self.collect_solution_values()
 
-        # Restore the current solution values.
+        # Restore the current system state and rediscretize as everything was
+        # rediscretized with reference solution state in collect_solution_values.
         self.equation_system.set_variable_values(
             values=current_solution,
             variables=[self.primary_saturation_var, self.primary_pressure_var],
@@ -111,10 +112,9 @@ class ComparisonMixin(TPFProtocol):
         )
         self.eval_secondary_variables()  # type: ignore[attr-defined]
         self.set_discretization_parameters()  # type: ignore[attr-defined]
-        self.equation_system.discretize()  # type: ignore[attr-defined]
+        self.equation_system.rediscretize()  # type: ignore[attr-defined]
 
         # Calculate differences between current and reference statistics.
-
         pressure_diff_norm, pressure_diff_max, pressure_diff_min = _difference_stats(
             solution_stats.pressure, reference_stats.pressure
         )
@@ -179,7 +179,7 @@ class ComparisonMixin(TPFProtocol):
         g: pp.Grid = self.g
         es: pp.EquationSystem = self.equation_system
 
-        # Set homotopy parameter to 0 if applicable.
+        # Turn off homotopy continuation to evaluate values at the TARGET PROBLEM.
         if self.uses_hc:
             # Ignore mypy and pylance complaining about the attributes not existing or
             # having not set_value method. If uses_hc is True, this works.
@@ -195,7 +195,7 @@ class ComparisonMixin(TPFProtocol):
         # was possibly loaded in from a file in compare_with_reference.
         self.eval_secondary_variables()  # type: ignore[attr-defined]
         self.set_discretization_parameters()  # type: ignore[attr-defined]
-        self.equation_system.discretize()  # type: ignore[attr-defined]
+        self.equation_system.rediscretize()  # type: ignore[attr-defined]
 
         primary_variables = es.get_variable_values(
             variables=[self.primary_saturation_var, self.primary_pressure_var],
@@ -219,7 +219,6 @@ class ComparisonMixin(TPFProtocol):
             self.equation_system.equations[self.transport_equation].value(es),
         )
 
-        # Turn HC back on.
         if self.uses_hc:
             self.hc_toggle_fl = 1.0  # type: ignore
             self.hc_toggle_ad.set_value(self.hc_toggle_fl)  # type: ignore
