@@ -714,7 +714,7 @@ def plot_nl_iterations(
             # solver_statistics.
             final_lambda = stats.lambdas[-1][-2]
             data_as_array[i]["annotation"] = (
-                f"{tot_nl_iterations}/{tot_hc_iters}/{final_lambda:.4f}\n"
+                f"{tot_nl_iterations}/{tot_hc_iters}/{final_lambda:.3g}\n"
                 f"({len(stats.discrete_times)}/{np.sum(np.logical_not(stats.time_step_convergence))})"
             )
         # For Newton, these include only #nl_iters and #time_steps.
@@ -731,9 +731,9 @@ def plot_nl_iterations(
             # Failed simulations are marked with -1.0 and later masked in the heatmap.
             data_as_array[i]["nl_iterations"] = -1.0
             data_as_array[i]["annotation"] = (
-                rf"$\Delta t = {stats.time_step_sizes[-1] / 86400:.1f}\,\mathrm{{d}}$"
+                rf"$\Delta t = {stats.time_step_sizes[-1] / 86400:.6g}\,\mathrm{{d}}$"
                 + "\n"
-                rf"$t={stats.final_time / 86400:.1f}\,\mathrm{{d}}$"
+                rf"$t={stats.final_time / 86400:.6g}\,\mathrm{{d}}$"
                 + "\n"
                 + data_as_array[i]["annotation"]
             )
