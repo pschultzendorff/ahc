@@ -114,7 +114,7 @@ def generate_cases() -> list[SimulationConfig]:
                 # HC solver is not of interest here.
                 continue
             if solver_name == "AHC" and (hc_tol != 0.1 or nl_tol != 0.01):
-                # Only run AHC with the largest tolerances.
+                # Only run AHC with the largest hc tolerance and tight Newton tolerance.
                 continue
             cases.append(
                 SimulationConfig(
