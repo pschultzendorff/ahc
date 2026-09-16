@@ -149,7 +149,7 @@ if __name__ == "__main__":
         study="linear_vs_nonlinear",
         case=f"nonlinear_stop_early_{init_s}",
         solver_name="AHC",
-        hc_tol=1e-4,
+        hc_tol=10.0,  # Stop after the first homotopy step.
         nl_tol=0.1,
         init_s=init_s,
         rp_model_1=LINEAR_RP_MODEL,
