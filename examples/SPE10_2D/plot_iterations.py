@@ -113,6 +113,9 @@ def generate_cases() -> list[SimulationConfig]:
             if solver_name in ["HC", "ReferenceSolution"]:
                 # HC solver is not of interest here.
                 continue
+            if solver_name == "AHC" and (hc_tol != 0.1 or nl_tol != 0.01):
+                # Only run AHC with the largest tolerances.
+                continue
             cases.append(
                 SimulationConfig(
                     results_dir=results_dir,
@@ -126,7 +129,7 @@ def generate_cases() -> list[SimulationConfig]:
                     rp_model_1=LINEAR_RP_MODEL,
                     rp_model_2=rp_models["Brooks-Corey_nb_4"],
                     cp_model_1=ZERO_CP_MODEL,
-                    cp_model_2=cp_models["Brooks-Corey_nb_4"],
+                    cp_model_2=cp_models["linear"],
                     buoyancy_constants_1=ZERO_BUOYANCY_MODEL,
                     buoyancy_constants_2=ZERO_BUOYANCY_MODEL,
                     spe10_cell_size=CELL_SIZE,
@@ -145,7 +148,9 @@ if __name__ == "__main__":
     study = generate_cases()
     for config in study:
         run_simulation(
-            config, time_manager_params=time_manager_params, iteration_exporting=True
+            config,
+            time_manager_params=time_manager_params,
+            model_kwargs={"iteration_exporting": True},
         )
 
 # endregion
