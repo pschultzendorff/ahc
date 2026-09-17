@@ -246,6 +246,7 @@ class ComparisonMixin(TPFProtocol):
         )
         self.equation_system.set_variable_values(
             previous_solution,
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
             time_step_index=0,
             additive=False,
         )
