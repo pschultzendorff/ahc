@@ -66,55 +66,100 @@ def _difference_stats(
 class ComparisonMixin(TPFProtocol):
     """_summary_"""
 
-    def save_solution(self) -> None:
+    def save_solution(self, time_step_index: int = 0) -> None:
         """Save the current variable values as numpy arrays."""
         solution = self.equation_system.get_variable_values(
             variables=[self.primary_saturation_var, self.primary_pressure_var],
-            iterate_index=0,
+            time_step_index=time_step_index,
         )
-        np.save(self.params["folder_name"] / "solution.npy", solution)
+        np.save(
+            self.params["folder_name"] / f"solution_{time_step_index}.npy", solution
+        )
 
     def compare_with_reference(
-        self, reference_solution: np.ndarray
+        self,
+        current_reference_solution: np.ndarray,
+        previous_reference_solution: np.ndarray,
+        previous_dt: float,
+        hc_parameter: float = 0.0,
     ) -> tuple[ComparisonStats, ComparisonStats]:
         """Compare current approximation with a reference solution and return statistics
         about the differences.
 
+        Note: This method is supposed to be called after convergence of a time step and
+            after
+            :meth:`~porepy.models.solution_strategy.SolutionStrategy.after_nonlinear_convergence`
+            has been called. Calling it at any other time may lead to incorrect results.
+
         Parameters:
-            reference_solution: Reference saturation and pressure values (in that order)
-                for the same problem.
+            current_reference_solution: Reference saturation and pressure values (in
+                that order) for the same problem.
+            previous_reference_solution: Reference saturation and pressure values (in
+                that order) for the previous time step.
+            previous_dt: Time step size of the solved time step. Assumed to be equal for
+                the current and reference solution. Required for the transport residual
+                to be calculated correctly.
+            hc_parameter: Homotopy continuation parameter at which the
+                reference solution was computed. The fluxes and residuals of the current
+                and reference solutions are computed at this value. Defaults to 0.0,
+                i.e., the target problem.
 
         Returns:
             A tuple of two ComparisonStats objects, representing the absolute and
             relative differences between the current and reference solutions.
 
         """
+        # Adjust the model state to correctly evaluate the residual of the solved time
+        # step.
+
+        # This method is called after after_nonlinear_convergence. The current
+        # converged time step solution is stored at time_step_index=0 and equal to the
+        # solution at iterate_index=0. The previous time step solution is stored at
+        # time_step_index=1. pp.ad.time_derivatives.dt computes the difference between
+        # iterate_index=0 and time_step_index=0. Therefore we shift as follows:
+        # iterate_index=0 -> iterate_index=0
+        # time_step_index=1 -> time_step_index=0
         current_solution = self.equation_system.get_variable_values(
             variables=[self.primary_saturation_var, self.primary_pressure_var],
             iterate_index=0,
         )
+        previous_solution = self.equation_system.get_variable_values(
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+            time_step_index=1,
+        )
+        saved_hc_parameter = (
+            # nonlinear_solver_statistics will be an instance of HCSolverStatistics and
+            # have the attribute hc_lambda_fl. Ignore mypy.
+            self.nonlinear_solver_statistics.hc_lambda_fl if self.uses_hc else 0.0  # type: ignore
+        )
+        saved_dt = self.time_manager.dt
+
+        self._set_model_state(
+            current_solution,
+            previous_solution,
+            dt=previous_dt,
+            hc_parameter=hc_parameter,
+        )
         solution_stats = self.collect_solution_values()
 
-        # Change system state to the reference solution and collect statistics for it.
-        self.equation_system.set_variable_values(
-            values=reference_solution,
-            variables=[self.primary_saturation_var, self.primary_pressure_var],
-            iterate_index=0,
+        self._set_model_state(
+            current_reference_solution,
+            previous_reference_solution,
+            dt=previous_dt,
+            hc_parameter=hc_parameter,
         )
         reference_stats = self.collect_solution_values()
 
-        # Restore the current system state and rediscretize as everything was
-        # rediscretized with reference solution state in collect_solution_values.
-        self.equation_system.set_variable_values(
-            values=current_solution,
-            variables=[self.primary_saturation_var, self.primary_pressure_var],
-            iterate_index=0,
+        # Restore the saved model state.
+        # iterate_index=0 -> iterate_index=0
+        # iterate_index=0 -> time_step_index=0
+        self._set_model_state(
+            current_solution,
+            current_solution,
+            dt=saved_dt,
+            hc_parameter=saved_hc_parameter,
         )
-        self.eval_secondary_variables()  # type: ignore[attr-defined]
-        self.set_discretization_parameters()  # type: ignore[attr-defined]
-        self.equation_system.rediscretize()  # type: ignore[attr-defined]
 
-        # Calculate differences between current and reference statistics.
         pressure_diff_norm, pressure_diff_max, pressure_diff_min = _difference_stats(
             solution_stats.pressure, reference_stats.pressure
         )
@@ -175,27 +220,54 @@ class ComparisonMixin(TPFProtocol):
 
         return absolute_stats, relative_stats
 
+    def _set_model_state(
+        self,
+        current_solution: np.ndarray,
+        previous_solution: np.ndarray,
+        dt: float,
+        hc_parameter: float = 0.0,
+    ) -> None:
+        """Set to a given model state and rediscretize all equations.
+
+        Parameters:
+            current_solution: Saturation and pressure values (in that order) for the
+                current approximation.
+            previous_solution: Saturation and pressure values (in that order)
+                for the previous time step.
+            dt: Time step size.
+            hc_parameter: Homotopy continuation parameter. Defaults to 0.0, i.e., the
+            target problem.
+
+        """
+        self.equation_system.set_variable_values(
+            values=current_solution,
+            variables=[self.primary_saturation_var, self.primary_pressure_var],
+            iterate_index=0,
+        )
+        self.equation_system.set_variable_values(
+            previous_solution,
+            time_step_index=0,
+            additive=False,
+        )
+
+        self.time_manager.dt = dt
+        self.ad_time_step.set_value(dt)
+
+        if self.uses_hc:
+            # nonlinear_solver_statistics will be an instance of HCSolverStatistics and
+            # have the attributes hc_lambda_fl and hc_lambda_ad. Ignore mypy.
+            self.nonlinear_solver_statistics.hc_lambda_fl = hc_parameter  # type: ignore
+            self.nonlinear_solver_statistics.hc_lambda_ad.set_value(  # type: ignore
+                hc_parameter
+            )
+
+        self.eval_secondary_variables()  # type: ignore[attr-defined]
+        self.set_discretization_parameters()  # type: ignore[attr-defined]
+        self.rediscretize()  # type: ignore[attr-defined]
+
     def collect_solution_values(self) -> SolutionVals:
         g: pp.Grid = self.g
         es: pp.EquationSystem = self.equation_system
-
-        # Turn off homotopy continuation to evaluate values at the TARGET PROBLEM.
-        if self.uses_hc:
-            # Ignore mypy and pylance complaining about the attributes not existing or
-            # having not set_value method. If uses_hc is True, this works.
-            self.hc_toggle_fl = 0.0  # type: ignore
-            self.hc_toggle_ad.set_value(self.hc_toggle_fl)  # type: ignore
-
-        # Phase mobilities and capillary pressures depend on the solution state, which
-        # in turn depend on the primary variables the upwind discretization, and the HC
-        # parameters value . The upwind discretization itself depends on the secondary
-        # wetting pressure variable. We evaluate the secondary variables and
-        # rediscritize the system to ensure that the fluxes and residuals are
-        # consistent with the current HC parameter value and the solution state, which
-        # was possibly loaded in from a file in compare_with_reference.
-        self.eval_secondary_variables()  # type: ignore[attr-defined]
-        self.set_discretization_parameters()  # type: ignore[attr-defined]
-        self.equation_system.rediscretize()  # type: ignore[attr-defined]
 
         primary_variables = es.get_variable_values(
             variables=[self.primary_saturation_var, self.primary_pressure_var],
@@ -218,10 +290,6 @@ class ComparisonMixin(TPFProtocol):
             np.ndarray,
             self.equation_system.equations[self.transport_equation].value(es),
         )
-
-        if self.uses_hc:
-            self.hc_toggle_fl = 1.0  # type: ignore
-            self.hc_toggle_ad.set_value(self.hc_toggle_fl)  # type: ignore
 
         return SolutionVals(
             pressure=pressure,

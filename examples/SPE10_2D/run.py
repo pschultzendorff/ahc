@@ -334,7 +334,8 @@ def run_simulation(
         pp.run_time_dependent_model(model=model, params=params)
 
         if is_reference_solution:
-            model.save_solution()
+            model.save_solution(time_step_index=0)
+            model.save_solution(time_step_index=1)
 
     # It is okay to catch general exceptions because we recognize failed simulations
     # in plotting.py.
@@ -345,20 +346,28 @@ def run_simulation(
 
     # The reference solution was saved in the parallel path for the
     # ReferenceSolution solver instead of the current solver.
-    reference_solution_file = (
-        pathlib.Path(
-            *(
-                "ReferenceSolution_0.01_0.01" if p == config.solver_specs() else p
-                for p in folder_name.parts
-            )
+    reference_folder_path = pathlib.Path(
+        *(
+            "ReferenceSolution_0.01_0.01" if p == config.solver_specs() else p
+            for p in folder_name.parts
         )
-        / "solution.npy"
     )
+    current_reference_solution_file = reference_folder_path / "solution_0.npy"
+    previous_reference_solution_file = reference_folder_path / "solution_1.npy"
 
-    if not is_reference_solution and reference_solution_file.exists():
-        reference_solution = np.load(reference_solution_file)
+    if (
+        not is_reference_solution
+        and current_reference_solution_file.exists()
+        and previous_reference_solution_file.exists()
+    ):
+        current_reference_solution = np.load(current_reference_solution_file)
+        previous_reference_solution = np.load(previous_reference_solution_file)
         absolute_stats, relative_stats = model.compare_with_reference(
-            reference_solution
+            current_reference_solution,
+            previous_reference_solution,
+            previous_dt=time_manager_params["schedule"][1]  # type: ignore
+            - time_manager_params["schedule"][0],  # type: ignore
+            hc_parameter=0.0,
         )
         save_comparison_stats(
             absolute_stats, folder_name / "absolute_comparison_stats.json"
@@ -924,15 +933,15 @@ def generate_viscous_varying_rp_cases_varying_temp_est_scaling(
 
 
 studies: dict[str, list[SimulationConfig]] = {
-    # "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
+    "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
     # "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
-    "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
-    # "gravity_segregation": generate_gravity_segregation_cases(),
+    # "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
+    "gravity_segregation": generate_gravity_segregation_cases(),
     # "capillary_varying_rp": generate_capillary_varying_rp(),
     # "capillary_varying_init_s": generate_capillary_varying_init_s(),
     # "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
     # "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
-    # "buoyancy_varying_density": generate_buoyancy_varying_density(),
+    "buoyancy_varying_density": generate_buoyancy_varying_density(),
     # "buoyancy_varying_entry_pressure": generate_buoyancy_varying_entry_pressure(),
     # "viscous_varying_rp_with_spatial_estimators_init_s_02": generate_viscous_varying_rp_cases_with_spatial_estimators(
     #     init_s=0.2

@@ -544,6 +544,11 @@ class TPFSolutionStrategy(TPFProtocol, pp.SolutionStrategy):  # type: ignore
     def uses_hc(self) -> bool:
         return False
 
+    @property
+    def time_step_indices(self) -> np.ndarray:
+        """Store the current and previous known time step solutions."""
+        return np.array([0, 1])
+
     def set_phases(self) -> None:
         """Set phase constants from parameters."""
         # Check types to satisfy mypy.
