@@ -782,9 +782,9 @@ def plot_F_capillary() -> None:
                 ax.plot_surface(s_D_grid, s_U_grid, F_values, cmap="viridis")  # type: ignore
 
                 # Set labels and title
-                ax.set_xlabel(r"$\hat{s}_{w,D}$")
-                ax.set_ylabel(r"$\hat{s}_{w,U}$")
-                ax.set_zlabel(r"$f_w(s_U, s_D)$")  # type: ignore
+                ax.set_xlabel(r"$s_D$")
+                ax.set_ylabel(r"$S_U$")
+                ax.set_zlabel(r"$f_{\mathrm{w},K,e}(s_U, s_D)$")  # type: ignore
 
                 # Split title into two lines for better readability
                 # Peclet number only makes sense for nonzero capillary pressure.
@@ -860,9 +860,9 @@ def plot_dSU_F_capillary() -> None:
                     cmap="viridis",
                 )
 
-                ax.set_xlabel(r"$s_{w,D}$")
+                ax.set_xlabel(r"$s_D$")
                 ax.set_ylabel(r"$s_U$")
-                ax.set_zlabel(r"$\partial_{s_U} F(s_U, s_D)$")  # type: ignore
+                ax.set_zlabel(r"$\partial_{s_U} f_{\mathrm{w},K,e}(s_U, s_D)$")  # type: ignore
 
                 # Split title into two lines for better readability
                 title_line1 = (
@@ -911,7 +911,7 @@ def plot_F_gravity(**kwargs) -> None:
                 ax.plot_surface(s_D_grid, s_U_grid, F_values, cmap="viridis")  # type: ignore
                 ax.set_xlabel(r"$s_D$")
                 ax.set_ylabel(r"$s_U$")
-                ax.set_zlabel(r"$F(s_U, s_D)$")  # type: ignore
+                ax.set_zlabel(r"$f_{\mathrm{w},K,e}(s_U, s_D)$")  # type: ignore
                 ax.set_title(
                     rf"$\rho_w$ = {rho_w_case:g} kg m$^{{-3}}$, "
                     rf"$N_g$ = {n_g:.3g}, RP Model = {rp_model}"
