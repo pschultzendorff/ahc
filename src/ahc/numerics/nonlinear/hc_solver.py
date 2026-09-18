@@ -169,6 +169,7 @@ class HCSolver:
                     " converge at lambda=0.0."
                 )
         else:
+            model.after_hc_failure()
             raise RuntimeError(
                 "Cannot generate reference solution, since the HC got stuck in"
                 " a non-converged state."
