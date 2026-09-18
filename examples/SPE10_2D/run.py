@@ -934,27 +934,27 @@ def generate_viscous_varying_rp_cases_varying_temp_est_scaling(
 
 studies: dict[str, list[SimulationConfig]] = {
     "viscous_varying_rp_init_s_02": generate_viscous_varying_rp_cases(init_s=0.2),
-    # "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
-    # "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
+    "viscous_varying_rp_init_s_03": generate_viscous_varying_rp_cases(init_s=0.3),
+    "viscous_varying_init_s": generate_viscous_varying_init_s_cases(),
     "gravity_segregation": generate_gravity_segregation_cases(),
-    # "capillary_varying_rp": generate_capillary_varying_rp(),
-    # "capillary_varying_init_s": generate_capillary_varying_init_s(),
-    # "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
-    # "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
+    "capillary_varying_rp": generate_capillary_varying_rp(),
+    "capillary_varying_init_s": generate_capillary_varying_init_s(),
+    "capillary_varying_entry_pressure": generate_capillary_varying_entry_pressure(),
+    "buoyancy_varying_rp": generate_buoyancy_varying_rp(),
     "buoyancy_varying_density": generate_buoyancy_varying_density(),
-    # "buoyancy_varying_entry_pressure": generate_buoyancy_varying_entry_pressure(),
-    # "viscous_varying_rp_with_spatial_estimators_init_s_02": generate_viscous_varying_rp_cases_with_spatial_estimators(
-    #     init_s=0.2
-    # ),
-    # "viscous_varying_rp_varying_temp_est_scaling_init_r_0.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
-    #     r=0.5
-    # ),
-    # "viscous_varying_rp_varying_temp_est_scaling_init_r_1.0": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
-    #     r=1.0
-    # ),
-    # "viscous_varying_rp_varying_temp_est_scaling_init_r_1.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
-    #     r=1.5
-    # ),
+    "buoyancy_varying_entry_pressure": generate_buoyancy_varying_entry_pressure(),
+    "viscous_varying_rp_with_spatial_estimators_init_s_02": generate_viscous_varying_rp_cases_with_spatial_estimators(
+        init_s=0.2
+    ),
+    "viscous_varying_rp_varying_temp_est_scaling_init_r_0.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+        r=0.5
+    ),
+    "viscous_varying_rp_varying_temp_est_scaling_init_r_1.0": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+        r=1.0
+    ),
+    "viscous_varying_rp_varying_temp_est_scaling_init_r_1.5": generate_viscous_varying_rp_cases_varying_temp_est_scaling(
+        r=1.5
+    ),
 }
 
 # endregion

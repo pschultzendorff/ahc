@@ -265,7 +265,8 @@ def run_simulation(
         pp.run_time_dependent_model(model=model, params=params)
 
         if is_reference_solution:
-            model.save_solution()
+            model.save_solution(time_step_index=0)
+            model.save_solution(time_step_index=1)
 
     # It is okay to catch general exceptions because we recognize failed simulations
     # in plotting.py.
@@ -276,20 +277,28 @@ def run_simulation(
 
     # The reference solution was saved in the parallel path for the
     # ReferenceSolution solver instead of the current solver.
-    reference_solution_file = (
-        pathlib.Path(
-            *(
-                "ReferenceSolution_0.01_0.01" if p == config.solver_specs() else p
-                for p in folder_name.parts
-            )
+    reference_folder_path = pathlib.Path(
+        *(
+            "ReferenceSolution_0.01_0.01" if p == config.solver_specs() else p
+            for p in folder_name.parts
         )
-        / "solution.npy"
     )
+    current_reference_solution_file = reference_folder_path / "solution_0.npy"
+    previous_reference_solution_file = reference_folder_path / "solution_1.npy"
 
-    if not is_reference_solution and reference_solution_file.exists():
-        reference_solution = np.load(reference_solution_file)
+    if (
+        not is_reference_solution
+        and current_reference_solution_file.exists()
+        and previous_reference_solution_file.exists()
+    ):
+        current_reference_solution = np.load(current_reference_solution_file)
+        previous_reference_solution = np.load(previous_reference_solution_file)
         absolute_stats, relative_stats = model.compare_with_reference(
-            reference_solution
+            current_reference_solution,
+            previous_reference_solution,
+            previous_dt=time_manager_params["schedule"][1]  # type: ignore
+            - time_manager_params["schedule"][0],  # type: ignore
+            hc_parameter=0.0,
         )
         save_comparison_stats(
             absolute_stats, folder_name / "absolute_comparison_stats.json"
