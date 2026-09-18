@@ -1290,7 +1290,7 @@ def tabulate_comparison_stats(
                 solver_name,
                 hc_tol,
                 nl_tol,
-                f"{row['varying_param_value']:.6g}",
+                row["varying_param_value"],
                 f"{row['pressure_diff_norm']:.6g}",
                 f"{row['saturation_diff_norm']:.6g}",
                 f"{row['total_flux_diff_norm']:.6g}",
