@@ -28,18 +28,18 @@ dirname: pathlib.Path = pathlib.Path(__file__).parent.resolve()
 
 EXPECTED_FINAL_TIME = default_time_manager_params["schedule"][-1]  # type: ignore
 
-REL_ESTS: dict[str, str] = {}
-
 
 def analyze_study(
     cases: list[SimulationConfig],
+    expected_final_time: float,
     key_func: Callable[[SimulationConfig, SolverStats], tuple[str, str]],
     varying_param_name: str,
     varying_param_dtype,
     figure_save_path: pathlib.Path,
     table_save_path: pathlib.Path,
+    rel_ests_save_path: pathlib.Path,
     **kwargs,
-) -> None:
+):
     """Read all cases from a study, plot solver statistics, tabulate comparison
     statistics, and save the results.
 
@@ -49,6 +49,8 @@ def analyze_study(
             be tabulated.
 
     """
+    rel_ests: dict[str, str] = {}
+
     # To allow for easy sorting of the data by solver specs and parameter values in
     # plot_nl_iterations, we use tuples of strings as keys. The first string is the
     # solver name plus all relevant specs, while the second string is the parameter
@@ -63,7 +65,7 @@ def analyze_study(
 
     # Read solver and comparison statistics for all cases.
     for config in cases:
-        solver_stats = read_solver_stats(config, EXPECTED_FINAL_TIME)
+        solver_stats = read_solver_stats(config, expected_final_time)
         key = key_func(config, solver_stats)
 
         # There are several cases to consider regarding the reference solution and the
@@ -94,11 +96,11 @@ def analyze_study(
             and config.nl_tol == 0.01
         ):
             if solver_stats.converged:
-                REL_ESTS[f"{config.folder_name()}_{key}"] = (
+                rel_ests[f"{config.folder_name()}_{key}"] = (
                     f"{calc_relative_est(solver_stats)['total']:.2f}"
                 )
             else:
-                REL_ESTS[f"{config.folder_name()}_{key}"] = "not converged"
+                rel_ests[f"{config.folder_name()}_{key}"] = "not converged"
 
     for parameter_value in failed_reference_solutions:
         # Set the comparison statistics to default values to indicate that they are not
@@ -122,6 +124,9 @@ def analyze_study(
     with table_save_path.open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerows(comparison_stats_table)
+
+    with rel_ests_save_path.open("w") as f:
+        json.dump(rel_ests, f, indent=2)
 
 
 def _key_varying_rp(config: SimulationConfig, stats: SolverStats) -> tuple[str, str]:
@@ -218,13 +223,12 @@ if __name__ == "__main__":
 
         fig = analyze_study(
             study,
+            expected_final_time=EXPECTED_FINAL_TIME,
             key_func=key_func,
             varying_param_name=varying_param_name,
             varying_param_dtype=varying_param_dtype,
             figure_save_path=fig_dir / f"nl_iters_{study_name}.png",
             table_save_path=comparison_dir / f"comparison_stats_{study_name}.csv",
+            rel_ests_save_path=fig_dir / f"relative_ests_{study_name}.json",
             **kwargs,
         )
-
-    with (fig_dir / "relative_errors.txt").open("w") as f:
-        json.dump(REL_ESTS, f, indent=2)

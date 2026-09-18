@@ -1,4 +1,3 @@
-import json
 import pathlib
 import sys
 
@@ -49,15 +48,14 @@ if __name__ == "__main__":
             case _:
                 raise ValueError(f"Unknown study: {study_name}")
 
-        fig = analyze_study(
+        analyze_study(
             study,
+            expected_final_time=EXPECTED_FINAL_TIME,
             key_func=key_func,
             varying_param_name=varying_param_name,
             varying_param_dtype=varying_dtype,
             figure_save_path=fig_dir / f"nl_iters_{study_name}.png",
             table_save_path=comparison_dir / f"comparison_stats_{study_name}.csv",
+            rel_ests_save_path=fig_dir / f"relative_ests_{study_name}.json",
             **kwargs,
         )
-
-    with (fig_dir / "relative_errors.txt").open("w") as f:
-        json.dump(rel_errors, f, indent=2)
